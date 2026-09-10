@@ -1,0 +1,23 @@
+<div class="filter-tabs">
+    <p-selectButton
+        [options]="options()"
+        [(ngModel)]="selectedOption"
+        (onChange)="emitChange()"
+        optionLabel="label"
+        optionValue="value"
+        id="title-list-btn"
+    >
+        <ng-template let-item pTemplate="item">
+            <div class="btn-content">
+                <i [class]="item.icon"></i>
+                <span class="text-sm">{{ item.label }}</span>
+            </div>
+
+            @if(item.counter >= 0) {
+            <div class="absolute bottom-0 right-0">
+                <p-badge [value]="item.counter" severity="warning" />
+            </div>
+            }
+        </ng-template>
+    </p-selectButton>
+</div>

@@ -1,0 +1,11 @@
+::ng-deep .p-datatable .p-datatable-thead > tr > th {
+  background-color: var(--bg-brand-soft) !important;
+  color: var(--primary-color) !important;
+  font-weight: bold;
+}
+
+::ng-deep .p-overlaypanel {
+    background-color: #fdfdfd !important;
+    border-radius: 0.5rem;
+    border: 0.1px solid rgba(103, 103, 103, 0.4);
+}

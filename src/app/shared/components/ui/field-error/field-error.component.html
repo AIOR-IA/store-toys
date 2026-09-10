@@ -1,0 +1,50 @@
+@if (thin()) {
+<p-overlayPanel #op [styleClass]="'py-4 pr-4'">
+    <ul>
+        @for(error of errorsKeys; track $index) { @if(error) {
+        <li class="text-danger text-sm">
+            @if (error == 'minlength') {
+            {{ getErrorMessage(error) | translate : { value: minlength } }}
+            } @else if (error == 'maxlength') {
+            {{ getErrorMessage(error) | translate : { value: maxlength } }}
+            } @else if (error == 'max') {
+            {{ getErrorMessage(error) | translate : { value: max } }}
+            } @else if (error == 'min') {
+            {{ getErrorMessage(error) | translate : { value: min } }}
+            }@else if(error === 'alreadyExist') {
+            {{ getErrorMessage(error) | translate : { field: field } }}
+            } @else {
+            {{ getErrorMessage(error) | translate }}
+            }
+        </li>
+
+        }}
+    </ul>
+</p-overlayPanel>
+@if(errorsKeys.length) {
+<div class="text-center mt-1">
+    <a
+        (click)="op.toggle($event)"
+        class="text-danger text-xs hover:cursor-pointer hover:text-danger-dark"
+    >
+        <i class="fas fa-exclamation"></i>
+        {{ 'app.common.error' | translate }}
+    </a>
+</div>
+} } @else { @for(error of errorsKeys; track $index) { @if(error) {
+<div class="text-danger">
+    @if (error == 'minlength') {
+    {{ getErrorMessage(error) | translate : { value: minlength } }}
+    } @else if (error == 'maxlength') {
+    {{ getErrorMessage(error) | translate : { value: maxlength } }}
+    } @else if (error == 'max') {
+    {{ getErrorMessage(error) | translate : { value: max } }}
+    } @else if (error == 'min') {
+    {{ getErrorMessage(error) | translate : { value: min } }}
+    }@else if(error === 'alreadyExist') {
+    {{ getErrorMessage(error) | translate : { field: field } }}
+    } @else {
+    {{ getErrorMessage(error) | translate }}
+    }
+</div>
+} } }

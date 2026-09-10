@@ -1,0 +1,12 @@
+::ng-deep .p-tabview-nav-content {
+    .p-tabview-nav {
+        li {
+            &.p-highlight {
+                .p-tabview-nav-link{
+                    @apply bg-brand-soft;
+                }
+            }
+            @apply bg-white border border-solid border-gray-300 rounded-t-md;
+        }
+    }
+}

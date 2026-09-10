@@ -1,0 +1,8 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="'ROLES'"
+></app-body-header>
+
+<app-title-bar [title]="'app.roles.new' | translate"></app-title-bar>
+<app-role-form-shared mode="create"></app-role-form-shared>

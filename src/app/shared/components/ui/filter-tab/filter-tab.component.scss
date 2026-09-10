@@ -1,0 +1,43 @@
+::ng-deep .filter-tabs {
+    .p-selectbutton {
+        .p-button.p-highlight {
+            background: var(--primary-color);
+            border-color: var(--primary-dark);
+            color: #ffffff;
+        }
+
+        .p-button {
+            @apply md:w-32 md:h-32 flex flex-col justify-center items-center text-primary;
+            &:hover {
+                @apply bg-secondary text-white;
+            }
+            .btn-content {
+                @apply flex flex-col items-center justify-center gap-2 truncate;
+                font-size: 1.2rem; /* Ajusta el tamaño del icono */
+                span {
+                    @apply whitespace-break-spaces hidden md:block;
+                    line-height: normal !important;
+                }
+
+                i {
+                    @apply text-2xl md:text-3xl;
+                }
+            }
+        }
+
+        display: flex !important;
+        flex-direction: row !important;
+        @media (max-width: 991px) {
+            .p-button .p-button-label {
+                display: none;
+            }
+        }
+    }
+
+    .p-button .p-badge {
+        margin-left: 0.5rem;
+        min-width: 1.4rem;
+        height: 1.4rem;
+        line-height: 1.4rem;
+    }
+}

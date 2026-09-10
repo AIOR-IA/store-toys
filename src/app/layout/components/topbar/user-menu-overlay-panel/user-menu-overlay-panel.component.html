@@ -1,0 +1,73 @@
+<div class="flex flex-col items-center justify-center gap-4 w-screen md:w-80">
+    <div
+        class="rounded-full bg-theme-secondary w-[120px] h-[120px] flex items-center justify-center mt-8 relative overflow-hidden"
+    >
+        @if (photoUrl()) {
+        <img
+            [src]="photoUrl()"
+            alt=""
+            class="absolute inset-0 w-full h-full object-cover z-0"
+        />
+        } @else {
+        <div class="text-black">
+            <i class="fas fa-user text-4xl"></i>
+        </div>
+        }
+    </div>
+    <div class="w-full text-center px-4">
+        <div class="text-lg font-semibold">
+            {{ sessionService.user().fullName }}
+        </div>
+        <div
+            class="text-sm text-gray-600 flex justify-center gap-4 items-center mt-4"
+        >
+            @if(!showRoleDropdown()){
+            <p class="m-0 p-0">{{ sessionService.role().name }}</p>
+            }@else {
+            <p-dropdown
+                class="roles"
+                [options]="roles()"
+                [(ngModel)]="selectedRole"
+                optionLabel="name"
+                [placeholder]="'app.common.selectedRole' | translate"
+                (onChange)="changeRole()"
+            />
+            } @if(!showRoleDropdown() &&
+            !sessionService.isAgentOfficer()){<button
+                pButton
+                class="p-0 text-black border-none bg-transparent"
+                [pTooltip]="'app.common.changeRole' | translate"
+                type="button"
+                (click)="toggleRoleDropdown()"
+                tooltipPosition="top"
+            >
+                <i class="fa fa-edit"></i></button
+            >}
+        </div>
+        <div class="text-sm text-gray-400">
+            <!-- {{ sessionService.user().entityName }} -->
+        </div>
+    </div>
+    <div class="flex flex-col items-start justify-start w-full">
+        <!-- <a
+            routerLink="notifications"
+            class="p-link user-option text-black hover:text-black hover:font-normal"
+        >
+            <i class="fas fa-bell"></i>
+            <span>Notificationes</span>
+        </a> -->
+
+        <a
+            routerLink="profile"
+            class="p-link user-option text-black hover:text-black hover:font-normal"
+        >
+            <i class="fas fa-user"></i>
+            <span>Mi Cuenta</span>
+        </a>
+
+        <button (click)="logout()" class="p-link user-option">
+            <i class="fas fa-power-off"></i>
+            <span>Cerrar Sesión</span>
+        </button>
+    </div>
+</div>

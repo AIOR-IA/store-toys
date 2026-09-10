@@ -1,0 +1,44 @@
+<div class="mx-auto mx-screen-xl">
+    <div class="grid grid-cols-2 gap-4">
+        @for (item of state.items; track $index;) {
+            <div class="bg-white rounded-lg shadow-md max-w-120 h-64 overflow-auto relative">
+                <div class="grid grid-cols-2 h-full">
+                    <div class="p-4 relative flex flex-col justify-center">
+                        <div class="absolute top-2 right-2">
+                            <app-web-map-service-options [item]="item"></app-web-map-service-options>
+                        </div>
+                        <h2 class="text-xl font-bold mb-2 text-center">
+                        <a [routerLink]="[item.id]">{{ item.label }}</a>
+                        </h2>
+                      <div class="text-gray-400 mt-2 text-sm text-center">
+                        <p>{{ item.group}}</p>
+                        <p>{{ item.description}}</p>
+                      </div>
+                      <div class="mt-auto">
+                        <span>{{ item.createdAt | date : "dd/MM/yyyy HH:mm"}}</span>    
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-center p-2">
+                        <img
+                            [src]="getWmsImageUrl(item.url, item.layer)"
+                            alt="Vista previa"
+                            width="150"
+                            height="100"
+                        />
+                    </div>
+                  </div>
+            </div>
+        } @empty {
+            <div class="col-span-4">
+                <app-items-not-found></app-items-not-found>
+            </div>
+        }
+    </div>
+    <p-paginator
+        [rows]="state.meta.perPage"
+        [totalRecords]="state.meta.total"
+        [first]="state.meta.first || 0"
+        [rowsPerPageOptions]="[6, 12, 24]"
+        (onPageChange)="onPageChange($event)">
+    </p-paginator>
+</div>

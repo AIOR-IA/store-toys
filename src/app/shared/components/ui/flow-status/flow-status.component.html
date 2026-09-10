@@ -1,0 +1,19 @@
+<div class="flow-status">
+    <p-tag
+        *ngIf="!sessionService.isApproverForResource(resource())"
+        [severity]="flowStatus.severity"
+        [value]="flowStatus.value"
+    ></p-tag>
+    <p-splitButton
+        *ngIf="sessionService.isApproverForResource(resource())"
+        [label]="flowStatus.value"
+        [model]="this.statuses"
+        pTooltip="Cambiar el estado"
+        tooltipPosition="top"
+        size="small"
+        appendTo="body"
+        styleClass="p-button-sm p-button-{{
+            flowStatus.severity
+        }} mr-2 mb-2 text-xs"
+    ></p-splitButton>
+</div>

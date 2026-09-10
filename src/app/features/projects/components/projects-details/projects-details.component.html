@@ -1,0 +1,13 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="state.resources.PROJECT"
+></app-body-header>
+<app-title-bar
+    [title]="state.current.name"
+    [editLabel]="'app.project.edit' | translate"
+    [editPath]="'/admin/projects/' + params().uuid + '/edit'"
+    [resource]="state.resources.PROJECT"
+>
+</app-title-bar>
+<app-projects-form mode="view"></app-projects-form>

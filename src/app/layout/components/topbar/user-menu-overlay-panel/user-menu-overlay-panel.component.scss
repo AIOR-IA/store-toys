@@ -1,0 +1,15 @@
+.user-option {
+    @apply w-full flex items-center justify-start gap-4 py-4 px-8 hover:bg-gray-100 rounded-none;
+}
+
+::ng-deep .roles .p-dropdown-trigger {
+    width: 2rem;
+}
+
+::ng-deep .roles .p-dropdown-label {
+    padding: 5px;
+}
+
+::ng-deep .roles .p-dropdown {
+    min-width: 270px;
+}

@@ -1,0 +1,47 @@
+::ng-deep .body-header {
+    .p-breadcrumb {
+        border: none;
+        padding: 0.5rem 0;
+
+        .p-breadcrumb-list li {
+            font-size: 0.8rem;
+            .p-menuitem-link:hover {
+                .p-menuitem-text {
+                    font-weight: bold;
+                    color: var(--primary-dark);
+                }
+            }
+        }
+    }
+
+    .p-menuitem-link .p-menuitem-text {
+        @apply capitalize;
+    }
+
+    .p-selectbutton {
+        box-shadow: none;
+        .p-button-label {
+            display: none;
+        }
+
+        .p-button.p-highlight {
+            background: var(--gray-300);
+            color: var(--text-primary);
+            border-color: var(--gray-200);
+            .p-button-icon-left,
+            .p-button-icon-right {
+                color: var(--text-primary);
+            }
+        }
+    }
+
+    .p-button-label {
+        @apply capitalize;
+    }
+
+    @media (max-width: 991px) {
+        .p-button .p-button-label {
+            display: none;
+        }
+    }
+}

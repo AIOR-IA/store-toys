@@ -1,0 +1,18 @@
+<div *ngIf="!viewCompleteText" class="w-full">
+    {{ isTextLongerThanMax ? (text() | truncateText: max()) : text() }}
+    <a
+        *ngIf="isTextLongerThanMax"
+        (click)="viewCompleteText = true"
+        class="p-button-link hover:underline"
+    >
+        Ver más
+    </a>
+</div>
+<div *ngIf="viewCompleteText" class="w-full bg-inherit">
+    {{ text() }} <br/>
+    <a
+        *ngIf="isTextLongerThanMax"
+        (click)="viewCompleteText = false"
+        class="p-button-link hover:underline"
+    >Ver menos</a>
+</div>

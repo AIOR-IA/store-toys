@@ -1,0 +1,21 @@
+<div class="w-full flex justify-center mt-4 gap-6">
+    @if(hasPreviousPage()) {
+    <button
+        pButton
+        type="button"
+        (click)="onPreviousPage($event)"
+        loadingIcon="fas fa-spinner fa-spin"
+    >
+        {{ 'app.common.previous' | translate }}
+    </button>
+    } @if(hasNextPage()) {
+    <button
+        pButton
+        type="button"
+        (click)="onNextPage($event)"
+        loadingIcon="fas fa-spinner fa-spin"
+    >
+        {{ 'app.common.next' | translate }}
+    </button>
+    }
+</div>

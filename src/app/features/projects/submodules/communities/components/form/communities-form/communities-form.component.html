@@ -1,0 +1,97 @@
+<div class="card mt-8">
+    <form [formGroup]="form" (ngSubmit)="onSubmit()">
+        <div class="grid grid-cols-8 gap-6">
+            <div class="col-span-2 px-4">
+                <div class="form-field">
+                    <label htmlFor="department">{{
+                        "app.entity.department" | translate
+                        }}</label>
+                    <p-dropdown id="department" formControlName="department" [options]="departments()"
+                        optionLabel="departamento" optionValue="departamento" [style]="{ width: '100%' }"
+                        [placeholder]="'app.common.select' | translate" [filter]="true" filterBy="departamento"
+                        [showClear]="true" (onChange)="onSelectDepartment($event)">
+                    </p-dropdown>
+
+                    <app-field-error [errors]="f['department'].errors" field="department">
+                    </app-field-error>
+                </div>
+
+                <div class="form-field">
+                    <label htmlFor="municipality">{{
+                        "app.entity.municipality" | translate
+                        }}</label>
+                    <p-dropdown id="municipality" formControlName="municipality" [options]="municipalities()"
+                        optionLabel="municipio" optionValue="municipio" [style]="{ width: '100%' }"
+                        [placeholder]="'app.common.select' | translate" [filter]="true" filterBy="municipio"
+                        [showClear]="true" (onChange)="onSelectMunicipality($event)"
+                        (onFilter)="filterMunicipalities($event)">
+                    </p-dropdown>
+
+                    <app-field-error [errors]="f['municipality'].errors" field="municipality">
+                    </app-field-error>
+                </div>
+                <div class="form-field">
+                    <label htmlFor="name">{{ "app.community.singular" | translate }}</label>
+
+                    <input pInputText id="name" formControlName="name" class="w-full" placeholder="Ej. Comunidad X" />
+
+                    <app-field-error [errors]="f['name'].errors" field="name"></app-field-error>
+                </div>
+                <div class="form-field">
+                    <label htmlFor="latitude">{{
+                        "app.entity.latitude" | translate
+                        }}</label>
+
+                    <p-inputNumber #latIN formControlName="latitude" mode="decimal" [minFractionDigits]="6"
+                        [showButtons]="false" [useGrouping]="false" inputId="latitude" placeholder="Ej. -17.6480294"
+                        (onInput)="syncMarkerFromForm(true)" />
+
+                    <app-field-error [errors]="f['latitude'].errors" field="latitude">
+                    </app-field-error>
+                </div>
+
+                <div class="form-field">
+                    <label htmlFor="longitude">{{
+                        "app.entity.longitude" | translate
+                        }}</label>
+
+                    <p-inputNumber #lngIN formControlName="longitude" mode="decimal" [minFractionDigits]="6"
+                        [showButtons]="false" (onInput)="syncMarkerFromForm(true)" inputId="longitude"
+                        placeholder="Ej. -65.772600" [useGrouping]="false" />
+
+                    <app-field-error [errors]="f['longitude'].errors" field="longitude">
+                    </app-field-error>
+                </div>
+
+                <div class="form-field">
+                    <label htmlFor="enabled">{{
+                        'app.community.enabled' | translate
+                        }}</label>
+
+                    <p-inputSwitch id="enabled" formControlName="enabled"></p-inputSwitch>
+                </div>
+            </div>
+            <div class="col-span-4 max-w-[48rem]">
+
+                <app-map [fitBounds]="selectedBounds()" [zoomLevel]="selectedZoom()" [showMarker]="showMarker()"
+                    (onMarkedEditEventDragend)="eventDragend($event)" [markerPosition]="markerPosition()"></app-map>
+                <div class="italic py-2 text-sm text-info">
+                    {{ "app.entity.messages.selectPin" | translate }}
+                </div>
+
+            </div>
+        </div>
+
+
+
+
+        <!-- if is view mode -->
+        @if (!isViewMode) {
+        <div class="w-full text-right mt-6 col-span-2">
+            <button pButton icon="fas fa-check" [loading]="saving()" loadingIcon="fas fa-spinner"
+                class="p-button-success w-full md:w-fit" [label]="'app.common.save' | translate"
+                [disabled]="!form.valid"></button>
+        </div>
+        }
+    </form>
+</div>

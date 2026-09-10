@@ -1,0 +1,98 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="state.resources.ROLES"
+></app-body-header>
+
+<app-title-bar
+    [title]="state.current.name"
+    [newLabel]="'app.roles.permissions.new' | translate"
+    (onClickNew)="onAssignPermission($event)"
+    [resource]="state.resources.ROLES"
+></app-title-bar>
+
+<p-table
+    [value]="currentRole().permissions"
+    [paginator]="true"
+    [rows]="10"
+    [rowsPerPageOptions]="[5, 10, 20, 50]"
+    dataKey="id"
+    [totalRecords]="currentRole().permissions.length"
+    styleClass="p-datatable-striped"
+    [tableStyle]="{ 'min-width': '100%' }"
+>
+    <ng-template pTemplate="header">
+        <tr>
+            <th pSortableColumn="createdAt" style="width: 20%">
+                {{ 'app.roles.createdAt' | translate }}
+                <p-sortIcon field="createdAt"></p-sortIcon>
+            </th>
+            <th pSortableColumn="name" style="width: 20%">
+                {{ 'app.roles.permissions.resource' | translate }}
+                <p-sortIcon field="name"></p-sortIcon>
+            </th>
+
+            <th style="width: 40%">
+                {{ 'app.roles.description' | translate }}
+            </th>
+
+            <th style="width: 20%">
+                {{ 'app.roles.permissions.list' | translate }}
+            </th>
+            <th style="width: 20%"></th>
+        </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-item>
+        <tr>
+            <td>
+                {{ item.createdAt | date : "dd/MM/yyyy HH:mm"}}
+            </td>
+            <td>
+                {{ item.resource.name }}
+            </td>
+            <td>{{ item.resource.description }}</td>
+
+            <td>
+                <div class="flex flex-col justify-start items-start gap-1">
+                    @if (item.canRead) {
+                    <span class="p-tag p-tag-info">
+                        {{ 'app.roles.permissions.canRead' | translate }}
+                    </span>
+                    } @if (item.canCreate) {
+                    <span class="p-tag p-tag-success">
+                        {{ 'app.roles.permissions.canCreate' | translate }}
+                    </span>
+                    } @if (item.canUpdate) {
+                    <span class="p-tag p-tag-warning">
+                        {{ 'app.roles.permissions.canUpdate' | translate }}
+                    </span>
+                    } @if (item.canDelete) {
+                    <span class="p-tag p-tag-danger">
+                        {{ 'app.roles.permissions.canDelete' | translate }}
+                    </span>
+                    } @if (item.canManage) {
+                    <span class="p-tag bg-green-800">
+                        {{ 'app.roles.permissions.canManage' | translate }}
+                    </span>
+                    } @if (item.canMaster) {
+                    <span class="p-tag bg-brand">
+                        {{ 'app.roles.permissions.canMaster' | translate }}
+                    </span>
+                    } @if (item.canApprove) {
+                    <span class="p-tag bg-blue-950">
+                        {{ 'app.roles.permissions.canApprove' | translate }}
+                    </span>
+                    }
+                </div>
+            </td>
+            <td>
+                <div class="w-full text-right">
+                    <app-permission-options
+                        [permission]="item"
+                        [item]="item"
+                    ></app-permission-options>
+                </div>
+            </td>
+        </tr>
+    </ng-template>
+</p-table>

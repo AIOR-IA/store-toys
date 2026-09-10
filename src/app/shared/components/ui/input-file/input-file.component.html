@@ -1,0 +1,178 @@
+<div class="flex justify-start items-start gap-4 w-full file-uploader">
+    @if (disabled()) {
+    <div class="p-fileupload w-full">
+        <div class="p-fileupload-content p-0 overflow-hidden rounded-t-lg">
+            <div
+                class="px-3 container text-center {{
+                    _contentFiles().length ? 'py-2' : 'drag-drop py-3'
+                }}"
+            >
+                @for (file of _contentFiles(); track $index) {
+                <div
+                    class="thumbail overflow-hidden w-full {{
+                        preview() ? 'text-center' : 'text-left'
+                    }}"
+                >
+                    <app-input-file-previewer
+                        [file]="file"
+                        [preview]="preview()"
+                        [height]="heightPreviewer()"
+                        [onlinePreview]="onlinePreview()"
+                    ></app-input-file-previewer>
+                </div>
+                } @empty { @if(placeholder()) {
+                <div
+                    class="info-text w-full min-w-32 {{
+                        preview() ? 'text-center' : 'text-left'
+                    }} text-gray-500"
+                >
+                    <small>{{ placeholder() }}</small>
+                </div>
+                }@else {
+                <div
+                    class="info-text w-full min-w-32 text-center text-gray-500"
+                >
+                    <small> No continene información. </small>
+                </div>
+                } }
+            </div>
+        </div>
+    </div>
+
+    } @else {
+    <p-fileUpload
+        #fileUpload
+        mode="advanced"
+        [accept]="accept()"
+        [fileLimit]="maxFiles()"
+        [multiple]="multiple()"
+        [maxFileSize]="maxFileSize()"
+        (onSelect)="onChange($event)"
+        (onUpload)="onChange($event)"
+        (onError)="onError($event)"
+        [chooseLabel]="label()"
+        [showCancelButton]="false"
+        [showUploadButton]="false"
+        [disabled]="false"
+        class="file-upload w-full {{ orientation() }} {{
+            uploading ? 'uploading' : ''
+        }}"
+    >
+        <ng-template pTemplate="toolbar">
+            @if (uploading) {
+            <div class="flex gap-1 justify-center items-center h-full py-3">
+                <p-progressSpinner
+                    styleClass="w-5 h-5"
+                    strokeWidth="3"
+                    fill="var(--surface-ground)"
+                    animationDuration=".5s"
+                ></p-progressSpinner>
+
+                <span class="ml-2 italic text-xs">Cargando archivo.....</span>
+            </div>
+
+            } @if (uploaded) {
+            <p-message severity="success" text="Archivo cargado"></p-message>
+            }
+        </ng-template>
+        <ng-template let-file pTemplate="file">
+            <div></div>
+        </ng-template>
+        <ng-template pTemplate="content">
+            <div
+                class="px-3 container text-center {{
+                    _contentFiles().length ? 'py-2' : 'drag-drop py-3 '
+                }}
+                "
+            >
+                @if (dragDrop() && !_contentFiles().length) {
+                <div
+                    class="file-section flex flex-col w-full text-center gap-4"
+                >
+                    <div
+                        class="icon"
+                        title="Selecciones un archivo o arrastrelo aquí"
+                    >
+                        <i
+                            class="fas fa-cloud-arrow-up text-3xl md:text-4xl"
+                        ></i>
+                    </div>
+                    @if(!isHorizontal) {
+                    <div class="description">
+                        <h5 class="text-sm">
+                            Seleccione
+                            {{
+                                multiple()
+                                    ? "archivos o arrastrelos "
+                                    : "un archivo o arrastrelo "
+                            }}
+                            aquí
+                        </h5>
+                    </div>
+                    }
+                </div>
+                }
+                <div
+                    class="flex-grow flex items-center gap-2 {{
+                        multiple() ? 'justify-start' : 'justify-end'
+                    }}"
+                >
+                    @for (file of _contentFiles(); track $index) {
+                    <div
+                        class=" overflow-hidden thumbail w-full {{
+                            preview() ? 'text-center' : 'text-left'
+                        }}"
+                    >
+                        @if (showDeleteBtn()) {
+                        <button
+                            type="button"
+                            class="delete-btn text-sm"
+                            [disabled]="isDeleting(file)"
+                            (click)="confirmDelete(file)"
+                            pButton
+                            icon="fas fa-trash"
+                            label="Eliminar"
+                            [text]="true"
+                            [severity]="'danger'"
+                            [pTooltip]="'Eliminar archivo'"
+                            tooltipPosition="top"
+                        ></button>
+                        }
+
+                        <app-input-file-previewer
+                            [file]="file"
+                            [preview]="preview()"
+                            [onlinePreview]="onlinePreview()"
+                            [height]="heightPreviewer()"
+                        ></app-input-file-previewer>
+                    </div>
+                    } @empty { @if(!errors.length) {
+                    <div
+                        class="info-text w-full text-center text-primary truncate"
+                    >
+                        <div class="text-xs">
+                            <b>{{ maxFileSize() / 1000000 }}MB</b> Max.
+                            {{ multiple() ? "por archivo." : "" }}
+                        </div>
+                        <div class="text-xs">
+                            <b>Permitidos: </b> {{ allowedTypes }}
+                        </div>
+                    </div>
+                    } }
+                </div>
+                @if(errors.length) {
+                <div class="info-text w-full min-w-32">
+                    <p-messages
+                        [value]="errors"
+                        [closable]="true"
+                        (onClose)="onCloseError()"
+                        styleClass="custom-messages w-full text-sm"
+                    ></p-messages>
+                </div>
+
+                }
+            </div>
+        </ng-template>
+    </p-fileUpload>
+    }
+</div>

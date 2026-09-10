@@ -1,0 +1,13 @@
+<div class="relative min-h-[calc(100vh-10rem)] pt-8">
+    <app-menu></app-menu>
+
+    <div class="absolute bottom-3 right-2 sidebar-button hidden md:block">
+        <button
+            #menubutton
+            pButton
+            class="inline-flex p-button-rounded p-button-icon w-fit"
+            (click)="layoutService.onMenuToggle()"
+            icon="fa-solid fa-bars"
+        ></button>
+    </div>
+</div>

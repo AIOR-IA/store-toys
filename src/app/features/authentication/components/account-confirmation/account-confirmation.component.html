@@ -1,0 +1,123 @@
+<div class="login-page">
+  <div class="login-box">
+
+    <h1 class="login-title">
+      Confirmar Cuenta
+    </h1>
+
+    @if(form() && !tokenExpired()) {
+      <form [formGroup]="form()">
+
+        <div class="text-center mb-6">
+          <p class="text-base text-center">
+            Hola <b>{{ user().firstName }}</b>, para confirmar tu cuenta, por favor completa
+            los datos del formulario a continuación.
+          </p>
+        </div>
+
+        <!-- Usuario -->
+        <div class="form-group">
+          <label class="form-label" for="username">Usuario</label>
+
+          <div class="form-item">
+            <input
+              id="username"
+              type="text"
+              placeholder="Username"
+              pInputText
+              class="form-input w-full"
+              formControlName="username"
+              readonly="true"
+            />
+          </div>
+
+          <div class="error-message">
+            @if(username.errors && username.errors['required']) {
+              <p>*Campo requerido</p>
+            }
+            @if(username.errors && username.errors['maxlength']) {
+              <p>
+                *Máximo de caracteres permitido es
+                {{ username.errors['maxlength'].requiredLength }}
+              </p>
+            }
+          </div>
+        </div>
+
+        <!-- Password -->
+        <div class="form-group">
+          <label class="form-label" for="password">Contraseña</label>
+
+          <div class="form-item password-item">
+            <p-password
+              id="password"
+              class="w-full"
+              placeholder="Contraseña"
+              [toggleMask]="true"
+              formControlName="password"
+              [style]="{ width: '100%' }"
+              [feedback]="false"
+              inputStyleClass="form-input p-password-input"
+            ></p-password>
+          </div>
+
+          <div class="error-message">
+            @if(password.errors && password.errors['required']) {
+              <p>*Campo requerido</p>
+            }
+            @if(password.errors && password.errors['minlength']) {
+              <p>*Mínimo de 8 caracteres</p>
+            }
+          </div>
+        </div>
+
+        <!-- Confirm Password -->
+        <div class="form-group">
+          <label class="form-label" for="confirmPassword">Confirmar Contraseña</label>
+
+          <div class="form-item password-item">
+            <p-password
+              id="confirmPassword"
+              class="w-full"
+              placeholder="Contraseña"
+              [toggleMask]="true"
+              formControlName="confirmPassword"
+              [style]="{ width: '100%' }"
+              [feedback]="false"
+              inputStyleClass="form-input p-password-input"
+            ></p-password>
+          </div>
+
+          <div class="error-message">
+            @if(confirmPassword.errors && confirmPassword.errors['required']) {
+              <p>*Campo requerido</p>
+            }
+            @if(confirmPassword.dirty && confirmPassword.errors && confirmPassword.errors['passwordMismatch']) {
+              <p>*Las contraseñas no coinciden</p>
+            }
+          </div>
+        </div>
+
+        <!-- Botón -->
+        <button
+          type="button"
+          class="btn-primary"
+          (click)="onSubmit()"
+        >
+          CONFIRMAR CUENTA
+        </button>
+
+      </form>
+    } @else {
+      <div class="text-center">
+        <h3 class="text-2xl font-bold mb-2">Confirmar Cuenta</h3>
+        <h3 class="text-2xl font-bold text-warning mb-4">Token Inválido</h3>
+        <p class="my-6">
+          El enlace de confirmación ha expirado o no es válido. Si cree que esto es un error,
+          por favor solicite un nuevo correo de confirmación al administrador.
+        </p>
+      </div>
+    }
+
+  </div>
+</div>

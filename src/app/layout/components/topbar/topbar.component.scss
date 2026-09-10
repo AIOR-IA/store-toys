@@ -1,0 +1,131 @@
+.layout-topbar-menu {
+    @apply rounded-full bg-primary w-[48px] h-[48px] flex items-center justify-center cursor-pointer;
+    i {
+        font-size: 18px;
+    }
+}
+
+.user-option {
+    @apply w-full flex items-center justify-start gap-4 py-4 px-8 hover:bg-gray-100 rounded-none;
+}
+
+::ng-deep .p-overlaypanel .p-overlaypanel-content {
+    padding: 0 !important;
+}
+
+.notifications-icon {
+    overflow: visible;
+
+    &::after {
+        content: attr(data-count);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 0.6rem;
+        font-weight: 700;
+        color: #fff;
+        position: absolute;
+        width: 15px;
+        height: 15px;
+        top: -3px;
+        right: -7px;
+        background-color: #f43d40;
+        border-radius: 50%;
+    }
+}
+
+.leaf-right {
+  transform: rotateZ(355deg);
+}
+
+.leaf-left {
+  transform: rotateZ(5deg);
+}
+
+.theme-toggle-button {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 999px;
+
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+
+    cursor: pointer;
+    transition:
+        background 0.15s ease-in-out,
+        border-color 0.15s ease-in-out,
+        transform 0.15s ease-in-out;
+
+    i {
+        font-size: 1.1rem;
+    }
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.24);
+        border-color: rgba(255, 255, 255, 0.6);
+        transform: translateY(-1px);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+}
+
+:host-context(body.dark-theme) .theme-toggle-button {
+    background: rgba(103, 173, 61, 0.16);
+    border-color: rgba(103, 173, 61, 0.45);
+    color: #ffffff;
+
+    &:hover {
+        background: rgba(103, 173, 61, 0.28);
+        border-color: rgba(103, 173, 61, 0.75);
+    }
+}
+
+@media (max-width: 767px) {
+    .theme-toggle-button {
+        width: 38px;
+        height: 38px;
+        min-width: 38px;
+
+        i {
+            font-size: 1rem;
+        }
+    }
+}
+
+
+.layout-topbar-logo {
+    align-items: center;
+    justify-content: center;
+}
+
+.topbar-logo-badge {
+    width: 75px;
+    height: 75px;
+    border-radius: 999px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background: #ffffff;
+    border: 3px solid rgba(103, 173, 61, 0.75);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+
+    overflow: hidden;
+}
+
+.topbar-logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}

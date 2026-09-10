@@ -1,0 +1,51 @@
+:host {
+    display: inline-block;
+    position: relative;
+}
+
+.column-filter-container {
+    display: inline-block;
+    position: relative;
+}
+
+.filter-menu {
+    min-width: 150px;
+    max-width: 250px;
+}
+
+.filter-item {
+    padding: 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid #f8f8f8;
+    transition: background-color 0.15s;
+    display: flex;
+    align-items: center;
+
+    &:hover {
+        background-color: var(--highlight-bg, #f8f9fa);
+    }
+
+    &:last-child {
+        border-bottom: none;
+    }
+}
+
+// Estilos más específicos para el botón dentro de nuestro componente
+.column-filter-container {
+    ::ng-deep .p-button {
+        padding: 0.25rem;
+        min-width: auto;
+        width: auto;
+        height: auto;
+        
+        &.p-button-text {
+            background: transparent;
+            border: none;
+            color: var(--primary-color, #007ad9);
+            
+            &:hover {
+                background: var(--primary-color-text, rgba(0, 122, 217, 0.04));
+            }
+        }
+    }
+}

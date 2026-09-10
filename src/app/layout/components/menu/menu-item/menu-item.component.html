@@ -1,0 +1,112 @@
+<ng-container>
+    <div
+        *ngIf="root && item.visible !== false"
+        class="layout-menuitem-root-text truncate px-4"
+    >
+        {{ item.label }}
+    </div>
+    <!-- nested menus -->
+    <a
+        *ngIf="(!item.routerLink || item.items) && item.visible !== false"
+        [attr.href]="item.url"
+        (click)="itemClick($event)"
+        [pTooltip]="item.label"
+        [ngClass]="item.class"
+        [attr.target]="item.target"
+        tabindex="0"
+        pRipple
+    >
+        <div class="flex justify-start gap-4 items-center w-full">
+            @if(item.icon) { @if(item.rounded) {
+            <div
+                class="icon-container flex items-center w-12 h-12 rounded-full justify-center text-primary bg-white border-2 border-primary border-solid"
+            >
+                <i [ngClass]="item.icon" class="text-xl hover:text-2xl transition-all duration-300"></i>
+            </div>
+            } @else {
+            <div
+                class="icon-container flex items-center w-14 h-12 justify-center text-primary bg-white border-2 border-primary border-solid rounded-lg shadow-md hover:shadow-lg transition-all duration-300 hover:scale-105 relative overflow-hidden"
+            >
+                <div class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+                <i [ngClass]="item.icon" class="text-xl relative z-10 hover:text-2xl transition-all duration-300"></i>
+            </div>
+            } }
+            <div class="layout-menuitem-text text-white text-base w-[65%]">
+                {{ item.label }}
+            </div>
+            <i
+                class="fa solid fa-angle-down layout-submenu-toggler"
+                *ngIf="item.items"
+            ></i>
+        </div>
+    </a>
+
+    <div
+        *ngIf="(!item.routerLink || item.items) && item.visible !== false"
+        class="my-4"
+    ></div>
+    <!-- normal menus -->
+    <a
+        *ngIf="item.routerLink && !item.items && item.visible !== false"
+        (click)="itemClick($event)"
+        [ngClass]="item.class"
+        [routerLink]="item.routerLink"
+        routerLinkActive="active-route"
+        [routerLinkActiveOptions]="item.routerLinkOptions || { exact: true }"
+        [fragment]="item.fragment"
+        [queryParamsHandling]="item.queryParamsHandling"
+        [preserveFragment]="item.preserveFragment"
+        [skipLocationChange]="item.skipLocationChange"
+        [pTooltip]="item.label"
+        [replaceUrl]="item.replaceUrl"
+        [state]="item.state"
+        [queryParams]="item.queryParams"
+        [attr.target]="item.target"
+        tabindex="0"
+        pRipple
+    >
+        <div class="flex justify-start gap-4 items-center w-full">
+            @if(item.icon) { @if(item.rounded) {
+            <div
+                class="icon-container flex items-center w-12 h-12 rounded-full justify-center text-primary bg-white border-2 border-primary border-solid"
+            >
+                <i [ngClass]="item.icon" class="text-xl hover:text-2xl transition-all duration-300"></i>
+            </div>
+            } @else {
+            <div
+                class="icon-container flex items-center w-14 h-12 justify-center text-primary bg-white border-2 border-primary border-solid rounded-lg shadow-md hover:shadow-lg transition-all duration-300 hover:scale-105 relative overflow-hidden"
+            >
+                <div class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
+                <i [ngClass]="item.icon" class="text-xl relative z-10 hover:text-2xl transition-all duration-300"></i>
+            </div>
+            } }
+            <div class="layout-menuitem-text text-white text-base w-[65%]">
+                {{ item.label }}
+            </div>
+        </div>
+
+        <i
+            class="fa solid fa-angle-down layout-submenu-toggler"
+            *ngIf="item.items"
+        ></i>
+    </a>
+    <div
+        *ngIf="item.routerLink && !item.items && item.visible !== false"
+        class="my-4"
+    ></div>
+
+    <ul
+        *ngIf="item.items && item.visible !== false"
+        [@children]="submenuAnimation"
+    >
+        <ng-template ngFor let-child let-i="index" [ngForOf]="item.items">
+            <li
+                app-menu-item
+                [item]="child"
+                [index]="i"
+                [parentKey]="key"
+                [class]="child.badgeClass"
+            ></li>
+        </ng-template>
+    </ul>
+</ng-container>

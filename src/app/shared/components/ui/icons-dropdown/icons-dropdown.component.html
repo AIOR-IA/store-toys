@@ -1,0 +1,61 @@
+@if (editMode()) {
+<div class="flex justify-start items-start gap-2 w-full">
+    <div class="flex-grow">
+        <p-dropdown
+            [(ngModel)]="selectedIcon"
+            [options]="pagedIcons()"
+            optionLabel="label"
+            optionValue="value"
+            [style]="{ width: '100%' }"
+            styleClass="w-full"
+            [placeholder]="'app.common.select' | translate"
+            [filter]="true"
+            filterBy="label,search.terms"
+            [showClear]="!required"
+            (onChange)="_onChange($event)"
+            (onFilter)="_onFilter($event)"
+        >
+            <ng-template let-item pTemplate="selectedItem">
+                <i [className]="item.value"></i> - {{ item.label }}
+            </ng-template>
+            <ng-template let-item pTemplate="item">
+                <div class="whitespace-break-spaces text-sm">
+                    <i [className]="item.value"></i> - {{ item.label }}
+                </div>
+            </ng-template>
+        </p-dropdown>
+    </div>
+
+    @if(selectedIcon) {
+    <button
+        pButton
+        pTooltip="Cancelar Edición"
+        type="button"
+        tooltipPosition="top"
+        class="p-button-secondary p-button-text p-button-rounded hover:text-black"
+        (click)="editMode.set(false)"
+    >
+        <i class="fas fa-times"></i>
+    </button>
+    }
+</div>
+
+}@else {
+<div
+    class="flex justify-between items-center gap-2 bg-theme-secondary rounded-md py-1 px-2"
+>
+    <div class="px-4 text-xl">
+        <i [className]="selectedIcon"></i>
+    </div>
+    <button
+        pButton
+        pTooltip="Editar Ícono"
+        type="button"
+        tooltipPosition="top"
+        class="p-button-secondary p-button-text p-button-rounded hover:text-black"
+        (click)="editMode.set(true)"
+    >
+        <i class="fas fa-pen-to-square"></i>
+    </button>
+</div>
+}

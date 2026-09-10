@@ -1,0 +1,8 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="state.resources.WEB_MAP_SERVICE"
+></app-body-header>
+
+<app-title-bar [title]="state.current.label"></app-title-bar>
+<app-web-map-service-form mode="update"></app-web-map-service-form>

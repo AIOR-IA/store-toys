@@ -1,0 +1,31 @@
+<div class="column-filter-container">
+    <p-overlayPanel 
+        #columnFilter 
+        styleClass="column-filter-panel"
+        [showCloseIcon]="false"
+        [appendTo]="'body'"
+    >
+        <div class="filter-menu">
+            <div 
+                *ngFor="let item of items()" 
+                class="filter-item relative"
+                (click)="selectItem(item)"
+            >
+                <i *ngIf="item.icon" [class]="item.icon" class="mr-2"></i>
+                <span class="text-sm">{{ item.label }}</span>
+                <i *ngIf="isSelected(item)" class="fas fa-check filter-item-check absolute top-2.5 right-2"></i>
+            </div>
+        </div>
+    </p-overlayPanel>
+    
+    <p-button
+        #filterButton
+        (click)="columnFilter.toggle($event)"
+        icon="fas fa-filter"
+        type="button"
+        [text]="true"
+        [size]="'small'"
+        pTooltip="Filtrar"
+        tooltipPosition="top"
+    />
+</div>

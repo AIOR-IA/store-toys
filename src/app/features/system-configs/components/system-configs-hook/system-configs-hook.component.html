@@ -1,0 +1,52 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="state.resources.SYSTEM_CONFIGS"
+></app-body-header>
+
+<div class="card mt-8">
+    <div class="px-2 md:px-48 grid grid-cols-1 gap-4">
+        <div></div>
+
+        <div class="form-field">
+            <label>Clave Secreta:</label>
+
+            <div class="flex justify-start items-center">
+                <div class="flex-1">
+                    <p-password
+                        id="password"
+                        placeholder="Contraseña"
+                        [toggleMask]="true"
+                        inputStyleClass="w-full p-3"
+                        [style]="{ width: '100%' }"
+                        [feedback]="false"
+                        [ngModel]="secretkey()"
+                        [disabled]="true"
+                    >
+                    </p-password>
+                </div>
+
+                <button
+                    pButton
+                    type="button"
+                    (click)="copyToClipboard(secretkey())"
+                    class="p-button-info w-fit"
+                    label="Copiar al portapapeles"
+                    [disabled]="copied()"
+                ></button>
+            </div>
+
+            @if(copied()) {
+                <div class="italic text-sm text-info">
+                    Si desea volver a copiar la clave secreta debe esperar {{ remainingTime() }} segundos.
+                </div>
+            }
+        </div>
+
+        <div class="form-field">
+            <div class="markdown-body">
+                <markdown [data]="markdownContent()"></markdown>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,14 @@
+<div class="container">
+    <div #mapContainer class="map-container"></div>
+    <p-dialog
+        header="Información de capa"
+        [modal]="true"
+        [(visible)]="popupVisible"
+        [style]="{ width: '35rem' }"
+        [draggable]="false"
+        [resizable]="false"
+    >
+        <div [innerHTML]="popupContent()" class="layer-popup-content"></div>
+    </p-dialog>
+
+</div>

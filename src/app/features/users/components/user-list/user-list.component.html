@@ -1,0 +1,24 @@
+<p-confirmDialog />
+
+<app-body-header
+    [breadcrumbs]="breadcrumbItems"
+    (onViewChange)="onViewChange($event)"
+    [resource]="userState.resources.USERS"
+    createPath="/admin/users/new"
+    [createLabel]="'app.users.new' | translate"
+>
+</app-body-header>
+
+<app-search-bar
+    [title]="currentUserList()"
+    (onSearch)="onSearch($event)"
+    [compact]="true"
+>
+</app-search-bar>
+
+<div class="mt-4">
+    <app-users-view
+        [view]="currentView()"
+        [isUserRequestView]="showUserRequestTable()"
+    ></app-users-view>
+</div>

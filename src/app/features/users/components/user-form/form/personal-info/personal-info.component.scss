@@ -1,0 +1,11 @@
+.form-field {
+  margin-bottom: 0.8rem;
+}
+
+:host ::ng-deep .p-calendar {
+  width: 100% !important;
+}
+
+.app-field-error {
+  color: red;
+}

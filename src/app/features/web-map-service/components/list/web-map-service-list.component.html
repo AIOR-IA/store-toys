@@ -1,0 +1,25 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    (onViewChange)="onViewChange($event)"
+    [resource]="state.resources.WEB_MAP_SERVICE"
+></app-body-header>
+
+<app-tabs-actions
+    [options]="tabs()"
+    [resource]="state.resources.WEB_MAP_SERVICE"
+    [newLabel]="'app.webMapService.create' | translate"
+    [newPath]="'/admin/web-map-service/create'"
+    (onChange)="onChangeTab($event)"
+    (onReload)="onReload($event)"
+></app-tabs-actions>
+
+<app-search-bar
+    [title]="'app.webMapService.list' | translate"
+    (onSearch)="onSearch($event)"
+></app-search-bar>
+
+@if(isGridView) {
+    <app-web-map-service-cards></app-web-map-service-cards>
+}@else {
+    <app-web-map-service-table></app-web-map-service-table>
+}

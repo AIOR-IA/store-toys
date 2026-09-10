@@ -1,0 +1,63 @@
+<div class="card mt-8">
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="px-2 md:px-48 grid grid-cols-1 md:grid-cols-2 gap-4">
+  
+      <div class="form-field">
+        <label for="url">{{ 'URL' | translate }}</label>
+        <input id="url" pInputText type="text" formControlName="url" [placeholder]="'URL' | translate" />
+        <app-field-error [errors]="f['url'].errors" field="url"></app-field-error>
+      </div>
+
+      <div class="form-field">
+        <label for="layer">{{ 'app.webMapService.layer' | translate }}</label>
+        <input id="layer" pInputText type="text" formControlName="layer" [placeholder]="'app.webMapService.layer' | translate" />
+        <app-field-error [errors]="f['layer'].errors" field="layer"></app-field-error>
+      </div>
+  
+      <div class="form-field">
+        <label for="label">{{ 'app.webMapService.label' | translate }}</label>
+        <input id="label" pInputText type="text" formControlName="label" [placeholder]="'app.webMapService.label' | translate" />
+        <app-field-error [errors]="f['label'].errors" field="label"></app-field-error>
+      </div>
+  
+      <div class="form-field">
+        <label for="group">{{ 'app.webMapService.group' | translate }}</label>
+        <input id="group" pInputText type="text" formControlName="group" [placeholder]="'app.webMapService.group' | translate" />
+        <app-field-error [errors]="f['group'].errors" field="group"></app-field-error>
+      </div>
+  
+      <div class="form-field">
+        <label for="description">{{ 'app.webMapService.description' | translate }}</label>
+        <textarea id="description" pInputTextarea formControlName="description" [placeholder]="'app.webMapService.description' | translate" rows="3"></textarea>
+        <app-field-error [errors]="f['description'].errors" field="description"></app-field-error>
+      </div>
+  
+      <div class="form-field">
+        <label for="opacity">{{ 'app.webMapService.opacity' | translate }}</label>
+        <input id="opacity" type="number" pInputText formControlName="opacity" min="0" max="1" step="0.1" />
+        <app-field-error [errors]="f['opacity'].errors" field="opacity"></app-field-error>
+      </div>
+  
+      <!-- <div class="form-field flex items-center gap-2">
+        <p-checkbox inputId="enabled" formControlName="enabled" binary="true"></p-checkbox>
+        <label for="enabled">{{ 'app.webMapService.enabled' | translate }}</label>
+      </div>
+   -->
+      <!-- if is view mode -->
+      @if (!isViewMode) {
+        <div class="w-full text-right mt-6 col-span-2">
+            <button
+                pButton
+                icon="fas fa-check"
+                class="p-button-success w-full md:w-fit"
+                [loading]="saving()"
+                [loading]="saving()"
+                loadingIcon="fas fa-spinner"
+                loadingIcon="fas fa-spinner"
+                [label]="'app.common.save' | translate"
+                [disabled]="!form.valid"
+            ></button>
+        </div>
+      }
+  
+    </form>
+  </div>

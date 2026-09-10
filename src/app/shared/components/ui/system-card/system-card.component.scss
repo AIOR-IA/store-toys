@@ -1,0 +1,16 @@
+// Animación para el body del card
+// Animación acordeón tradicional para el body del system-card
+.card-body-anim {
+	overflow: hidden;
+	max-height: 1000px;
+	transition: max-height 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.card-body-anim.collapsed {
+	max-height: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	pointer-events: none;
+}
+.card-body-anim.expanded {
+	max-height: 1000px !important;
+}

@@ -1,0 +1,70 @@
+<div
+    class="flex flex-col md:flex-row justify-between bg-theme-secondary md:h-32 gap-4"
+>
+    <div
+        class="flex {{
+            backAction() ? 'justify-between' : 'justify-start'
+        }} w-full items-center gap-4 md:px-4"
+    >
+        <div class="flex justify-start items-center gap-2">
+            @if(backAction()) {
+            <button
+                pButton
+                type="button"
+                icon="fas fa-chevron-left"
+                class="p-button-secondary p-button-rounded"
+                (click)="goBack()"
+            ></button>
+
+            <div class="flex-1">
+                <div class="text-2xl font-semibold capitalize">
+                    {{ title() }}
+                </div>
+                 <div class="text-sm text-gray-500">{{ description() }}</div>
+            </div>
+            }
+        </div>
+
+        <div
+            class="flex gap-2 {{
+                backAction() ? 'justify-end' : 'justify-start'
+            }}"
+        >
+            @if (newPath() && !hideReinscription()) {
+            <p-button
+                appPermissions
+                [action]="createAction"
+                [resource]="resource()"
+                [pTooltip]="newLabel()"
+                tooltipPosition="top"
+                (onClick)="onCreate($event)"
+            >
+                <i class="fas fa-plus"></i>
+                <label class="ml-2 hidden md:block">{{ newLabel() }}</label>
+            </p-button>
+            } @if (!hideReloadButton()) {
+            <p-button
+                appPermissions
+                [action]="readAction"
+                [resource]="resource()"
+                styleClass="p-button-info"
+                [pTooltip]="'app.common.reload' | translate"
+                tooltipPosition="top"
+                (onClick)="emitReload($event)"
+            >
+                <i class="fas fa-rotate"></i>
+                <label class="ml-2 hidden md:block">{{
+                    "app.common.reload" | translate
+                }}</label>
+            </p-button>
+            }
+            <ng-content></ng-content>
+        </div>
+    </div>
+    <app-filter-tab
+        [options]="options()"
+        [selectedOption]="selectedOption()"
+        (onChange)="emitChange($event)"
+        class="flex flex-row justify-between items-center"
+    ></app-filter-tab>
+</div>

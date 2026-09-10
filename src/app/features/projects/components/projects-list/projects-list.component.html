@@ -1,0 +1,25 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    (onViewChange)="onViewChange($event)"
+    [resource]="state.resources.PROJECT"
+></app-body-header>
+
+<app-tabs-actions
+    [options]="tabs()"
+    [resource]="state.resources.PROJECT"
+    [newLabel]="'app.project.new' | translate"
+    newPath="/admin/projects/new"
+    (onChange)="onChangeTab($event)"
+    (onReload)="onReload($event)"
+></app-tabs-actions>
+
+<app-search-bar
+    [title]="'app.project.list' | translate"
+    (onSearch)="onSearch($event)"
+></app-search-bar>
+
+@if(isGridView) {
+    <app-projects-cards></app-projects-cards>
+}@else {
+    <app-projects-table></app-projects-table>
+}

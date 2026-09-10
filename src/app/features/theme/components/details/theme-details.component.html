@@ -1,0 +1,13 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="state.resources.GEOGRAPHIC_LAYER"
+></app-body-header>
+<app-title-bar
+    [title]="state.current.title"
+    [editLabel]="'app.theme.edit' | translate"
+    [editPath]="'/admin/theme/' + params().uuid + '/edit'"
+    [resource]="state.resources.GEOGRAPHIC_LAYER"
+>
+</app-title-bar>
+<app-theme-form mode="view"></app-theme-form>

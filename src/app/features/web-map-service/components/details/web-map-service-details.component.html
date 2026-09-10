@@ -1,0 +1,13 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="state.resources.WEB_MAP_SERVICE"
+></app-body-header>
+<app-title-bar
+    [title]="state.current.layer"
+    [editLabel]="'app.webMapService.edit' | translate"
+    [editPath]="'/admin/web-map-service/' + params().uuid + '/edit'"
+    [resource]="state.resources.WEB_MAP_SERVICE"
+>
+</app-title-bar>
+<app-web-map-service-form mode="view"></app-web-map-service-form>

@@ -1,0 +1,47 @@
+<div
+    class="w-full flex flex-wrap md:flex-nowrap justify-start mb-4 gap-1 body-header"
+>
+    <div class="w-full md:w-2/3 text-xs">
+        @if (breadcrumbs().length) {
+        <p-breadcrumb [model]="breadcrumbs()" [home]="home"></p-breadcrumb>
+        }
+    </div>
+    <div
+        class="w-full md:w-1/3 flex items-center justify-start md:justify-end gap-2"
+    >
+        <ng-content></ng-content>
+        @if(mainOption()) {
+        <p-splitButton
+            [label]="mainOption()?.label"
+            [icon]="mainOption()?.icon"
+            (onClick)="callCommand(mainOption(), $event)"
+            [model]="dropDownOptions()"
+        ></p-splitButton>
+        }@else if(createPath()) {
+        <p-button
+            appPermissions
+            [action]="createAction"
+            [resource]="resource()"
+            [label]="createLabel()"
+            [routerLink]="[createPath()]"
+            [queryParams]="createParams()"
+            icon="fas fa-plus"
+        ></p-button>
+        }
+        <!-- View buttons  -->
+        @if (viewButtons()) {
+        <p-selectButton
+            [options]="stateOptions"
+            [(ngModel)]="view"
+            (onChange)="emitView()"
+            [unselectable]="true"
+            optionLabel="icon"
+            optionValue="value"
+        >
+            <ng-template let-item>
+                <i [class]="item.icon"></i>
+            </ng-template>
+        </p-selectButton>
+        }
+    </div>
+</div>

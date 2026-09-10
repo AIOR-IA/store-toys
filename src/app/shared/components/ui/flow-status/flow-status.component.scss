@@ -1,0 +1,7 @@
+::ng-deep .flow-status {
+    .p-splitbutton-defaultbutton {
+        .p-button-label {
+            @apply truncate;
+        }
+    }
+}

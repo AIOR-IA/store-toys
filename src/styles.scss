@@ -1,0 +1,112 @@
+/* You can add global styles to this file, and also import other style files */
+/* Import Tailwind CSS */
+@tailwind components;
+@tailwind utilities;
+
+/* Prime Ng Theme */
+@import "assets/layout/styles/theme/tailwind-light/theme.css";
+@import "primeng/resources/primeng.css";
+@import "assets/layout/styles/layout/layout.scss";
+
+// import Quill styles in styles.scss
+@import "../node_modules/quill/dist/quill.core.css";
+@import "../node_modules/quill/dist/quill.snow.css";
+//import ckeditor styles
+@import "../node_modules/ckeditor5/dist/ckeditor5.css";
+
+/* Asegurar que el toolbar contextual de CKEditor sea visible */
+.ck.ck-balloon-panel {
+    z-index: 10000 !important;
+    position: fixed !important;
+}
+
+.ck.ck-balloon-panel.ck-balloon-panel_visible {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Permitir que el balloon se muestre fuera del diálogo de PrimeNG */
+.p-dialog .ck-body-wrapper {
+    position: static !important;
+}
+
+/* INFO: Error on color picker https://github.com/primefaces/primeng/issues/13820#issuecomment-2430690678 */
+.p-colorpicker-panel .p-colorpicker-color {
+    background: transparent url("assets/custom-color.png") no-repeat left top;
+}
+
+.p-colorpicker-panel .p-colorpicker-hue {
+    background: transparent url("assets/custom-hue.png") no-repeat left top !important;
+}
+
+.tiny-form {
+    .p-inputtext,
+    .p-treeselect-label {
+        font-size: 0.8rem;
+        padding: 0.65rem;
+    }
+
+    .p-tree .p-tree-container .p-treenode .p-treenode-content {
+        font-size: 0.8rem;
+    }
+
+    .p-datepicker {
+        font-size: 0.8rem;
+        table {
+            font-size: 0.8rem;
+            td {
+                padding: 0.3rem;
+                span {
+                    width: 1.5rem;
+                    height: 1.5rem;
+                }
+            }
+        }
+
+        .timepicker {
+            padding: 0.3rem;
+            font-size: 0.8rem;
+        }
+
+        .p-timepicker span {
+            font-size: 1rem;
+        }
+    }
+
+    .form-field {
+        margin-bottom: 0.5rem;
+
+        .p-button.p-button-icon-only {
+            width: 2rem;
+            height: 1rem;
+            padding: 0;
+        }
+    }
+
+    .p-multiselect .p-multiselect-label {
+        padding: 0.5rem 0.5rem;
+        transition: none;
+        font-size: 0.8rem;
+    }
+
+    .p-tabview-title {
+        font-size: 0.8rem;
+        line-height: 0.5;
+        white-space: nowrap;
+    }
+
+    .p-tabview .p-tabview-nav li .p-tabview-nav-link {
+        padding: 0.75rem;
+    }
+}
+
+.geovisor-select-button.p-selectbutton {
+    .p-button {
+        &.p-highlight {
+            background-color: var(--primary-soft);
+            border-color: var(--primary-soft);
+            color: var(--primary-dark);
+        }
+    }
+}

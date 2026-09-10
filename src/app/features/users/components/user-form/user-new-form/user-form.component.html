@@ -1,0 +1,7 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="'USERS'"
+></app-body-header>
+<app-title-bar [title]="'app.users.new' | translate"></app-title-bar>
+<app-user-form mode="create" [redirectAfterCreate]="false"></app-user-form>

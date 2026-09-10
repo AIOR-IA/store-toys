@@ -1,0 +1,32 @@
+<div class="mx-auto mx-screen-xl">
+    <div class="grid grid-cols-4 gap-4">
+        @for (item of state.items; track $index;) {
+            <div class="bg-white rounded-lg shadow-md max-w-80 h-64 overflow-auto relative">
+                <div class="p-4 relative h-full leading-relaxed">
+                    <h2 class="text-xl font-bold mb-2 line-clamp-1">
+                        <a [routerLink]="[item.id]">{{ item.title }}</a>
+                    </h2>
+                    <div
+                        class="text-gray-400 mt-2 text-sm absolute left-4 bottom-3"
+                    >
+                        <span>{{ item.createdAt | date : "dd/MM/yyyy HH:mm"}}</span>
+                    </div>
+                    <div class="absolute right-0 bottom-0">
+                        <app-theme-options [item]="item"></app-theme-options>
+                    </div>
+                </div>
+            </div>
+        } @empty {
+            <div class="col-span-4">
+                <app-items-not-found></app-items-not-found>
+            </div>
+        }
+    </div>
+    <p-paginator
+    [rows]="state.meta.perPage"
+    [totalRecords]="state.meta.total"
+    [first]="state.meta.first || 0"
+    [rowsPerPageOptions]="[5, 10, 20, 50]"
+    (onPageChange)="onPageChange($event)">
+    </p-paginator>
+</div>

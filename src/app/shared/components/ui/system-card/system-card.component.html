@@ -1,0 +1,34 @@
+<div 
+    class="bg-white shadow-sm overflow-hidden transition-all duration-300 w-full mb-1"
+    [ngClass]="customClass()"
+>
+    <!-- Card Header -->
+    @if (showHeader() && title()) {
+        <div class="bg-primary-clear-soft text-primary-dark px-4 py-1 cursor-pointer select-none flex items-center justify-between" (click)="toggleExpand()">
+            <div class="flex-1">
+                <div class="text-lg font-semibold text-center uppercase tracking-wide">
+                    {{ title() }}
+                </div>
+                @if (subtitle()) {
+                    <div class="text-xs text-primary text-center mt-1">
+                        {{ subtitle() }}
+                    </div>
+                }
+            </div>
+            <span class="ml-2 text-sm">
+                <i [ngClass]="expanded() ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
+            </span>
+        </div>
+    }
+
+    <!-- Card Body - Content projection -->
+    <div class="card-body-anim p-4" [class.expanded]="expanded()" [class.collapsed]="!expanded()">
+        <ng-content></ng-content>
+    </div>
+
+    <!-- Card Footer - Optional content projection -->
+    <div class="border-t border-gray-100">
+        <ng-content select="[slot=footer]"></ng-content>
+    </div>
+</div>
+ 

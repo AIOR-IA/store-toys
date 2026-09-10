@@ -1,0 +1,8 @@
+<app-body-header
+    [breadcrumbs]="breadcrumbItems()"
+    [viewButtons]="false"
+    [resource]="'PROJECT'"
+></app-body-header>
+
+<app-title-bar [title]="'app.project.new' | translate"></app-title-bar>
+<app-projects-form mode="create"></app-projects-form>

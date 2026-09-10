@@ -1,0 +1,161 @@
+.layout-sidebar {
+    position: fixed; //review with with dashboard
+    width: 250px;
+    height: calc(100vh - 6.5rem);
+    z-index: 90;
+    overflow-y: auto;
+    user-select: none;
+    top: 4rem;
+    left: 0rem;
+    transition: transform $transitionDuration, left $transitionDuration;
+
+    background-color: var(--primary-default);
+    box-shadow: 0px 3px 5px rgba(0, 0, 0, 0.02), 0px 0px 2px rgba(0, 0, 0, 0.05),
+        0px 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.layout-menu {
+    margin: 0;
+    padding: 0;
+    // border-bottom: 2px solid var(--bg-secondary);
+    list-style-type: none;
+
+    .layout-root-menuitem {
+        > .layout-menuitem-root-text {
+            font-size: 0.857rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--surface-900);
+            margin: 0.75rem 0;
+        }
+
+        > a {
+            display: none;
+        }
+    }
+
+    a {
+        user-select: none;
+        // color: var(--primary-dark) !important;
+        color: white !important;
+
+        &.active-menuitem {
+            > .layout-submenu-toggler {
+                transform: rotate(-180deg);
+            }
+        }
+    }
+
+    li.active-menuitem {
+        > a {
+            color: var(--primary-dark);
+            .layout-submenu-toggler {
+                transform: rotate(-180deg);
+            }
+        }
+    }
+
+    ul {
+        margin: 0;
+        padding: 0;
+        list-style-type: none;
+        // border-bottom: 2px solid var(--bg-secondary);
+        // background-color: rgba(255, 255, 255, 0.4);
+        a {
+            display: flex;
+            align-items: center;
+            position: relative;
+            outline: 0 none;
+            color: var(--primary-dark);
+            cursor: pointer;
+            padding: 0.75rem 1rem 0.75rem 0.1rem;
+            border-radius: $borderRadius;
+            transition: background-color $transitionDuration,
+                box-shadow $transitionDuration;
+
+            .layout-menuitem-icon {
+                margin-right: 0.5rem;
+            }
+
+            .layout-submenu-toggler {
+                font-size: 75%;
+                margin-left: auto;
+                transition: transform $transitionDuration;
+            }
+
+            &.rotated-icon {
+                .layout-menuitem-icon {
+                    transform: rotate(90deg);
+                }
+            }
+
+            &.active-route {
+                font-weight: bold;
+                background-color: var(--primary-soft);
+                color: var(--primary-dark);
+                &::after {
+                    content: "▶"; /* O usa '›', '❯', etc., para un estilo más suave */
+                    font-size: 0.9em;
+                    margin-left: auto;
+                    padding-left: 8px;
+                }
+            }
+
+            &:hover {
+                background-color: var(--primary-soft);
+            }
+
+            // &:focus {
+                // @include focused-inset();
+                // background-color: var(--primary-soft);
+            // }
+        }
+
+        ul {
+            overflow: hidden;
+            border-radius: $borderRadius;
+
+            li {
+                a {
+                    margin-left: 1rem;
+                }
+
+                li {
+                    a {
+                        margin-left: 2rem;
+                    }
+
+                    li {
+                        a {
+                            margin-left: 2.5rem;
+                        }
+
+                        li {
+                            a {
+                                margin-left: 3rem;
+                            }
+
+                            li {
+                                a {
+                                    margin-left: 3.5rem;
+                                }
+
+                                li {
+                                    a {
+                                        margin-left: 4rem;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@media screen and (max-width: 768px) {
+    .layout-menu {
+        min-height: 930px !important;
+    }
+}

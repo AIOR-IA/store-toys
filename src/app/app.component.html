@@ -1,0 +1,13 @@
+<router-outlet />
+<p-confirmDialog
+    [header]="'app.common.confirm' | translate"
+    [message]="'app.common.messages.confirmDelete' | translate"
+    [acceptLabel]="'app.common.accept' | translate"
+    [rejectLabel]="'app.common.cancel' | translate"
+    acceptButtonStyleClass="p-button-success"
+    rejectButtonStyleClass="p-button-secondary"
+    icon="fas fa-exclamation-triangle"
+    styleClass="w-full md:w-1/2 max-w-2xl"
+>
+</p-confirmDialog>
+<app-spinner></app-spinner>

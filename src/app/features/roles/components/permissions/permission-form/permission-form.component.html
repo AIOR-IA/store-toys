@@ -1,0 +1,176 @@
+<div class="card mt-8">
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="px-4">
+        @if(!isEditMode){
+        <div class="form-field">
+            <label htmlFor="name">{{
+                "app.roles.permissions.resource" | translate
+            }}</label>
+
+            <p-dropdown
+                [options]="resources().data"
+                formControlName="resourceId"
+                optionLabel="name"
+                optionValue="id"
+                placeholder="{{ 'app.common.select' | translate }}"
+                [filter]="true"
+                filterBy="name"
+                [resetFilterOnHide]="true"
+                [style]="{ width: '100%' }"
+            >
+                <ng-template let-item pTemplate="selectedItem">
+                    {{ item.name }}
+                    <div class="text-xs text-gray-600">
+                        {{ item.description }}
+                    </div>
+                </ng-template>
+                <ng-template let-item pTemplate="item">
+                    <div class="break-all">
+                        <span class="item-value1">{{ item.name }}</span>
+                        <div class="text-xs text-gray-600">
+                            {{ item.description }}
+                        </div>
+                    </div>
+                </ng-template>
+            </p-dropdown>
+
+            <app-field-error
+                [errors]="f['resourceId'].errors"
+                field="name"
+            ></app-field-error>
+        </div>
+        }
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canMaster' | translate
+                "
+                >{{ "app.roles.permissions.canMaster" | translate }}</label
+            >
+            <p-inputSwitch formControlName="canMaster"></p-inputSwitch>
+        </div>
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canManage' | translate
+                "
+                >{{ "app.roles.permissions.canManage" | translate }}</label
+            >
+            <p-inputSwitch
+                formControlName="canManage"
+                [readonly]="isMasterActivated"
+                [styleClass]="isMasterActivated ? 'opacity-10' : ''"
+            ></p-inputSwitch>
+        </div>
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canRead' | translate
+                "
+                >{{ "app.roles.permissions.canRead" | translate }}</label
+            >
+            <p-inputSwitch
+                formControlName="canRead"
+                [readonly]="isAdminActivated"
+                [styleClass]="isAdminActivated ? 'opacity-10' : ''"
+            ></p-inputSwitch>
+        </div>
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canUpdate' | translate
+                "
+                >{{ "app.roles.permissions.canUpdate" | translate }}</label
+            >
+            <p-inputSwitch
+                formControlName="canUpdate"
+                [readonly]="isAdminActivated"
+                [styleClass]="isAdminActivated ? 'opacity-10' : ''"
+            ></p-inputSwitch>
+        </div>
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canCreate' | translate
+                "
+                >{{ "app.roles.permissions.canCreate" | translate }}</label
+            >
+            <p-inputSwitch
+                formControlName="canCreate"
+                [readonly]="isAdminActivated"
+                [styleClass]="isAdminActivated ? 'opacity-10' : ''"
+            ></p-inputSwitch>
+        </div>
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canDelete' | translate
+                "
+                >{{ "app.roles.permissions.canDelete" | translate }}</label
+            >
+            <p-inputSwitch
+                formControlName="canDelete"
+                [readonly]="isAdminActivated"
+                [styleClass]="isAdminActivated ? 'opacity-10' : ''"
+            ></p-inputSwitch>
+        </div>
+
+        <div
+            class="grid grid-cols-2 items-center gap-1 py-1 px-4 bg-theme-secondary mb-4"
+        >
+            <label
+                class="w-fit"
+                tooltipPosition="top"
+                [pTooltip]="
+                    'app.roles.permissions.tooltip.canApprove' | translate
+                "
+                >{{ "app.roles.permissions.canApprove" | translate }}</label
+            >
+            <p-inputSwitch
+                formControlName="canApprove"
+                [readonly]="isMasterActivated"
+                [styleClass]="isMasterActivated ? 'opacity-10' : ''"
+            ></p-inputSwitch>
+        </div>
+
+        <!-- if is view mode -->
+        <div class="w-full text-right">
+            <button
+                pButton
+                icon="fas fa-check"
+                class="p-button-success"
+                [label]="'app.common.save' | translate"
+                [disabled]="!form.valid"
+            ></button>
+        </div>
+    </form>
+</div>

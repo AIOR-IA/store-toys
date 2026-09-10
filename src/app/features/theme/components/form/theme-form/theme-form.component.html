@@ -1,0 +1,83 @@
+<div class="card mt-8">
+    <form
+        [formGroup]="form"
+        (ngSubmit)="onSubmit()"
+        class="px-2 md:px-48 grid grid-cols-1 md:grid-cols-2 gap-4"
+    >
+        <div class="form-field">
+            <label for="title">{{ "app.theme.name" | translate }}</label>
+            <input
+                id="title"
+                pInputText
+                type="text"
+                formControlName="title"
+                [placeholder]="'app.theme.name' | translate"
+            />
+            <app-field-error
+                [errors]="f['title'].errors"
+                field="title"
+            ></app-field-error>
+        </div>
+
+        <div class="form-field">
+            <label htmlFor="icon">{{
+                "app.instrumentType.icon" | translate
+            }}</label>
+
+            <app-icons-dropdown
+                [selectedIcon]="state.current.icon"
+                (onChange)="onSelectIcon($event)"
+            >
+            </app-icons-dropdown>
+            <app-field-error
+                [errors]="f['icon'].errors"
+                field="icon"
+            ></app-field-error>
+        </div>
+
+        <div class="form-field">
+            <label for="description">{{
+                "app.theme.description" | translate
+            }}</label>
+            <textarea
+                id="description"
+                pInputTextarea
+                formControlName="description"
+                [placeholder]="'app.theme.description' | translate"
+                rows="3"
+            ></textarea>
+            <app-field-error
+                [errors]="f['description'].errors"
+                field="description"
+            ></app-field-error>
+        </div>
+
+        <div class="form-field">
+            <label for="description">{{
+                "app.theme.color" | translate
+            }}</label>
+            <p-colorPicker 
+                id="color"
+                formControlName="color" />
+            <app-field-error
+                [errors]="f['color'].errors"
+                field="color"
+            ></app-field-error>
+        </div>
+
+        <!-- if is view mode -->
+        @if (!isViewMode) {
+        <div class="w-full text-right mt-6 col-span-2">
+            <button
+                pButton
+                icon="fas fa-check"
+                class="p-button-success w-full md:w-fit"
+                [loading]="saving()"
+                loadingIcon="fas fa-spinner"
+                [label]="'app.common.save' | translate"
+                [disabled]="!form.valid"
+            ></button>
+        </div>
+        }
+    </form>
+</div>

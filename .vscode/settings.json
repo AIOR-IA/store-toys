@@ -1,0 +1,11 @@
+{
+    "angular-schematics.schematicsDefaultOptions": {
+        "angular-*": {
+            "externalTemplate": true
+        }
+    },
+    "exportall.config.relExclusion": [
+        "/src/app/features/officers/law-procedures/services/index.ts",
+        "/src/app/features/law-procedures/services/index.ts"
+    ]
+}
