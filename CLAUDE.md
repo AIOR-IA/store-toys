@@ -196,15 +196,27 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 
 ## Estado actual
 
-- **El proyecto heredado es un fork de SAHTOSO** (sistema GIS), no de CLIRE. ~221 de 301
-  archivos de `features/` son de dominio ajeno, más ~18 dependencias GIS/editores/sockets.
-  **La limpieza es la Fase 0A** y empieza con un commit de los cambios pendientes.
+- **Fase 0A COMPLETADA** (rama `phase-0a-cleanup`, sin commit). El fork de SAHTOSO quedó
+  limpio: 398 archivos eliminados, 35 dependencias desinstaladas, identidad de Mi Pimpollito
+  aplicada. Build de producción: 758 kB iniciales (164 kB transferidos).
 - **No hay nada de Firebase escrito todavía** (`firebase@^10` está en `package.json` sin usar).
   El proyecto DEV existe en la consola, pero el repositorio aún no tiene `firebase.json`,
   `.firebaserc`, reglas ni `environment` conectados: eso es la Fase 0B.
 - `login.component.html` y `login.component.scss` **ya tienen el diseño aprobado: no se
-  rediseñan.** Solo se reescribe el `.ts`.
-- **Ninguna fase implementada.** Siguiente paso: **FASE 0A**.
+  rediseñan.** El `.ts` quedó sin lógica de autenticación, listo para Fase 1.
+- **Qué existe hoy en `src/app`** (116 archivos): `layout/` completo y desacoplado de la
+  sesión · `shared/` podado · `core/{config,models,services/toast,utils}` ·
+  `features/authentication` (login + forgot-password, sin backend) · `features/home`
+  (**placeholder temporal**).
+- **Pendientes heredados** que las fases siguientes deben cerrar:
+  - `src/environments/*` todavía contienen `API_URL`/`GEOSERVER_URL` de SAHTOSO y ABT.
+    Nada los importa. **Los reescribe la Fase 0B**; `environment.prod.ts` se elimina ahí.
+  - Assets sin convertir a WebP: 6,3 MB en `src/assets/images` (Angular avisa `NG0913`).
+    No hay conversor en el entorno; requiere además tocar 4 rutas del login aprobado.
+  - `core/models/attachment.interface.ts` quedó sin consumidores (lo usará la Fase 3).
+  - `src/assets/custom-color.png` y `custom-hue.png` quedaron sin referencia al retirar el
+    parche del colorpicker de PrimeNG de `styles.scss`.
+- **Siguiente paso: FASE 0B** — proyectos Firebase y ambientes (solo DEV).
 
 ## Comandos
 

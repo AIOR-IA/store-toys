@@ -3,6 +3,7 @@ import { LayoutService } from '../../services/app.layout.service';
 
 @Component({
     selector: 'app-footer',
+    standalone: true,
     templateUrl: './footer.component.html',
     styleUrl: './footer.component.scss',
 })

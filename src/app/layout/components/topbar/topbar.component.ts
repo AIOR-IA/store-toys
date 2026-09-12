@@ -4,57 +4,50 @@ import {
     inject,
     input,
     OnInit,
-    Signal,
     signal,
     ViewChild,
 } from '@angular/core';
-import { MenuItem } from 'primeng/api';
-import { LayoutService } from '../../services/app.layout.service';
-import {
-    AttachmentService,
-    SessionService,
-    ToastService,
-} from '@core/services';
+import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { NavigationEnd, Router } from '@angular/router';
-import { OverlayPanel } from 'primeng/overlaypanel';
-import { TranslateService } from '@ngx-translate/core';
-import { IUser } from 'app/features/users/models';
+import { OverlayPanel, OverlayPanelModule } from 'primeng/overlaypanel';
 import { filter } from 'rxjs';
+import { LayoutService } from '../../services/app.layout.service';
 
+/**
+ * Barra superior.
+ *
+ * FASE 0A: desacoplada de la sesión heredada de SAHTOSO. El avatar, las
+ * iniciales del usuario y el menú de usuario se reconectan en la FASE 1 contra
+ * `core/session/session.service.ts` (ver docs/architecture/mi-pimpollito-plan.md §6).
+ */
 @Component({
     selector: 'app-topbar',
+    standalone: true,
+    imports: [CommonModule, RouterLink, OverlayPanelModule],
     templateUrl: './topbar.component.html',
     styleUrl: './topbar.component.scss',
 })
 export class AppTopbarComponent implements OnInit {
-    showRoleDropdown = signal(false);
-    items!: MenuItem[];
-
-    translate: TranslateService = inject(TranslateService);
-    toastService: ToastService = inject(ToastService);
-    sessionService = inject(SessionService);
-    attachService = inject(AttachmentService);
     showProfile = input<boolean>(true);
     isDarkTheme = signal(false);
 
     @ViewChild('menubutton') menuButton!: ElementRef;
 
-    @ViewChild('topbarmenubutton') topbarMenuButton!: ElementRef;
-
-    @ViewChild('topbarmenu') menu!: ElementRef;
-
     @ViewChild('overlay') overlay!: OverlayPanel;
-
-    @ViewChild('notificationsOverlay') notificationsOverlay!: OverlayPanel;
 
     constructor(
         public layoutService: LayoutService,
-        private readonly router: Router
-    ) { }
+        private readonly router: Router,
+    ) {}
 
     ngOnInit(): void {
         this.loadTheme();
-        this.initialize();
+        this.router.events
+            .pipe(filter((event) => event instanceof NavigationEnd))
+            .subscribe(() => {
+                this.overlay?.hide();
+            });
     }
 
     navigateTo(route: string): void {
@@ -62,54 +55,7 @@ export class AppTopbarComponent implements OnInit {
     }
 
     public toggleMenu(event: any): void {
-        if (this.overlay) {
-            this.overlay.toggle(event);
-            this.showRoleDropdown.set(false);
-        }
-    }
-
-    public toggleNotificationMenu(event: any): void {
-        if (this.notificationsOverlay) {
-            this.notificationsOverlay.toggle(event);
-        }
-    }
-
-    private initialize(): void {
-        this.startListenSocket();
-
-        this.router.events
-            .pipe(filter((event) => event instanceof NavigationEnd))
-            .subscribe((event: NavigationEnd) => {
-                this.overlay?.hide();
-            });
-    }
-
-    private startListenSocket(): void { }
-
-    get photoUrl() {
-        let keyPhoto;
-        if (this.sessionService.isRepresentant()) {
-        }
-
-        if (keyPhoto) return this.attachService.getFileUrl(keyPhoto);
-
-        return null;
-    }
-
-    get initialsName() {
-        let initials = '';
-        let user: Partial<IUser> = this.sessionService.user();
-
-        if (user.firstName) {
-            initials = user.firstName[0];
-        }
-
-        if (user.paternalLastName) {
-            const ipn = user.paternalLastName[0];
-            if (initials !== ipn) initials += ipn;
-        }
-
-        return initials;
+        this.overlay?.toggle(event);
     }
 
     private loadTheme(): void {

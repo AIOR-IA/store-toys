@@ -11,15 +11,12 @@ import {
     WritableSignal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { TranslateService } from '@ngx-translate/core';
 import { GRID_VIEW, LIST_VIEW } from '@shared/constants';
 import { MenuItem } from 'primeng/api';
 import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { ButtonModule } from 'primeng/button';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SplitButtonModule } from 'primeng/splitbutton';
-import { PermissionsDirective } from '@shared/directives';
-import { SystemAccessPermissions } from '@core/types';
 
 @Component({
     selector: 'app-body-header',
@@ -31,20 +28,17 @@ import { SystemAccessPermissions } from '@core/types';
         FormsModule,
         SplitButtonModule,
         ButtonModule,
-        PermissionsDirective,
     ],
     templateUrl: './body-header.component.html',
     styleUrl: './body-header.component.scss',
 })
 export class BodyHeaderComponent implements OnChanges {
-    translate = inject(TranslateService);
     breadcrumbs = input.required<MenuItem[]>();
     options = input<MenuItem[]>([]);
     createPath = input<string>();
     createParams = input<any>();
-    createLabel = input<string>(this.translate.instant('app.common.new'));
+    createLabel = input<string>('Nuevo');
     viewButtons = input<boolean>(true);
-    resource = input.required<string>();
 
     home!: MenuItem;
     mainOption: WritableSignal<MenuItem | undefined> = signal(undefined);
@@ -52,7 +46,6 @@ export class BodyHeaderComponent implements OnChanges {
 
     view = model<string>(LIST_VIEW);
     onViewChange = output<string>();
-    createAction = SystemAccessPermissions.CAN_CREATE;
 
     stateOptions: any[] = [
         { icon: 'fas fa-list', value: LIST_VIEW },

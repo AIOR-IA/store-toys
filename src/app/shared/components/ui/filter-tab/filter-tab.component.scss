@@ -9,7 +9,7 @@
         .p-button {
             @apply md:w-32 md:h-32 flex flex-col justify-center items-center text-primary;
             &:hover {
-                @apply bg-secondary text-white;
+                @apply bg-primary text-white;
             }
             .btn-content {
                 @apply flex flex-col items-center justify-center gap-2 truncate;

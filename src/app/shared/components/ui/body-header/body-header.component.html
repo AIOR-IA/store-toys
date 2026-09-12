@@ -19,9 +19,6 @@
         ></p-splitButton>
         }@else if(createPath()) {
         <p-button
-            appPermissions
-            [action]="createAction"
-            [resource]="resource()"
             [label]="createLabel()"
             [routerLink]="[createPath()]"
             [queryParams]="createParams()"

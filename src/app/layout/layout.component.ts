@@ -1,23 +1,38 @@
-import { Component, inject, OnDestroy, OnInit, Renderer2, ViewChild } from '@angular/core';
-import { Router, NavigationEnd } from '@angular/router';
+import {
+    Component,
+    OnDestroy,
+    Renderer2,
+    ViewChild,
+} from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Router, NavigationEnd, RouterOutlet } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
+import { ToastModule } from 'primeng/toast';
 import { AppSidebarComponent } from './components/sidebar/sidebar.component';
 import { LayoutService } from './services/app.layout.service';
 import { AppTopbarComponent } from './components/topbar/topbar.component';
-import { AuthService } from '@core/services';
+import { AppFooterComponent } from './components/footer/footer.component';
 
 @Component({
     selector: 'app-layout',
+    standalone: true,
+    imports: [
+        CommonModule,
+        RouterOutlet,
+        ToastModule,
+        AppTopbarComponent,
+        AppSidebarComponent,
+        AppFooterComponent,
+    ],
     templateUrl: './layout.component.html',
     styleUrl: './layout.component.scss',
 })
-export class AppLayoutComponent implements OnDestroy, OnInit {
+export class AppLayoutComponent implements OnDestroy {
     overlayMenuOpenSubscription: Subscription;
 
     menuOutsideClickListener: any;
 
     profileMenuOutsideClickListener: any;
-    authService = inject(AuthService);
 
     @ViewChild(AppSidebarComponent) appSidebar!: AppSidebarComponent;
 
@@ -69,9 +84,6 @@ export class AppLayoutComponent implements OnDestroy, OnInit {
                 this.hideProfileMenu();
             });
     }
-    ngOnInit(): void {
-        this.authService.startTokenCheck();
-    }
 
     hideMenu() {
         this.layoutService.state.overlayMenuActive = false;
@@ -93,27 +105,11 @@ export class AppLayoutComponent implements OnDestroy, OnInit {
     }
 
     blockBodyScroll(): void {
-        if (document.body.classList) {
-            document.body.classList.add('blocked-scroll');
-        } else {
-            document.body.className += ' blocked-scroll';
-        }
+        document.body.classList.add('blocked-scroll');
     }
 
     unblockBodyScroll(): void {
-        if (document.body.classList) {
-            document.body.classList.remove('blocked-scroll');
-        } else {
-            document.body.className = document.body.className.replace(
-                new RegExp(
-                    '(^|\\b)' +
-                        'blocked-scroll'.split(' ').join('|') +
-                        '(\\b|$)',
-                    'gi',
-                ),
-                ' ',
-            );
-        }
+        document.body.classList.remove('blocked-scroll');
     }
 
     get containerClass() {
@@ -145,7 +141,5 @@ export class AppLayoutComponent implements OnDestroy, OnInit {
         if (this.menuOutsideClickListener) {
             this.menuOutsideClickListener();
         }
-
-        this.authService.stopTokenCheck();
     }
 }

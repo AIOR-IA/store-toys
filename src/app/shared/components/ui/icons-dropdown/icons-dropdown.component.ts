@@ -13,7 +13,6 @@ import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { DropdownModule } from 'primeng/dropdown';
 import { FormsModule } from '@angular/forms';
-import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 
 @Component({
@@ -23,7 +22,7 @@ import { ButtonModule } from 'primeng/button';
         CommonModule,
         DropdownModule,
         FormsModule,
-        TranslateModule,
+        
         ButtonModule,
     ],
     templateUrl: './icons-dropdown.component.html',

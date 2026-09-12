@@ -2894,6 +2894,54 @@ depende de la 6 (el reporte separa mercancía de gift cards).
 - **Condición para avanzar.** El proyecto compila, arranca y no queda código de dominio
   ajeno. Se hace commit de la limpieza **antes** de la Fase 0B.
 
+#### Registro de ejecución (2026-09-12) — hechos descubiertos
+
+La Fase 0A se ejecutó en la rama `phase-0a-cleanup`. Ocho hechos obligan a corregir lo que
+este documento decía:
+
+1. **`logo2.png` NO se puede eliminar.** El item 10 decía "eliminar `logo2/3`", pero el login
+   aprobado lo usa como avatar de la jirafa (`login.component.html:121`). Se eliminaron solo
+   `background3.png`, `background4.png` y `logo3.png`, que no tienen ninguna referencia.
+2. **`features/users` y `features/profile` se eliminaron**, en lugar de conservarse como
+   "Adaptar". Su UI entera depende de `BaseHttpService`, `SessionService` y `RESOURCES`, que
+   esta fase borra: mantenerlas habría obligado a conservar toda la pila REST. **La
+   referencia visual vive en git** (`git show 92bf47b:src/app/features/users/...`) y la Fase 2
+   las reconstruye sobre Firestore, que es lo que el plan ya preveía para el servicio.
+3. **`features/home` era contenido institucional de ABT** (misión, visión, valores,
+   "qué es ABT", pestañas de presupuesto) con redirecciones por rol, no un dashboard vacío.
+   Se eliminó y se creó `features/home/home.component.ts` como **placeholder temporal**, que
+   se reemplaza cuando exista el Inicio real.
+4. **`shared/components/ui/input-file` (+ previewers) se eliminó.** Su función es subir por
+   `AttachmentService` contra la API REST; sin ese servicio es un componente que no puede
+   funcionar. La Fase 3 construye el subidor contra Storage con `image-compressor.service.ts`,
+   que de todos modos es otro componente. Se retiró también `ng2-pdf-viewer`.
+5. **Retirar `@ngx-translate` fue más amplio de lo previsto.** No solo el menú: usaban el
+   pipe `translate` **siete** componentes de `shared` (field-error, search-bar,
+   items-not-found, cards-paginator, icons-dropdown, title-list, unauthorized), la directiva
+   `truncate-toggle` y `ToastService`. Todos quedaron con texto en español directo, y
+   `ToastService` ahora recibe el mensaje en lugar de una clave.
+6. **La paleta del layout no estaba en Tailwind.** Vive en
+   `src/assets/layout/styles/theme/tailwind-light/theme.css` como un bloque de variables CSS
+   `--clire-*`, renombrado a `--pimpollito-*` y repaletizado. `--sidebar-bg`,
+   `--sidebar-item-hover` y `--sidebar-item-active` estaban **declaradas y sin usar**: el
+   sidebar se pintaba con `--primary-default`. Ahora `_menu.scss` usa `--sidebar-bg`.
+7. **Decisión visual tomada:** topbar **rojo** (coherente con el login aprobado, que es
+   rojo-dominante) y sidebar **carbón** con el ítem activo en dorado. §4.7 decía carbón para
+   ambos; cambiar el topbar a carbón es una línea en `topbar.component.html` si se prefiere.
+8. **Presupuesto `anyComponentStyle` subido de 10 kB a 60 kB de error / 12 kB de aviso.**
+   `login.component.scss` compila a 10,7 kB y es diseño aprobado que no va a encogerse: con
+   el presupuesto anterior el build de producción fallaba.
+
+**Resultado:** 398 archivos eliminados · 57 modificados · 4 nuevos.
+Build de producción: **758 kB en total inicial (164 kB transferidos)**, dentro del
+presupuesto de 1 MB. Login y layout verificados en navegador. Sin errores de consola.
+
+**Item 10 (assets a WebP) NO se completó**, y es la única parte del alcance que queda
+pendiente: no hay conversor disponible en el entorno (`cwebp`, ImageMagick y `sharp` no
+existen) y esta sesión no podía instalar paquetes. `src/assets/images` bajó de 10,8 MB a
+**6,3 MB** por los borrados; el paso a WebP requiere además tocar cuatro rutas de imagen en
+el login aprobado. Angular ya avisa de ello en consola: `NG0913` para `logo.png` y `qr.png`.
+
 ---
 
 ### FASE 0B — Proyectos Firebase y ambientes

@@ -1,23 +1,15 @@
 <div class="layout-topbar bg-primary text-center relative w-full gap-5">
-    <!-- <div class="layout-topbar-logo   hidden md:block">
-        <img
-            src="/assets/images/clire.png"
-            class="h-full w-full object-cover"
-            alt="login-image"
-        />
-    </div> -->
-
     <div class="layout-topbar-logo hidden md:flex">
         <div class="topbar-logo-badge">
             <img
-                src="/assets/images/clire.png"
+                src="assets/images/logo.png"
                 class="topbar-logo-img"
-                alt="CLIRE"
+                alt="Mi Pimpollito"
             />
         </div>
     </div>
 
-    <!-- button to togle sidebar -->
+    <!-- botón para desplegar el sidebar -->
     <button
         #menubutton
         class="p-link layout-menu-button layout-topbar-button inline-flex md:hidden"
@@ -26,55 +18,34 @@
         <i class="fa-solid fa-bars"></i>
     </button>
 
-    <div class="flex gap-2 justify-center items-center w-[65%] md:w-full text-center">
-        <div class="text-center text-white font-bold text-xl md:text-2xl lg:text-3xl">
-            CLIRE
+    <div
+        class="flex gap-2 justify-center items-center w-[65%] md:w-full text-center"
+    >
+        <div
+            class="text-center text-white font-bold text-xl md:text-2xl lg:text-3xl"
+        >
+            Mi Pimpollito
         </div>
     </div>
 
-    <!-- //button to toggle theme -->
-    <!-- <button
-        type="button"
-        class="theme-toggle-button"
-        (click)="toggleTheme()"
-        [attr.aria-label]="isDarkTheme() ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'"
-    >
-        @if (isDarkTheme()) {
-            <i class="fa-solid fa-sun"></i>
-        } @else {
-            <i class="fa-solid fa-moon"></i>
-        }
-    </button> -->
-
-    @if(showProfile()) {
+    <!--
+        FASE 0A: el avatar queda como marcador. En la FASE 1 vuelve a mostrar
+        las iniciales o la foto del usuario desde SessionService, y el panel
+        de usuario con "Perfil" y "Cerrar sesión".
+    -->
+    @if (showProfile()) {
     <button
         class="cursor-pointer layout-topbar-profile rounded-full bg-white relative overflow-hidden"
         (click)="toggleMenu($event)"
     >
-        @if (initialsName && sessionService.isAgentOfficer()) {
-        <div class="font-bold text-primary text-3xl">
-            {{ initialsName }}
-        </div>
-        } @else if(photoUrl) {
-        <img
-            [src]="photoUrl"
-            alt=""
-            class="absolute inset-0 w-full h-full object-cover z-0"
-        />
-        }@else if(initialsName) {
-        <div class="font-bold text-primary text-3xl">
-            {{ initialsName }}
-        </div>
-        } @else {
         <div class="text-primary">
             <i class="fas fa-user text-4xl"></i>
         </div>
-        }
     </button>
     } @else {
     <div class="flex items-center layout-topbar-session gap-4 w-32 md:w-60">
         <a
-            routerLink=""
+            routerLink="/auth/login"
             class="text-white hover:text-white hover:underline text-lg md:text-xl"
         >
             Iniciar Sesión
@@ -82,16 +53,9 @@
     </div>
     }
 </div>
-<p-overlayPanel
-    #notificationsOverlay
-    [dismissable]="true"
-    styleClass="user-menu-panel notifications-panel "
->
-</p-overlayPanel>
 
 <p-overlayPanel #overlay [dismissable]="true" styleClass="user-menu-panel">
-    <app-user-menu-overlay-panel
-        [(showRoleDropdown)]="showRoleDropdown"
-        [photoUrl]="photoUrl"
-    ></app-user-menu-overlay-panel>
+    <div class="p-3 text-sm text-gray-500">
+        Menú de usuario disponible en la Fase 1.
+    </div>
 </p-overlayPanel>

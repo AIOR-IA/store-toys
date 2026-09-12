@@ -1,16 +1,13 @@
 import { Component, inject, input, output } from '@angular/core';
 import { ButtonModule } from 'primeng/button';
 import { Location } from '@angular/common';
-import { TranslateModule } from '@ngx-translate/core';
 import { SplitButtonModule } from 'primeng/splitbutton';
 import { Router } from '@angular/router';
-import { PermissionsDirective } from '@shared/directives';
-import { SystemAccessPermissions } from '@core/types';
 
 @Component({
     selector: 'app-title-bar',
     standalone: true,
-    imports: [ButtonModule, TranslateModule, SplitButtonModule, PermissionsDirective],
+    imports: [ButtonModule, SplitButtonModule],
     templateUrl: './title-bar.component.html',
     styleUrl: './title-bar.component.scss',
 })
@@ -22,14 +19,8 @@ export class TitleBarComponent {
     newLabel = input<string>();
     editPath = input<string>();
     editLabel = input<string>();
-    resource = input<string>('');
     description = input<string>('');
     backPath = input<string>();
-
-    actions = {
-        create: SystemAccessPermissions.CAN_CREATE,
-        update: SystemAccessPermissions.CAN_UPDATE,
-    };
 
     onClickNew = output<Event>();
     onClickEdit = output<Event>();
@@ -44,7 +35,6 @@ export class TitleBarComponent {
     }
 
     goToNewPath(path: string | undefined, event: Event) {
-
         if (path) {
             this.router.navigate([path]).then();
             return;

@@ -4,11 +4,8 @@ import {
     FilterTabOption,
 } from '../filter-tab/filter-tab.component';
 import { ButtonModule } from 'primeng/button';
-import { PermissionsDirective } from '@shared/directives';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { SystemAccessPermissions } from '@core/types';
-import { TranslateModule } from '@ngx-translate/core';
 import { Router } from '@angular/router';
 import { TooltipModule } from 'primeng/tooltip';
 import { Location } from '@angular/common';
@@ -21,8 +18,6 @@ import { Location } from '@angular/common';
         FormsModule,
         FilterTabComponent,
         ButtonModule,
-        PermissionsDirective,
-        TranslateModule,
         TooltipModule,
     ],
     templateUrl: './tabs-actions.component.html',
@@ -31,7 +26,6 @@ import { Location } from '@angular/common';
 export class TabsActionsComponent implements OnInit {
     location = inject(Location);
     options = input.required<FilterTabOption<any>[]>();
-    resource = input.required<string>();
     newLabel = input<string>();
     newPath = input<string>();
     newParams = input<any>();
@@ -42,8 +36,6 @@ export class TabsActionsComponent implements OnInit {
     selectedOption = model<any>();
     hideReloadButton = input(false);
 
-    createAction = SystemAccessPermissions.CAN_CREATE;
-    readAction = SystemAccessPermissions.CAN_READ;
     backPath = input<string>();
     backAction = input<boolean>(false);
     title = input<string>();

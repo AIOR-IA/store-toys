@@ -34,11 +34,6 @@ export function mustBeTrueValidator(): ValidatorFn {
     };
 }
 
-export function formatRegistrationId(id: number): string {
-    const paddedNumber = id.toString().padStart(5, '0');
-    return `RA-A-${paddedNumber}`;
-}
-
 export function getFileExtension(filename: string): string | null {
     const trimmed = filename.trim().toLowerCase();
     const lastDotIndex = trimmed.lastIndexOf('.');
@@ -48,30 +43,6 @@ export function getFileExtension(filename: string): string | null {
     }
 
     return trimmed.slice(lastDotIndex);
-}
-
-export function getFitBoundsFromBbox(bboxStr: string) {
-    if (!bboxStr) {
-        return null;
-    }
-    const coords = bboxStr.split(',').map(Number);
-    if (coords.length !== 4) {
-        return null;
-    }
-    const [minLon, minLat, maxLon, maxLat] = coords;
-    const polygon = {
-        type: 'Polygon',
-        coordinates: [
-            [
-                [minLon, minLat],
-                [maxLon, minLat],
-                [maxLon, maxLat],
-                [minLon, maxLat],
-                [minLon, minLat],
-            ],
-        ],
-    };
-    return polygon;
 }
 
 export function isDateObject(value: any): boolean {
@@ -97,9 +68,4 @@ export function showHideSpinner(show: boolean) {
 
 export function mbToBytes(mb: number): number {
     return mb * 1000000;
-}
-
-export function iconEntityMarker(entityType: string): string {
-    const imagePath = `assets/images/offices/${entityType}.png`;
-    return imagePath;
 }

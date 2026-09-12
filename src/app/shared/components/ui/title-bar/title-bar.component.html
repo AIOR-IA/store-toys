@@ -16,28 +16,20 @@
     <div class="text-right flex justify-end items-start">
         @if(newPath() || newLabel()){
         <button
-            appPermissions
-            [resource]="resource()"
-            [action]="actions.create"
-            [publicView]="!resource().length"
             pButton
             type="button"
             icon="fas fa-plus"
             class="p-button-info p-button-text"
-            [label]="newLabel() || 'app.common.new' | translate"
+            [label]="newLabel() || 'Nuevo'"
             (click)="goToNewPath(newPath(), $event)"
         ></button>
         } @if(editPath() || editLabel()){
         <button
-            appPermissions
-            [resource]="resource()"
-            [action]="actions.update"
-            [publicView]="!resource().length"
             pButton
             type="button"
             icon="fas fa-pencil-alt"
             class="p-button-info p-button-text"
-            [label]="editLabel() || 'app.common.edit' | translate"
+            [label]="editLabel() || 'Editar'"
             (click)="goToEditPath(editPath(), $event)"
         ></button>
         }

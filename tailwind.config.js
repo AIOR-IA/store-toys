@@ -6,60 +6,64 @@ module.exports = {
         extend: {
             colors: {
                 /**
-                 * Compatibilidad con clases existentes:
-                 * bg-primary, text-primary, bg-primary-soft, bg-brand-soft, etc.
+                 * Paleta de Mi Pimpollito.
+                 *
+                 * Los valores son los mismos que las variables CSS del login ya
+                 * aprobado (--pimpollito-*), para que el diseño y los tokens de
+                 * Tailwind no puedan divergir.
+                 *
+                 * Se conserva la FORMA de los tokens heredados
+                 * (DEFAULT/hover/light/soft/dark/darker) para que las clases que
+                 * ya usan los componentes reutilizados sigan resolviendo.
                  */
                 primary: {
-                    DEFAULT: "#00565c",
-                    hover: "#08777c",
-                    light: "#2b858a",
-                    soft: "#eef7f4",
-                    dark: "#004349",
-                    darker: "#002f33",
+                    DEFAULT: "#bd1119", // rojo de marca
+                    hover: "#d01821",
+                    light: "#e04a51",
+                    soft: "#fdecec",
+                    dark: "#8d0a10",
+                    darker: "#6b070c",
+                },
+
+                carbon: {
+                    DEFAULT: "#2b2520", // carbón: texto, topbar, sidebar
+                    light: "#4a423b",
+                    soft: "#f3f1ee",
+                    dark: "#171310",
+                },
+
+                gold: {
+                    DEFAULT: "#d8a23d",
+                    light: "#f1cd76",
+                    soft: "#fff5d8",
+                    dark: "#a97c2f",
+                },
+
+                cream: {
+                    DEFAULT: "#fffaf1", // fondo de aplicación
+                    dark: "#f5efe4",
+                },
+
+                giraffe: {
+                    DEFAULT: "#e0902b", // amarillo/naranja de la jirafa
+                    light: "#f2b45c",
+                    soft: "#fff3e0",
+                    dark: "#b6721f",
+                },
+
+                /** Alias conservados: los usan componentes reutilizados. */
+                brand: {
+                    DEFAULT: "#bd1119",
+                    light: "rgba(189, 17, 25, 0.7)",
+                    dark: "#8d0a10",
+                    soft: "#fff5d8",
+                    medium: "#d8a23d",
                 },
 
                 "primary-clear": {
-                    DEFAULT: "#67ad3d",
-                    hover: "#7cc94f",
-                    soft: "#dff0d7",
-                },
-
-                brand: {
-                    DEFAULT: "#67ad3d",
-                    light: "rgba(103, 173, 61, 0.7)",
-                    dark: "#4f9430",
-                    soft: "#eef7f4",
-                    medium: "#2b858a",
-                },
-
-                secondary: {
-                    DEFAULT: "#67ad3d",
-                    soft: "#cde7c2",
-                    dark: "#4f9430",
-                },
-
-                "brand-blue": {
-                    DEFAULT: "#00565c",
-                    light: "rgba(0, 86, 92, 0.7)",
-                    dark: "#004349",
-                    soft: "#eef7f4",
-                },
-
-                "forest-light": "#67ad3d",
-                "forest-dark": "#00565c",
-
-                /**
-                 * Nueva paleta CLIRE explícita:
-                 * bg-clire-primary, text-clire-green, bg-clire-soft, etc.
-                 */
-                clire: {
-                    primary: "#00565c",
-                    "primary-dark": "#004349",
-                    "primary-light": "#08777c",
-                    green: "#67ad3d",
-                    "green-dark": "#4f9430",
-                    soft: "#eef7f4",
-                    text: "#103f49",
+                    DEFAULT: "#d8a23d",
+                    hover: "#f1cd76",
+                    soft: "#fff5d8",
                 },
 
                 danger: {

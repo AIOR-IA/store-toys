@@ -8,7 +8,6 @@ import {
     SimpleChanges,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 
@@ -20,7 +19,7 @@ import { InputTextModule } from 'primeng/inputtext';
         FormsModule,
         ButtonModule,
         InputTextModule,
-        TranslateModule,
+        
     ],
     templateUrl: './search-bar.component.html',
     styleUrl: './search-bar.component.scss',

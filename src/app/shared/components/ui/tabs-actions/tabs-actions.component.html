@@ -32,9 +32,6 @@
         >
             @if (newPath() && !hideReinscription()) {
             <p-button
-                appPermissions
-                [action]="createAction"
-                [resource]="resource()"
                 [pTooltip]="newLabel()"
                 tooltipPosition="top"
                 (onClick)="onCreate($event)"
@@ -44,17 +41,14 @@
             </p-button>
             } @if (!hideReloadButton()) {
             <p-button
-                appPermissions
-                [action]="readAction"
-                [resource]="resource()"
                 styleClass="p-button-info"
-                [pTooltip]="'app.common.reload' | translate"
+                pTooltip="Recargar"
                 tooltipPosition="top"
                 (onClick)="emitReload($event)"
             >
                 <i class="fas fa-rotate"></i>
                 <label class="ml-2 hidden md:block">{{
-                    "app.common.reload" | translate
+                    "Recargar"
                 }}</label>
             </p-button>
             }

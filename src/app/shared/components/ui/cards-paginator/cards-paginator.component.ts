@@ -1,11 +1,10 @@
 import { Component, input, output } from '@angular/core';
-import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 
 @Component({
     selector: 'app-cards-paginator',
     standalone: true,
-    imports: [TranslateModule, ButtonModule],
+    imports: [ButtonModule],
     templateUrl: './cards-paginator.component.html',
     styleUrl: './cards-paginator.component.scss',
 })
