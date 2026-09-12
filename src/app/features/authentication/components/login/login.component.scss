@@ -1,35 +1,42 @@
 :host {
     display: block;
+
     width: 100%;
     min-height: 100vh;
 }
 
+
 /* =========================================================
-   VARIABLES DEL LOGIN
+   CONFIGURACIÓN GENERAL
    ========================================================= */
 
 .login-page {
-    --pimpollito-pink: #ee5974;
-    --pimpollito-pink-dark: #d94562;
-    --pimpollito-pink-soft: #fff1f3;
+    --pimpollito-red: #bd1119;
+    --pimpollito-red-bright: #d01821;
+    --pimpollito-red-dark: #8d0a10;
 
-    --pimpollito-brown: #512424;
-    --pimpollito-brown-soft: #875140;
+    --pimpollito-black: #171310;
+    --pimpollito-charcoal: #2b2520;
 
-    --pimpollito-yellow: #ffc928;
+    --pimpollito-gold: #d8a23d;
+    --pimpollito-gold-light: #f1cd76;
+    --pimpollito-gold-soft: #fff5d8;
 
-    --text-primary: #422027;
-    --text-secondary: #626d82;
+    --pimpollito-cream: #fffaf1;
 
-    --border-color: #e0e3e9;
+    --text-primary: #231c18;
+    --text-secondary: #6d665f;
+
+    --border-color: #ded8cf;
 
     display: grid;
+
     grid-template-columns: 46% 54%;
 
     width: 100%;
     min-height: 100vh;
 
-    background: #ffffff;
+    background: var(--pimpollito-cream);
 
     overflow: hidden;
 }
@@ -43,23 +50,35 @@
     position: relative;
     z-index: 2;
 
+    width: 100%;
     min-width: 0;
     min-height: 100vh;
 
     display: flex;
     justify-content: center;
 
-    background: #ffffff;
+    background:
+        linear-gradient(
+            145deg,
+            #ffffff 0%,
+            #fffdf8 60%,
+            #fff8eb 100%
+        );
 
-    /*
-     * Curva que genera la transición blanca del diseño
-     * hacia la imagen.
-     */
-    border-radius: 0 115px 115px 0;
+    border-radius:
+        0
+        clamp(70px, 7vw, 135px)
+        clamp(70px, 7vw, 135px)
+        0;
 
-    box-shadow: 20px 0 45px rgba(94, 50, 40, 0.04);
+    box-shadow:
+        20px 0 48px rgba(35, 21, 10, 0.08);
 }
 
+
+/* =========================================================
+   CONTENEDOR IZQUIERDO
+   ========================================================= */
 
 .login-info-content {
     width: 100%;
@@ -71,9 +90,9 @@
     flex-direction: column;
 
     padding:
-        clamp(36px, 5vh, 70px)
-        clamp(45px, 5vw, 90px)
-        30px;
+        clamp(30px, 4.5vh, 62px)
+        clamp(42px, 5vw, 88px)
+        28px;
 }
 
 
@@ -82,58 +101,71 @@
    ========================================================= */
 
 .brand-logo {
-    width: clamp(290px, 31vw, 480px);
+    display: block;
+
+    width: clamp(310px, 31vw, 500px);
     max-width: 100%;
     height: auto;
 
-    display: block;
-
     object-fit: contain;
 
-    margin-bottom: clamp(48px, 7vh, 90px);
+    margin-bottom:
+        clamp(42px, 6vh, 78px);
+
+    filter:
+        drop-shadow(
+            0 6px 10px rgba(80, 47, 15, 0.09)
+        );
 }
 
 
 /* =========================================================
-   TITULAR
+   MARKETING
    ========================================================= */
 
 .marketing-content {
+    width: 100%;
 
     h1 {
         max-width: 650px;
 
         margin: 0;
 
-        color: var(--pimpollito-brown);
+        color: var(--pimpollito-black);
 
-        font-size: clamp(38px, 3.5vw, 64px);
-        line-height: 1.06;
+        font-size:
+            clamp(39px, 3.4vw, 63px);
+
+        line-height: 1.05;
 
         font-weight: 800;
 
-        letter-spacing: -1.4px;
+        letter-spacing: -1.6px;
 
         span {
             display: block;
 
-            color: var(--pimpollito-pink);
+            margin-top: 4px;
+
+            color: var(--pimpollito-red);
         }
     }
 }
 
 
 .marketing-description {
-    max-width: 640px;
+    max-width: 660px;
 
     margin:
-        clamp(25px, 3.5vh, 38px)
+        clamp(24px, 3vh, 36px)
         0
         0;
 
     color: var(--text-secondary);
 
-    font-size: clamp(15px, 1.25vw, 19px);
+    font-size:
+        clamp(15px, 1.15vw, 18px);
+
     line-height: 1.65;
 
     font-weight: 400;
@@ -141,18 +173,25 @@
 
 
 /* =========================================================
-   CONTACTOS / QR
+   BLOQUE INFERIOR
    ========================================================= */
 
 .bottom-info {
     display: flex;
     align-items: center;
-    gap: 25px;
+
+    gap: 24px;
 
     margin-top: auto;
-    padding-top: 45px;
+
+    padding-top:
+        clamp(32px, 5vh, 55px);
 }
 
+
+/* =========================================================
+   CONTACT CARD
+   ========================================================= */
 
 .contact-card {
     flex: 1;
@@ -161,22 +200,35 @@
 
     display: flex;
     align-items: center;
+
     gap: 18px;
 
     box-sizing: border-box;
 
     padding: 17px 20px;
 
-    border: 1px solid rgba(238, 89, 116, 0.13);
-    border-radius: 14px;
+    border:
+        1px solid
+        rgba(216, 162, 61, 0.38);
+
+    border-radius: 15px;
 
     background:
         linear-gradient(
             135deg,
-            #fff4f5 0%,
-            #ffedef 100%
+            #fffdf9 0%,
+            #fff5de 100%
         );
+
+    box-shadow:
+        0 8px 22px
+        rgba(73, 47, 15, 0.07);
 }
+
+
+/* =========================================================
+   QR
+   ========================================================= */
 
 .qr-container {
     flex-shrink: 0;
@@ -192,13 +244,19 @@
 
     padding: 6px;
 
+    border:
+        1px solid
+        rgba(216, 162, 61, 0.22);
+
     border-radius: 10px;
 
     background: #ffffff;
 
     box-shadow:
-        0 3px 12px rgba(68, 35, 40, 0.08);
+        0 4px 12px
+        rgba(48, 31, 14, 0.09);
 }
+
 
 .contact-qr {
     display: block;
@@ -208,8 +266,13 @@
 
     object-fit: contain;
 
-    border-radius: 5px;
+    border-radius: 4px;
 }
+
+
+/* =========================================================
+   CONTACT INFO
+   ========================================================= */
 
 .contact-info {
     min-width: 0;
@@ -220,7 +283,7 @@
     strong {
         margin-bottom: 5px;
 
-        color: var(--pimpollito-brown);
+        color: var(--pimpollito-black);
 
         font-size: 16px;
         font-weight: 700;
@@ -236,53 +299,93 @@
     a {
         width: fit-content;
 
-        margin-top: 8px;
-        padding: 5px 14px;
+        margin-top: 9px;
+
+        padding:
+            5px
+            14px;
 
         border-radius: 20px;
 
-        background: var(--pimpollito-pink);
+        background:
+            linear-gradient(
+                135deg,
+                var(--pimpollito-red-bright),
+                var(--pimpollito-red)
+            );
 
         color: #ffffff;
 
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 700;
 
         text-decoration: none;
 
+        box-shadow:
+            0 5px 12px
+            rgba(170, 14, 21, 0.18);
+
         transition:
-            background-color 0.2s ease,
-            transform 0.2s ease;
+            transform 0.2s ease,
+            box-shadow 0.2s ease,
+            background 0.2s ease;
 
         &:hover {
-            background: var(--pimpollito-pink-dark);
+            transform:
+                translateY(-1px);
 
-            transform: translateY(-1px);
+            background:
+                linear-gradient(
+                    135deg,
+                    var(--pimpollito-red),
+                    var(--pimpollito-red-dark)
+                );
+
+            box-shadow:
+                0 7px 16px
+                rgba(143, 10, 16, 0.25);
         }
     }
 }
 
+
+/* =========================================================
+   FRASE DECORATIVA
+   ========================================================= */
 
 .happy-message {
     flex-shrink: 0;
 
     display: flex;
     align-items: center;
+
     gap: 10px;
 
-    transform: rotate(-4deg);
+    transform:
+        rotate(-3deg);
 
-    color: var(--pimpollito-brown-soft);
+    color:
+        var(--pimpollito-charcoal);
 
-    .fa-heart {
-        color: var(--pimpollito-pink);
+    i {
+        color:
+            var(--pimpollito-gold);
 
-        font-size: 38px;
+        font-size: 35px;
+
+        filter:
+            drop-shadow(
+                0 2px 3px
+                rgba(102, 69, 11, 0.18)
+            );
     }
 
     span {
+        color:
+            var(--pimpollito-charcoal);
+
         font-size: 18px;
-        font-weight: 600;
+        font-weight: 650;
 
         line-height: 1.2;
 
@@ -292,36 +395,38 @@
 
 
 /* =========================================================
-   CATEGORÍAS INFERIORES
+   CATEGORÍAS / MENSAJE INFERIOR
    ========================================================= */
 
 .category-footer {
     display: flex;
     align-items: center;
+
     gap: 22px;
 
-    margin-top: 28px;
+    margin-top: 27px;
 }
 
 
 .category-item {
     display: flex;
     align-items: center;
+
     gap: 9px;
 
-    color: var(--pimpollito-brown-soft);
-
     i {
-        color: #a45d3d;
+        color:
+            var(--pimpollito-gold);
 
-        font-size: 21px;
+        font-size: 20px;
     }
 
     span {
-        color: #505971;
+        color:
+            var(--pimpollito-charcoal);
 
         font-size: 11px;
-        font-weight: 600;
+        font-weight: 700;
 
         letter-spacing: 2px;
     }
@@ -332,12 +437,13 @@
     width: 1px;
     height: 25px;
 
-    background: #d2d5dc;
+    background:
+        rgba(216, 162, 61, 0.47);
 }
 
 
 /* =========================================================
-   PANEL DE IMAGEN
+   PANEL DERECHO
    ========================================================= */
 
 .login-visual {
@@ -354,36 +460,25 @@
     box-sizing: border-box;
 
     padding:
-        clamp(35px, 5vh, 70px)
-        clamp(32px, 4vw, 70px);
+        clamp(40px, 5vh, 72px)
+        clamp(35px, 4vw, 72px);
 
-    /*
-     * IMPORTANTE:
-     * background.png es la imagen horizontal que preparamos
-     * con contenido adicional en ambos laterales.
-     *
-     * cover garantiza que NUNCA existan huecos blancos,
-     * incluso en monitores anchos.
-     */
     background-image:
         linear-gradient(
-            rgba(255, 232, 221, 0.06),
-            rgba(255, 232, 221, 0.06)
+            rgba(22, 10, 5, 0.025),
+            rgba(22, 10, 5, 0.025)
         ),
         url('/assets/images/background.png');
 
     background-size: cover;
-
-    /*
-     * Mantiene el centro útil de la ilustración.
-     */
     background-position: center center;
-
     background-repeat: no-repeat;
 }
 
 
-/* pequeño velo para integrar el card con el fondo */
+/* =========================================================
+   SOMBRA / VELO DEL FONDO
+   ========================================================= */
 
 .login-visual::before {
     content: '';
@@ -396,8 +491,8 @@
     background:
         radial-gradient(
             circle at center,
-            rgba(255, 255, 255, 0.04),
-            transparent 55%
+            rgba(255, 248, 225, 0.03),
+            transparent 58%
         );
 }
 
@@ -410,26 +505,66 @@
     position: relative;
     z-index: 2;
 
-    width: min(100%, 470px);
+    width:
+        min(100%, 470px);
 
     box-sizing: border-box;
 
     padding:
-        60px
+        62px
         clamp(32px, 3vw, 48px)
         28px;
 
-    border: 1px solid rgba(255, 255, 255, 0.92);
+    border:
+        1px solid
+        rgba(216, 162, 61, 0.43);
 
     border-radius: 24px;
 
-    background: rgba(255, 255, 255, 0.96);
+    background:
+        rgba(255, 253, 248, 0.97);
 
     box-shadow:
-        0 28px 70px rgba(92, 52, 42, 0.18),
-        0 5px 20px rgba(92, 52, 42, 0.08);
+        0 30px 70px
+        rgba(31, 19, 8, 0.25),
+        0 6px 20px
+        rgba(31, 19, 8, 0.12);
 
-    backdrop-filter: blur(8px);
+    backdrop-filter:
+        blur(9px);
+}
+
+
+/* =========================================================
+   DETALLE DORADO SUPERIOR DEL CARD
+   ========================================================= */
+
+.login-card::before {
+    content: '';
+
+    position: absolute;
+
+    top: 0;
+    left: 50%;
+
+    width: 54%;
+    height: 3px;
+
+    transform:
+        translateX(-50%);
+
+    border-radius:
+        0 0 10px 10px;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            var(--pimpollito-gold),
+            var(--pimpollito-gold-light),
+            var(--pimpollito-gold),
+            transparent
+        );
 }
 
 
@@ -446,7 +581,8 @@
     width: 116px;
     height: 116px;
 
-    transform: translateX(-50%);
+    transform:
+        translateX(-50%);
 
     display: flex;
     align-items: center;
@@ -454,13 +590,22 @@
 
     overflow: hidden;
 
-    border: 6px solid #fff7f7;
+    box-sizing: border-box;
+
+    border:
+        4px solid
+        var(--pimpollito-gold);
+
     border-radius: 50%;
 
-    background: #fff0f1;
+    background:
+        var(--pimpollito-gold-soft);
 
     box-shadow:
-        0 8px 24px rgba(108, 58, 44, 0.12);
+        0 9px 24px
+        rgba(40, 26, 10, 0.19),
+        0 0 0 5px
+        rgba(255, 255, 255, 0.94);
 
     img {
         width: 100%;
@@ -472,7 +617,7 @@
 
 
 /* =========================================================
-   HEADER CARD
+   HEADER LOGIN
    ========================================================= */
 
 .login-card-header {
@@ -481,11 +626,15 @@
     text-align: center;
 
     h2 {
-        margin: 0 0 7px;
+        margin:
+            0 0 7px;
 
-        color: var(--pimpollito-brown);
+        color:
+            var(--pimpollito-black);
 
-        font-size: clamp(22px, 1.7vw, 28px);
+        font-size:
+            clamp(22px, 1.7vw, 28px);
+
         font-weight: 750;
 
         line-height: 1.2;
@@ -494,7 +643,8 @@
     p {
         margin: 0;
 
-        color: var(--text-secondary);
+        color:
+            var(--text-secondary);
 
         font-size: 14px;
     }
@@ -502,7 +652,7 @@
 
 
 /* =========================================================
-   FORMULARIO
+   FORM GROUP
    ========================================================= */
 
 .form-group {
@@ -515,12 +665,17 @@
 
     margin-bottom: 7px;
 
-    color: var(--pimpollito-brown);
+    color:
+        var(--pimpollito-charcoal);
 
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 650;
 }
 
+
+/* =========================================================
+   INPUT WRAPPER
+   ========================================================= */
 
 .form-item {
     width: 100%;
@@ -531,26 +686,43 @@
 
     box-sizing: border-box;
 
-    padding: 0 15px;
+    padding:
+        0 15px;
 
-    border: 1px solid var(--border-color);
+    border:
+        1px solid
+        var(--border-color);
+
     border-radius: 10px;
 
     background: #ffffff;
 
     transition:
         border-color 0.2s ease,
-        box-shadow 0.2s ease;
+        box-shadow 0.2s ease,
+        background 0.2s ease;
+}
+
+
+.form-item:hover {
+    border-color:
+        rgba(216, 162, 61, 0.62);
 }
 
 
 .form-item:focus-within {
-    border-color: var(--pimpollito-pink);
+    border-color:
+        var(--pimpollito-gold);
 
     box-shadow:
-        0 0 0 3px rgba(238, 89, 116, 0.1);
+        0 0 0 3px
+        rgba(216, 162, 61, 0.14);
 }
 
+
+/* =========================================================
+   ICONOS INPUTS
+   ========================================================= */
 
 .field-icon {
     flex-shrink: 0;
@@ -559,7 +731,7 @@
 
     margin-right: 10px;
 
-    color: #747d91;
+    color: #776d62;
 
     font-size: 16px;
 
@@ -567,28 +739,40 @@
 }
 
 
+/* =========================================================
+   INPUT
+   ========================================================= */
+
 .form-input {
     flex: 1;
 
     width: 100%;
 
-    border: 0 !important;
-    outline: none !important;
+    padding:
+        12px 0 !important;
 
-    box-shadow: none !important;
+    border:
+        0 !important;
 
-    background: transparent !important;
+    outline:
+        none !important;
 
-    color: #343a4a;
+    box-shadow:
+        none !important;
+
+    background:
+        transparent !important;
+
+    color:
+        #342e29;
 
     font-size: 14px;
-
-    padding: 12px 0 !important;
 }
 
 
 .form-input::placeholder {
-    color: #9ca3b2;
+    color:
+        #a09a93;
 }
 
 
@@ -603,33 +787,51 @@
 }
 
 
-:host ::ng-deep .password-control .p-password {
+:host ::ng-deep
+.password-control
+.p-password {
     width: 100%;
 }
 
 
-:host ::ng-deep .password-control .p-inputtext {
+:host ::ng-deep
+.password-control
+.p-inputtext {
     width: 100%;
 
-    padding: 12px 38px 12px 0 !important;
+    padding:
+        12px 38px
+        12px 0 !important;
 
-    border: 0 !important;
+    border:
+        0 !important;
 
-    outline: 0 !important;
+    outline:
+        0 !important;
 
-    box-shadow: none !important;
+    box-shadow:
+        none !important;
 
-    background: transparent !important;
+    background:
+        transparent !important;
 }
 
 
-:host ::ng-deep .password-control .p-password-toggle {
-    color: #788193;
+:host ::ng-deep
+.password-control
+.p-password-toggle {
+    color: #7a7168;
+
+    transition:
+        color 0.2s ease;
 }
 
 
-:host ::ng-deep .password-control .p-password-toggle:hover {
-    color: var(--pimpollito-pink);
+:host ::ng-deep
+.password-control
+.p-password-toggle:hover {
+    color:
+        var(--pimpollito-red);
 }
 
 
@@ -642,7 +844,8 @@
 }
 
 
-:host ::ng-deep .p-messages {
+:host ::ng-deep
+.p-messages {
     margin: 0;
 }
 
@@ -652,7 +855,8 @@
 
     margin-top: 4px;
 
-    color: #d94154;
+    color:
+        var(--pimpollito-red);
 
     p {
         margin: 0;
@@ -664,27 +868,30 @@
 
 
 /* =========================================================
-   OLVIDÉ CONTRASEÑA
+   OLVIDÓ CONTRASEÑA
    ========================================================= */
 
 .forgot-link {
     margin:
-        3px
-        0
-        22px;
+        3px 0 22px;
 
     text-align: right;
 
     a {
-        color: var(--pimpollito-pink);
+        color:
+            var(--pimpollito-red);
 
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 650;
 
         text-decoration: none;
 
+        transition:
+            color 0.2s ease;
+
         &:hover {
-            color: var(--pimpollito-pink-dark);
+            color:
+                var(--pimpollito-red-dark);
 
             text-decoration: underline;
         }
@@ -703,16 +910,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
+
     gap: 12px;
 
-    border: 0;
+    border:
+        1px solid
+        rgba(100, 6, 11, 0.22);
+
     border-radius: 9px;
 
     background:
         linear-gradient(
             135deg,
-            #ef607c 0%,
-            #ec5570 100%
+            #d01821 0%,
+            #a60d14 100%
         );
 
     color: #ffffff;
@@ -723,37 +934,48 @@
     cursor: pointer;
 
     box-shadow:
-        0 10px 22px rgba(238, 89, 116, 0.2);
+        0 11px 24px
+        rgba(152, 9, 15, 0.23);
 
     transition:
         transform 0.18s ease,
         background 0.18s ease,
         box-shadow 0.18s ease;
 
+    span {
+        line-height: 1;
+    }
+
     i {
+        color:
+            var(--pimpollito-gold-light);
+
         font-size: 14px;
     }
 
     &:hover:not(:disabled) {
-        transform: translateY(-1px);
+        transform:
+            translateY(-1px);
 
         background:
             linear-gradient(
                 135deg,
-                #e94f6d 0%,
-                #dd415e 100%
+                #bb1018 0%,
+                #83080e 100%
             );
 
         box-shadow:
-            0 13px 27px rgba(238, 89, 116, 0.25);
+            0 14px 29px
+            rgba(132, 7, 13, 0.3);
     }
 
     &:active:not(:disabled) {
-        transform: translateY(0);
+        transform:
+            translateY(0);
     }
 
     &:disabled {
-        opacity: 0.55;
+        opacity: 0.48;
 
         cursor: not-allowed;
 
@@ -770,61 +992,231 @@
     display: flex;
     align-items: center;
     justify-content: center;
+
     gap: 7px;
 
     margin-top: 25px;
 
-    color: #747d8d;
+    color: #736a61;
 
     font-size: 11px;
 
     i {
-        color: #626c80;
+        color:
+            var(--pimpollito-gold);
     }
 }
 
 
 /* =========================================================
-   LAPTOPS MÁS PEQUEÑAS
+   DESKTOP MEDIANO / LAPTOP
    ========================================================= */
 
-@media (max-width: 1300px) {
+@media (max-width: 1500px) {
 
     .login-page {
-        grid-template-columns: 44% 56%;
+        grid-template-columns:
+            45% 55%;
     }
 
     .login-info-content {
         padding:
-            35px
-            45px
-            25px;
+            34px
+            50px
+            24px;
     }
 
     .brand-logo {
-        width: 330px;
+        width: 390px;
 
         margin-bottom: 45px;
     }
 
     .marketing-content h1 {
-        font-size: 43px;
+        font-size: 48px;
     }
 
     .marketing-description {
         font-size: 15px;
     }
 
-    .happy-message {
-        display: none;
+    .login-card {
+        width:
+            min(100%, 440px);
+    }
+
+}
+
+
+/* =========================================================
+   LAPTOP 1366 / ALTURAS MÁS PEQUEÑAS
+   ========================================================= */
+
+@media (max-width: 1400px) {
+
+    .login-info-content {
+        padding:
+            28px
+            44px
+            20px;
+    }
+
+    .brand-logo {
+        width: 340px;
+
+        margin-bottom: 34px;
+    }
+
+    .marketing-content h1 {
+        font-size: 42px;
+    }
+
+    .marketing-description {
+        margin-top: 20px;
+
+        font-size: 14px;
+    }
+
+    .bottom-info {
+        gap: 18px;
+
+        padding-top: 28px;
     }
 
     .contact-card {
-        max-width: 440px;
+        padding:
+            14px 15px;
+    }
+
+    .qr-container {
+        width: 82px;
+        height: 82px;
+    }
+
+    .happy-message {
+        span {
+            font-size: 15px;
+        }
+
+        i {
+            font-size: 29px;
+        }
+    }
+
+    .category-footer {
+        margin-top: 18px;
     }
 
     .login-card {
-        width: min(100%, 430px);
+        width:
+            min(100%, 420px);
+
+        padding:
+            57px
+            34px
+            24px;
+    }
+
+}
+
+
+/* =========================================================
+   ALTURA 800 O MENOR
+   ========================================================= */
+
+@media (max-height: 800px)
+and (min-width: 961px) {
+
+    .login-info-content {
+        padding-top: 20px;
+        padding-bottom: 15px;
+    }
+
+    .brand-logo {
+        width: 300px;
+
+        margin-bottom: 22px;
+    }
+
+    .marketing-content h1 {
+        font-size: 38px;
+    }
+
+    .marketing-description {
+        margin-top: 15px;
+
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    .bottom-info {
+        padding-top: 18px;
+    }
+
+    .contact-card {
+        padding:
+            11px
+            13px;
+    }
+
+    .qr-container {
+        width: 72px;
+        height: 72px;
+    }
+
+    .contact-info {
+        strong {
+            font-size: 14px;
+        }
+
+        span {
+            font-size: 11px;
+        }
+
+        a {
+            margin-top: 5px;
+
+            padding:
+                4px
+                11px;
+
+            font-size: 10px;
+        }
+    }
+
+    .category-footer {
+        margin-top: 12px;
+    }
+
+    .category-item {
+        i {
+            font-size: 17px;
+        }
+
+        span {
+            font-size: 9px;
+        }
+    }
+
+    .login-card {
+        padding-top: 52px;
+        padding-bottom: 20px;
+    }
+
+    .login-card-header {
+        margin-bottom: 20px;
+    }
+
+    .form-group {
+        margin-bottom: 12px;
+    }
+
+    .forgot-link {
+        margin-bottom: 16px;
+    }
+
+    .login-card-footer {
+        margin-top: 18px;
     }
 }
 
@@ -850,22 +1242,32 @@
         min-height: 100vh;
 
         padding:
-            100px
+            105px
             25px
             45px;
 
         background-image:
             linear-gradient(
-                rgba(255, 239, 232, 0.16),
-                rgba(255, 239, 232, 0.16)
+                rgba(17, 8, 4, 0.07),
+                rgba(17, 8, 4, 0.07)
             ),
             url('/assets/images/background2.png');
 
-        background-position: center;
+        background-size: cover;
+
+        background-position:
+            center center;
+
+        background-repeat:
+            no-repeat;
     }
 
     .login-card {
-        width: min(100%, 450px);
+        width:
+            min(100%, 450px);
+
+        background:
+            rgba(255, 253, 248, 0.97);
     }
 }
 
@@ -883,31 +1285,40 @@
             82px
             15px
             25px;
+
+        background-position:
+            center center;
     }
 
     .login-card {
+        width: 100%;
+
         padding:
             55px
             23px
-            24px;
+            23px;
 
-        border-radius: 18px;
+        border-radius: 19px;
     }
 
     .giraffe-avatar {
-        top: -48px;
+        top: -47px;
 
-        width: 96px;
-        height: 96px;
+        width: 94px;
+        height: 94px;
 
-        border-width: 5px;
+        border-width: 3px;
     }
 
     .login-card-header {
         margin-bottom: 24px;
 
         h2 {
-            font-size: 22px;
+            font-size: 21px;
+        }
+
+        p {
+            font-size: 13px;
         }
     }
 
@@ -918,46 +1329,30 @@
     .btn-login {
         height: 49px;
     }
+
+    .login-card-footer {
+        margin-top: 21px;
+    }
 }
 
 
 /* =========================================================
-   ALTURAS REDUCIDAS
+   MOBILE PEQUEÑO
    ========================================================= */
 
-@media (max-height: 760px) and (min-width: 961px) {
+@media (max-width: 380px) {
 
-    .login-info-content {
-        padding-top: 25px;
-        padding-bottom: 20px;
-    }
-
-    .brand-logo {
-        width: 290px;
-
-        margin-bottom: 28px;
-    }
-
-    .marketing-content h1 {
-        font-size: 38px;
-    }
-
-    .marketing-description {
-        margin-top: 17px;
-
-        font-size: 14px;
-    }
-
-    .bottom-info {
-        padding-top: 20px;
-    }
-
-    .category-footer {
-        margin-top: 15px;
+    .login-visual {
+        padding-left: 11px;
+        padding-right: 11px;
     }
 
     .login-card {
-        padding-top: 55px;
-        padding-bottom: 22px;
+        padding-left: 18px;
+        padding-right: 18px;
+    }
+
+    .login-card-header h2 {
+        font-size: 19px;
     }
 }

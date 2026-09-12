@@ -7,47 +7,50 @@
 
         <div class="login-info-content">
 
+            <!-- LOGO -->
             <img
                 src="assets/images/logo.png"
-                alt="Mi Pimpollito - Bebés, Juguetes, Hogar"
+                alt="Mi Pimpollito Juguetería"
                 class="brand-logo"
             />
 
+            <!-- CONTENIDO PRINCIPAL -->
             <div class="marketing-content">
 
                 <h1>
-                    Un mundo de alegría
-                    <span>para los más pequeños</span>
+                    Donde la imaginación
+                    <span>cobra vida</span>
                 </h1>
 
                 <p class="marketing-description">
-                     Descubre juguetes, artículos para bebés y opciones para el hogar
-                    pensadas para acompañar cada etapa, crear momentos especiales
-                    y llenar de sonrisas a toda la familia.
+                    Descubre un mundo lleno de juegos, aventuras y momentos para compartir.
+                    En Mi Pimpollito encontrarás juguetes pensados para despertar la
+                    imaginación, crear sonrisas y hacer especial cada momento.
                 </p>
 
             </div>
 
+            <!-- INFORMACIÓN INFERIOR -->
             <div class="bottom-info">
 
-                <!-- QR: por ahora visual.
-                     Luego reemplazamos este bloque por el QR real -->
+                <!-- CONTACTOS -->
                 <div class="contact-card">
 
                     <div class="qr-container">
-                    <img
-                        src="assets/images/qr.png"
-                        alt="QR de contacto Mi Pimpollito"
-                        class="contact-qr"
-                    />
+                        <img
+                            src="assets/images/qr.png"
+                            alt="QR de contacto Mi Pimpollito"
+                            class="contact-qr"
+                        />
                     </div>
 
                     <div class="contact-info">
-                        <strong>Escanea para contactos</strong>
+
+                        <strong>Encuéntranos y conócenos</strong>
 
                         <span>
-                            Encuéntranos en nuestros canales
-                            y mantente conectado con Mi Pimpollito.
+                            Descubre nuestros canales, novedades
+                            y todo lo que Mi Pimpollito tiene para ti.
                         </span>
 
                         <a
@@ -57,40 +60,45 @@
                         >
                             beacons.ai/mipimpollito
                         </a>
+
                     </div>
 
                 </div>
 
+                <!-- FRASE -->
                 <div class="happy-message">
-                    <i class="fa-regular fa-heart"></i>
+
+                    <i class="fa-regular fa-star"></i>
 
                     <span>
-                        Juguetes que crean<br />
-                        momentos felices
+                        Grandes aventuras<br />
+                        comienzan jugando
                     </span>
+
                 </div>
 
             </div>
 
+            <!-- PIE DEL PANEL -->
             <div class="category-footer">
 
                 <div class="category-item">
-                    <i class="fa-solid fa-baby"></i>
-                    <span>BEBÉS</span>
+                    <i class="fa-solid fa-gamepad"></i>
+                    <span>JUEGA</span>
                 </div>
 
                 <div class="separator"></div>
 
                 <div class="category-item">
-                    <i class="fa-solid fa-puzzle-piece"></i>
-                    <span>JUGUETES</span>
+                    <i class="fa-solid fa-lightbulb"></i>
+                    <span>IMAGINA</span>
                 </div>
 
                 <div class="separator"></div>
 
                 <div class="category-item">
-                    <i class="fa-solid fa-house"></i>
-                    <span>HOGAR</span>
+                    <i class="fa-solid fa-star"></i>
+                    <span>CREA</span>
                 </div>
 
             </div>
@@ -107,6 +115,7 @@
 
         <div class="login-card">
 
+            <!-- AVATAR -->
             <div class="giraffe-avatar">
                 <img
                     src="assets/images/logo2.png"
@@ -114,28 +123,38 @@
                 />
             </div>
 
+            <!-- HEADER -->
             <div class="login-card-header">
 
                 <h2>Bienvenido a Mi Pimpollito</h2>
 
                 <p>
-                    Accede a tu sistema de gestión
+                    Ingresa para comenzar
                 </p>
 
             </div>
 
 
+            <!-- FORMULARIO -->
             <form [formGroup]="loginForm">
 
-                <!-- MENSAJE DE ERROR EXISTENTE -->
+                <!-- ERROR LOGIN -->
                 @if(errorLogin()) {
+
                     <div class="login-error">
+
                         <p-messages severity="error">
+
                             <ng-template pTemplate>
+
                                 {{ "app.common.messages.errorLogin" | translate }}
+
                             </ng-template>
+
                         </p-messages>
+
                     </div>
+
                 }
 
 
@@ -230,15 +249,17 @@
                 </div>
 
 
-                <!-- OLVIDÉ CONTRASEÑA -->
+                <!-- RECUPERAR CONTRASEÑA -->
                 <div class="forgot-link">
+
                     <a [routerLink]="['/auth/forgot-password']">
                         ¿Olvidaste tu contraseña?
                     </a>
+
                 </div>
 
 
-                <!-- LOGIN -->
+                <!-- BOTÓN LOGIN -->
                 <button
                     type="button"
                     class="btn-login"
@@ -247,10 +268,15 @@
                 >
 
                     @if (loading()) {
+
                         <span>Ingresando...</span>
+
                     } @else {
+
                         <span>Iniciar sesión</span>
+
                         <i class="fa-solid fa-arrow-right"></i>
+
                     }
 
                 </button>
@@ -258,9 +284,15 @@
             </form>
 
 
+            <!-- FOOTER CARD -->
             <div class="login-card-footer">
+
                 <i class="fa-solid fa-shield-halved"></i>
-                <span>Plataforma segura y confiable</span>
+
+                <span>
+                    Plataforma segura y confiable
+                </span>
+
             </div>
 
         </div>
