@@ -9,6 +9,14 @@
         </div>
     </div>
 
+    @if (isDevFirebase) {
+    <span
+        class="absolute top-1 left-1 md:left-16 bg-gold text-carbon text-[10px] font-bold uppercase px-2 py-0.5 rounded"
+        [title]="'Este build habla con Firebase ' + firebaseProjectId"
+        >Firebase DEV</span
+    >
+    }
+
     <!-- botón para desplegar el sidebar -->
     <button
         #menubutton

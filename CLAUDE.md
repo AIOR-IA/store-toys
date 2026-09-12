@@ -28,10 +28,18 @@ pueden validarlo; lo demás pasa por Cloud Functions.
 
 ## Ambientes
 
-| | Project ID | Hosting | Estado |
-|---|---|---|---|
-| **DEV** | `mi-pimpollito-dev` | `https://mi-pimpollito-dev.web.app` | **creado y configurado** |
-| **PROD** | `mi-pimpollito` | `https://mi-pimpollito.web.app` | **NO CREADO** — límite de proyectos de la cuenta |
+> ⚠️ **Decisión temporal vigente desde 2026-09-12** (reemplaza la regla anterior de que
+> "production queda bloqueado hasta que exista `mi-pimpollito`"): Google no deja crear el
+> proyecto Firebase de PROD hasta dentro de ~30 días. Mientras tanto, **el build de
+> producción de Angular también habla con el Firebase de DEV.** Detalle: plan §5.5.
+
+| Build de Angular | Firebase real | Estado |
+|---|---|---|
+| `development` (`ng serve`, `ng build --configuration development`) | `mi-pimpollito-dev` | normal |
+| `production` (`ng build`, `ng build --configuration production`) | `mi-pimpollito-dev` **(TEMPORAL)** | hasta que exista `mi-pimpollito` |
+| — futuro — `production` | `mi-pimpollito` | cuando la cuenta permita crearlo |
+
+**`mi-pimpollito` (PROD) no existe todavía** — límite de proyectos de la cuenta.
 
 ### DEV — configuración real (detalle en el plan, §5.4)
 
@@ -48,27 +56,43 @@ pueden validarlo; lo demás pasa por Cloud Functions.
 - El bucket está en `US-CENTRAL1` a propósito (cuota gratuita): por eso la **compresión de
   imágenes en el cliente no es negociable**.
 
-### PROD — bloqueado (detalle en el plan, §5.5 y §22.1)
+### PROD — temporalmente apunta a DEV (detalle en el plan, §5.5 y §22.1)
 
-- **`mi-pimpollito` no existe todavía.** La cuenta alcanzó el límite de proyectos de Firebase.
-- **DEV NO se usa como PROD.** Ni temporalmente.
-- **No se crea `environment.production.ts`**, y **nunca** apuntará a `mi-pimpollito-dev`.
-- `.firebaserc` lleva **solo el alias `dev`** (+ `default: dev`) hasta que PROD exista.
-- Por eso **`ng build` a secas (configuración `production`) no es ejecutable**: durante todo
-  el desarrollo se usa `ng build --configuration development`.
-- Cuando PROD se pueda crear: misma región de Firestore (`southamerica-west1`), mismo
-  criterio de Storage (`US-CENTRAL1`), solo Email/Password, production mode, Blaze + alerta.
-  Se configura y se despliega **por separado**.
-- No bloquea las Fases 0A–5, que se construyen contra DEV. **Sí bloquea el despliegue a
-  producción al cerrar la Fase 5**: hay que desbloquear la cuota antes de llegar ahí.
+- **`environment.production.ts` existe** y satisface `AppEnvironment`
+  (`name: 'prod'`, `production: true`), pero su bloque `firebase` es —**a propósito y de
+  forma temporal**— una copia exacta del de `environment.ts`: mismo `projectId`
+  (`mi-pimpollito-dev`), mismo `authDomain`, mismo `storageBucket`. Lleva un comentario en
+  mayúsculas en el propio archivo que no se puede pasar por alto.
+- `angular.json` → `production` tiene `fileReplacements: environment.ts → environment.production.ts`.
+  Esto es justo lo que faltaba: `ng build` (por defecto usa `production`) **ya compila**.
+- `.firebaserc` sigue con **solo el alias `dev`** (+ `default: dev`). No se inventa un alias
+  `prod` ni un segundo proyecto Firebase: solo existe uno.
+- **El badge del topbar no se basa en `environment.name` ni en `environment.production`** —
+  esos solo describen la configuración de Angular. Se basa en
+  `environment.firebase.projectId === FIREBASE_DEV_PROJECT_ID`
+  (`environment.model.ts`): por eso sigue viéndose **incluso en el build de producción**,
+  mientras el Firebase real siga siendo DEV. El día que `environment.production.ts` tenga el
+  `projectId` de `mi-pimpollito`, el badge desaparece solo, sin tocar el componente.
+- **Cuando `mi-pimpollito` pueda crearse**, la lista completa de lo que cambia (nada de esto
+  toca la arquitectura, solo datos y un alias):
+  1. registrar su Web App;
+  2. habilitar Authentication;
+  3. crear Firestore;
+  4. crear Storage;
+  5. configurar Functions;
+  6. copiar/desplegar Rules e índices;
+  7. reemplazar el bloque `firebase` de `environment.production.ts` con los datos reales;
+  8. añadir el alias `prod` en `.firebaserc`;
+  9. validar y desplegar de forma independiente.
 
 ### Reglas de ambiente
 
 - `ng serve` → **DEV** (`environment.ts` es la base, sin reemplazo).
-- `environment.ts` implementa la interfaz `AppEnvironment`: **comentar un campo rompe la
-  compilación**. Nunca se comenta ni descomenta configuración.
-- Un `firebase deploy` sin `-P` apunta a DEV.
-- **No mezclar ambientes.** Badge `DEV` visible en el topbar cuando `environment.name !== 'prod'`.
+- Ambos environments implementan `AppEnvironment`: **comentar un campo rompe la
+  compilación** (verificado en los dos archivos). Nunca se comenta ni descomenta configuración.
+- Un `firebase deploy` sin `-P` apunta a DEV — es el único proyecto que existe.
+- **No mezclar ambientes.** El badge de Firebase se deriva del `projectId`, no del nombre de
+  la configuración de Angular — ver arriba.
 
 ## Textos e i18n
 
@@ -90,65 +114,22 @@ aunque inicialmente solo exista idioma español.**
   configuración de librería, no texto de la aplicación.
 - Detalle y motivos: plan §4.5.
 
-<!-- ADDED BY CHATGPT -->
+### Antes de añadir un texto nuevo
 
-### Internationalization (i18n)
+Aplica a título, subtítulo, etiqueta, botón, opción de menú, mensaje de validación,
+mensaje de éxito/error, tooltip, placeholder, estado vacío, texto de diálogo, confirmación,
+encabezado de tabla o campo de formulario:
 
-User-visible text must use the existing `ngx-translate` system.
-
-Mi Pimpollito currently uses Spanish only, but `ngx-translate` is kept as the
-centralized UI text system.
-
-The primary translation catalog is:
-
-`src/assets/i18n/es.json`
-
-Do **not** hardcode Spanish UI text in templates or TypeScript when the text
-belongs to the application's translation system.
-
-Before adding a new:
-
-- title
-- subtitle
-- label
-- button text
-- menu option
-- validation message
-- success/error message
-- tooltip
-- placeholder
-- empty-state message
-- dialog text
-- confirmation message
-- table header
-- form field text
-
-follow this process:
-
-1. Search `src/assets/i18n/es.json` for an appropriate existing translation key.
-2. Reuse the existing key whenever possible.
-3. If it does not exist, add a new key to `src/assets/i18n/es.json`.
-4. Organize keys by feature/domain, for example:
-   - `common.*`
-   - `auth.*`
-   - `users.*`
-   - `products.*`
-   - `sales.*`
-   - `payments.*`
-   - `giftCards.*`
-   - `validation.*`
-5. Use the existing `translate` pipe in templates or the translation service
-   pattern already used by the surrounding TypeScript code.
-6. Do not create duplicate keys for text that already exists elsewhere in the
-   translation catalog.
-7. Do not restore old SAHTOSO/CLIRE translation keys unless they are genuinely
-   reusable by Mi Pimpollito.
-8. Do not introduce another i18n library.
-
-Example:
-
-```html
-{{ 'users.actions.create' | translate }}
+1. Busca primero en `es.json` una clave ya existente que sirva. **Reutilízala.**
+2. Si no existe, añade una clave nueva — nunca hardcodees el texto.
+3. Organiza las claves por dominio bajo `app.*`, siguiendo lo ya establecido:
+   `app.common.*`, `app.menu.*`, `app.users.*`. Fases futuras añaden
+   `app.products.*`, `app.sales.*`, `app.giftCards.*`, etc. — un bloque por feature,
+   igual que `app.users` hoy.
+4. No dupliques una clave para un texto que ya existe en otro lado del catálogo.
+5. No restaures claves antiguas de SAHTOSO/CLIRE salvo que sean genuinamente
+   reutilizables para Mi Pimpollito (ver la poda de la Fase 0A/corrección de i18n).
+6. No introduzcas otra librería de i18n.
 
 ## Roles
 
@@ -277,39 +258,55 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 
 ## Estado actual
 
-- **Fase 0A COMPLETADA** (rama `phase-0a-cleanup`, sin commit). El fork de SAHTOSO quedó
-  limpio: 398 archivos eliminados, 33 dependencias desinstaladas, identidad de Mi Pimpollito
-  aplicada. Build de producción: 758 kB iniciales (164 kB transferidos).
+- **Fase 0A COMPLETADA** (`master`). El fork de SAHTOSO quedó limpio: 398 archivos
+  eliminados, identidad de Mi Pimpollito aplicada.
 - **Corrección posterior a la Fase 0A:** `ngx-translate` y `es.json` se **conservan** por
   decisión del cliente — ver *Textos e i18n* arriba y plan §4.5.
-- **No hay nada de Firebase escrito todavía** (`firebase@^10` está en `package.json` sin usar).
-  El proyecto DEV existe en la consola, pero el repositorio aún no tiene `firebase.json`,
-  `.firebaserc`, reglas ni `environment` conectados: eso es la Fase 0B.
-- `login.component.html` y `login.component.scss` **ya tienen el diseño aprobado: no se
-  rediseñan.** El `.ts` quedó sin lógica de autenticación, listo para Fase 1.
-- **Qué existe hoy en `src/app`** (116 archivos): `layout/` completo y desacoplado de la
-  sesión · `shared/` podado · `core/{config,models,services/toast,utils}` ·
+- **Fase 0B COMPLETADA** (rama `phase-0b-firebase`, sin commit). El SDK de Firebase está
+  conectado a `mi-pimpollito-dev`:
+  - `@angular/fire@18.0.1` instalado; `firebase` fijado a `^10.14.1`.
+  - `src/environments/environment.ts` con la config real de DEV, tipada por
+    `environment.model.ts` (`AppEnvironment`). Sin restos de SAHTOSO/ABT.
+  - `core/firebase/firebase.providers.ts` — `provideFirebase()` con App, Auth, Firestore,
+    Storage y Functions (región `southamerica-west1`), inyectado en `app.config.ts`.
+    **Nada lo consume todavía**: es infraestructura para la Fase 1.
+  - `.firebaserc` (solo alias `dev`), `firebase.json`, `firestore.rules` y `storage.rules`
+    **deny-by-default**, `firestore.indexes.json` vacío, `functions/` como esqueleto sin
+    lógica de negocio. **Nada de esto se ha desplegado** (`firebase deploy`) — ver riesgos.
+  - Badge **Firebase DEV** visible en el topbar, en desarrollo y en producción.
+- **Corrección posterior a la Fase 0B (2026-09-12):** `environment.production.ts` **sí
+  existe**, con `fileReplacements` en `angular.json`, pero **apunta temporalmente a
+  `mi-pimpollito-dev`** — el proyecto PROD real (`mi-pimpollito`) tarda ~30 días más por el
+  límite de proyectos de Google. Ver la sección *Ambientes* arriba, es la fuente de verdad.
+- `login.component.html` y `login.component.scss` **siguen con el diseño aprobado, intacto.**
+  El `.ts` sigue sin lógica de autenticación.
+- **Qué existe hoy en `src/app`**: `layout/` completo y desacoplado de la sesión ·
+  `shared/` podado, con i18n restaurado · `core/{config,firebase,models,services/toast,utils}` ·
   `features/authentication` (login + forgot-password, sin backend) · `features/home`
   (**placeholder temporal**).
 - **Pendientes heredados** que las fases siguientes deben cerrar:
-  - `src/environments/*` todavía contienen `API_URL`/`GEOSERVER_URL` de SAHTOSO y ABT.
-    Nada los importa. **Los reescribe la Fase 0B**; `environment.prod.ts` se elimina ahí.
   - Assets sin convertir a WebP: 6,3 MB en `src/assets/images` (Angular avisa `NG0913`).
     No hay conversor en el entorno; requiere además tocar 4 rutas del login aprobado.
   - `core/models/attachment.interface.ts` quedó sin consumidores (lo usará la Fase 3).
   - `src/assets/custom-color.png` y `custom-hue.png` quedaron sin referencia al retirar el
     parche del colorpicker de PrimeNG de `styles.scss`.
-- **Siguiente paso: FASE 0B** — proyectos Firebase y ambientes (solo DEV).
+  - `functions/` no tiene `node_modules` instalado (no se ejecutó `npm install` ahí):
+    esqueleto sin dependencias descargadas hasta que haga falta compilar de verdad (Fase 2).
+- **Deshabilitar la auto-creación de cuentas** en Authentication → Settings → *User actions*
+  quedó **verificado por el cliente** al describir la configuración de consola (registro
+  público deshabilitado); no requiere acción de código.
+- **Siguiente paso: FASE 1** — Autenticación, sesión y recuperación de contraseña.
 
 ## Comandos
 
 ```bash
 npm start                      # ng serve → DEV
 npm run build:dev              # ng build --configuration development → DEV
+npm run build                  # ng build (production) → TEMPORALMENTE también DEV
+firebase use dev               # selecciona mi-pimpollito-dev (ya es el default)
 firebase deploy --only hosting -P dev
 firebase deploy --only firestore:rules,firestore:indexes,storage -P dev
 
-# NO ejecutable hasta que exista mi-pimpollito (PROD):
-# npm run build                # ng build (configuración production)
+# NO ejecutable hasta que exista mi-pimpollito (PROD real):
 # firebase deploy -P prod
 ```

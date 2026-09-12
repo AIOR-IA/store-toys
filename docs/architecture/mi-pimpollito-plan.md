@@ -8,11 +8,11 @@
 |---|---|
 | **Proyecto** | Mi Pimpollito — sistema administrativo para juguetería |
 | **Negocio** | Artículos y accesorios para niños · Oruro, Bolivia |
-| **Estado del documento** | Planificación cerrada · aprobada · **ninguna fase implementada** |
+| **Estado del documento** | Planificación cerrada · aprobada · **Fases 0A y 0B implementadas** |
 | **Última consolidación** | 2026-09-12 |
 | **Fuentes consolidadas** | Plan técnico completo + cuestionario de 48 preguntas respondido por el cliente + **configuración real de Firebase DEV** (§5.4) |
-| **Infraestructura** | DEV `mi-pimpollito-dev` **creado y configurado** · PROD `mi-pimpollito` **pendiente**, límite de proyectos de la cuenta (§5.5) |
-| **Siguiente paso** | FASE 0A — Limpieza controlada del proyecto heredado |
+| **Infraestructura** | DEV `mi-pimpollito-dev` **creado, configurado y conectado a Angular** (en `development` y, **temporalmente**, también en `production`) · PROD `mi-pimpollito` **pendiente**, ~30 días por límite de proyectos de la cuenta (§5.5) |
+| **Siguiente paso** | FASE 1 — Autenticación, sesión y recuperación de contraseña |
 
 ---
 
@@ -613,7 +613,8 @@ siempre a PROD; y hay **una sola fuente de configuración por ambiente**.
 ```ts
 // src/environments/environment.model.ts
 export interface AppEnvironment {
-  name: 'dev' | 'prod';
+  name: 'dev' | 'prod';        // qué configuración de Angular generó este archivo
+  production: boolean;         // alias estándar de Angular, equivalente a name === 'prod'
   firebase: {
     apiKey: string;
     authDomain: string;
@@ -624,6 +625,11 @@ export interface AppEnvironment {
   };
   useEmulators: boolean;
 }
+
+// Único proyecto Firebase real hoy. Sirve para derivar, a partir de
+// environment.firebase.projectId, si el build actual sigue hablando con DEV
+// — es la base del badge de ambiente (§5.3), independiente de `name`/`production`.
+export const FIREBASE_DEV_PROJECT_ID = 'mi-pimpollito-dev';
 ```
 
 ```ts
@@ -631,25 +637,29 @@ export interface AppEnvironment {
 import { AppEnvironment } from './environment.model';
 export const environment: AppEnvironment = {
   name: 'dev',
+  production: false,
   firebase: { /* credenciales del proyecto mi-pimpollito-dev */ },
   useEmulators: false,
 };
 ```
 
 ```ts
-// src/environments/environment.production.ts   ← PROD · NO SE CREA TODAVÍA (§5.5)
+// src/environments/environment.production.ts   ← PROD · lo que usa `ng build`
 import { AppEnvironment } from './environment.model';
 export const environment: AppEnvironment = {
   name: 'prod',
-  firebase: { /* credenciales del proyecto mi-pimpollito */ },
+  production: true,
+  // TEMPORAL (§5.5): mismo proyecto que DEV, hasta que exista mi-pimpollito.
+  firebase: { /* credenciales del proyecto mi-pimpollito-dev */ },
   useEmulators: false,
 };
 ```
 
-> **`environment.production.ts` está pendiente.** `mi-pimpollito` no existe todavía (§5.5),
-> así que el archivo **no se crea** y, sobre todo, **nunca lleva las credenciales de DEV**.
-> Mientras eso sea así, el build de producción no está disponible y se trabaja con
-> `ng build --configuration development`.
+> **`environment.production.ts` existe y `ng build` (producción) compila.** Su bloque
+> `firebase` es, de forma **temporal y deliberada**, el mismo que el de DEV — ver §5.5 para
+> el porqué y para la lista exacta de lo que cambia cuando `mi-pimpollito` pueda crearse.
+> Sustituir solo ese bloque, cuando llegue el momento, es la única tarea: `AppEnvironment`,
+> el `fileReplacements` y `provideFirebase()` no se tocan.
 
 Las claves `firebase.*` del cliente web **no son secretos**: son identificadores públicos
 del proyecto. Lo que protege los datos son las Security Rules y App Check, no ocultar el
@@ -768,33 +778,54 @@ crear otro bucket y mover los archivos.
 > sesión, guards, recuperación de contraseña, primer admin sembrado a mano) **no necesita
 > Functions**. Con Blaze ya activo en DEV, nada de esto bloquea ninguna fase.
 
-### 5.5 PROD — pendiente y bloqueado
+### 5.5 PROD — todavía no existe; `production` apunta a DEV de forma temporal
 
-**`mi-pimpollito` no existe todavía: la cuenta alcanzó el límite de proyectos de Firebase.**
+**`mi-pimpollito` no existe todavía: Google no deja crear el proyecto hasta dentro de
+~30 días** (límite de proyectos de la cuenta). Esta cifra la dio el cliente el
+2026-09-12 y es la que gobierna cuándo se revisa esta sección, no una estimación nuestra.
 
-Reglas que se derivan de ese hecho y que no se negocian:
+> **Decisión del 2026-09-12 — reemplaza la regla anterior de esta sección.** La versión
+> previa de este documento bloqueaba por completo el build de producción hasta que
+> `mi-pimpollito` existiera. Un mes de espera cambia el cálculo: se decidió que **el build
+> de producción de Angular hable, de forma temporal y explícita, con el mismo Firebase que
+> DEV**, en vez de dejar `ng build` roto un mes entero. La regla que sí se mantiene sin
+> excepción es la de fondo — nunca fingir un PROD que no existe —, así que la solución no es
+> inventar credenciales, sino que **ambos environments sean honestos**: los dos declaran
+> `mi-pimpollito-dev` como su Firebase real, y el código lo sabe.
 
-1. **DEV no se usa como PROD.** Ni temporalmente, ni "solo para mostrarlo al cliente". La
-   base de DEV contiene datos de prueba, y el día que se mezclen con ventas reales no hay
-   forma de separarlos.
-2. **`environment.production.ts` no se crea todavía**, y **nunca** apuntará a
-   `mi-pimpollito-dev`. Escribir las credenciales de DEV en el archivo de producción es
-   exactamente el error que toda la §5 existe para hacer imposible.
-3. **Consecuencia operativa:** mientras PROD no exista, el build de producción no está
-   disponible. Durante todo el desarrollo se usa `ng build --configuration development`.
-   `ng build` a secas (configuración `production`, que es la predeterminada) **fallará por
-   falta del archivo de entorno** — y eso es lo correcto: es imposible generar por accidente
-   un bundle "de producción" que escriba en DEV.
-4. **`.firebaserc` lleva solo el alias `dev`** hasta que PROD exista:
+**Cómo queda, mientras dura lo temporal:**
+
+| Build de Angular | Firebase real |
+|---|---|
+| `development` (`ng serve`, `ng build --configuration development`) | `mi-pimpollito-dev` |
+| `production` (`ng build`, `ng build --configuration production`) | `mi-pimpollito-dev` **(temporal)** |
+
+1. **`environment.production.ts` existe**, implementa `AppEnvironment` y `ng build` (que usa
+   `production` por defecto) **compila y funciona** — ya no está bloqueado.
+2. **Su bloque `firebase` es una copia exacta del de `environment.ts`**, con un aviso en
+   mayúsculas dentro del propio archivo. No es un descuido: es la única forma de no mentir
+   sobre qué backend se está usando de verdad.
+3. **`.firebaserc` sigue con solo el alias `dev`** — sigue existiendo un único proyecto
+   Firebase real, así que un segundo alias sería un alias a nada:
 
    ```json
    { "projects": { "dev": "mi-pimpollito-dev", "default": "mi-pimpollito-dev" } }
    ```
 
-   El alias `prod` se añade cuando haya un proyecto al que apuntar. Un alias que apunta a un
-   proyecto inexistente falla en el momento del deploy, que es el peor momento posible.
-5. **Qué hay que hacer cuando `mi-pimpollito` pueda crearse** — se configura y se despliega
-   **por separado**, repitiendo la §5.4 con estos valores:
+4. **El badge de ambiente deja de basarse en `name`/`production`.** Esos campos ahora
+   describen honestamente la configuración de *Angular* (`'prod'`/`true` en un build de
+   producción), y ya no sirven para inferir el Firebase real. El badge compara
+   `environment.firebase.projectId` contra `FIREBASE_DEV_PROJECT_ID` (§5.1): por diseño,
+   **se sigue viendo en el build de producción** mientras el proyecto real siga siendo DEV, y
+   desaparece solo, sin tocar el componente, el día que `environment.production.ts` tenga el
+   `projectId` de `mi-pimpollito`.
+5. **DEV sigue sin mezclarse con datos de un PROD real** — porque no hay un PROD real
+   todavía. La regla "nunca escribir datos de producción en DEV" se retoma en cuanto exista
+   el proyecto de verdad; hasta entonces solo hay un backend, y todo lo que corre contra él
+   —sea build de desarrollo o de producción— es, por definición, DEV.
+6. **Qué hay que hacer cuando `mi-pimpollito` pueda crearse** — se configura y se despliega
+   por separado, repitiendo la §5.4 con estos valores, y **solo entonces** deja de ser
+   temporal el paso 2:
 
    | Concepto | Valor para PROD |
    |---|---|
@@ -805,17 +836,19 @@ Reglas que se derivan de ese hecho y que no se negocian:
    | Authentication | solo Email/Password; Google, passwordless y MFA deshabilitados |
    | Security initialization | Production mode en Firestore y en Storage |
    | Billing | Blaze + alerta de USD 5 |
-   | Además | crear `environment.production.ts`, añadir el alias `prod` a `.firebaserc`, autorizar el dominio en Authentication, y sembrar el primer admin (§7.1) |
+   | Además | reemplazar el bloque `firebase` de `environment.production.ts` con los datos reales, añadir el alias `prod` a `.firebaserc`, autorizar el dominio en Authentication, desplegar Rules e índices, y sembrar el primer admin (§7.1) |
 
-6. **Cómo desbloquear el límite de proyectos**, cuando toque: eliminar definitivamente algún
-   proyecto de Firebase/Google Cloud que ya no se use (un proyecto borrado sigue contando
-   durante su periodo de retención de ~30 días), o solicitar aumento de cuota desde la
-   consola de Google Cloud. Es una gestión de cuenta del desarrollador, no una tarea de
-   código.
+7. **Cómo acelerar el límite de proyectos**, si conviene antes de los ~30 días: eliminar
+   definitivamente algún proyecto de Firebase/Google Cloud en desuso (un proyecto borrado
+   sigue contando durante su periodo de retención de ~30 días, así que no acorta el plazo de
+   inmediato), o solicitar aumento de cuota desde la consola de Google Cloud. Es gestión de
+   cuenta del desarrollador, no una tarea de código.
 
-> **Esto no bloquea el desarrollo.** Las Fases 0A a 5 se construyen y se prueban íntegras
-> contra DEV. Lo único que queda en espera es el **despliegue a producción** al cerrar la
-> Fase 5 (§23.2).
+> **Esto no bloquea el desarrollo.** Las Fases 1 en adelante se construyen y se prueban
+> contra DEV exactamente igual que antes. Lo único que cambió es que **el build de
+> producción ya no está roto** mientras se espera a `mi-pimpollito` — antes esa espera
+> impedía generar el bundle de producción; ahora lo genera, contra el backend correcto que
+> existe hoy, con la advertencia explícita de que es temporal.
 
 ---
 
@@ -2779,7 +2812,7 @@ respuesta del cliente, y el motivo está en §2.1.
 | 30 ⟳ | **Región de Firestore** | **`southamerica-west1`** (Santiago). Ya aplicada en DEV; PROD usará la misma | Latencia desde Bolivia, que se nota en el mostrador. Es **inmutable** tras crear la base. Las Functions van en la misma región | 0B | Medio — irreversible sin recrear el proyecto |
 | 31 | **Región de Cloud Storage** | **`US-CENTRAL1`**, Standard — distinta de Firestore, a propósito | Es la región con cuota gratuita de Cloud Storage. El coste es que las imágenes viajan desde EE. UU., por eso la compresión en el cliente (§9.2) no es negociable | 0B | Bajo — la ubicación de un bucket es inmutable |
 | 32 | **Proveedores de Authentication** | **Solo Email/Password.** Google Sign-In, email link y MFA deshabilitados | Las cuentas las crea un admin (§7). Google Sign-In permitiría a cualquiera crear una sesión de Auth sin acceso real, ensuciando el proyecto | 0B | Medio — cuentas de Auth que nadie dio de alta |
-| 33 | **PROD mientras `mi-pimpollito` no exista** | **Bloqueado.** No se crea `environment.production.ts`, `.firebaserc` lleva solo el alias `dev`, y **DEV no se usa como PROD** | Escribir credenciales de DEV en el archivo de producción es precisamente el error que la §5 existe para hacer imposible | 5 (despliegue) | **Alto** — datos de prueba mezclados con ventas reales, sin forma de separarlos |
+| 33 ⟳ | **PROD mientras `mi-pimpollito` no exista** | **`environment.production.ts` existe y `ng build` (production) compila**, pero su `firebase` apunta **temporalmente** a `mi-pimpollito-dev` — mismo aviso explícito dentro del archivo. `.firebaserc` sigue con solo el alias `dev`. El badge de ambiente se deriva de `firebase.projectId`, no de `name`/`production` (§5.1) | Google tarda ~30 días en permitir crear `mi-pimpollito`; bloquear el build de producción todo ese tiempo costaba más que ser explícito sobre qué backend se usa de verdad | 0B (revisión: cuando exista `mi-pimpollito`) | Medio — mitigado por el badge visible en todo build y por el comentario en el propio archivo; el riesgo real sería *fingir* un PROD sin decirlo |
 | 34 | **SDK de Firebase en Angular** | `@angular/fire@^18` | Wrappers zone-aware (el proyecto usa zone.js) y adaptadores a Observable, que son las piezas del pipeline de sesión | 0B | Medio — bugs intermitentes de detección de cambios |
 | 35 ⟳ | **Internacionalización** | **Se conserva `ngx-translate`** con `es.json` como catálogo central de textos; solo español. Los textos se resuelven con el **pipe**, nunca en `translate.get().subscribe()` | Decisión del cliente: evitar strings sueltos en los componentes. El coste real del patrón heredado estaba en construir modelos dentro de un `subscribe`, no en la librería | 0A | Medio — o strings repartidos por el código, o el sidebar vacío en el arranque si se vuelve al `subscribe` |
 | 36 | **Estrategia CI/CD** | `main` → PROD · `develop` → DEV · PR → preview **en DEV**. Despliegue manual adelantado a la Fase 1B | Las previews sobre PROD darían a ramas sin revisar acceso a los datos reales. El despliegue temprano revela los problemas de Hosting cuando son baratos | 1B / 9 | Medio — problemas de hosting descubiertos tarde, o previews escribiendo en producción |
@@ -2814,19 +2847,20 @@ antes porque hoy no hay información que los haga urgentes:
 | 2 | **Tarjeta física perdida con saldo** (E8 quedó sin responder) | Recomendación: el admin anula la emisión con `cancelGiftCardIssue` y deja el motivo en `note`; no se reemplaza salvo decisión del dueño. El modelo ya lo soporta | Fase 6 |
 | 3 | **Activar App Check** | Recomendado, pero se activa primero en DEV y se verifica antes de PROD | Fase 8 |
 
-### 22.1 Un bloqueo externo, real, que no afecta a las Fases 0A–5
+### 22.1 Un bloqueo externo, real, que ya no bloquea el build de producción
 
-**`mi-pimpollito` (PROD) no se puede crear todavía: la cuenta alcanzó el límite de proyectos
-de Firebase** (§5.5). No es una decisión pendiente —está decidido qué hacer— sino un hecho de
-la cuenta que hay que resolver fuera del código.
+**`mi-pimpollito` (PROD) no se puede crear todavía: Google tarda ~30 días por el límite de
+proyectos de la cuenta** (§5.5). No es una decisión pendiente —está decidido qué hacer,
+incluida la corrección del 2026-09-12— sino un hecho de la cuenta que se resuelve fuera del
+código, con una fecha aproximada.
 
 | | |
 |---|---|
-| **Qué bloquea** | Únicamente el **despliegue a producción**, al cerrar la Fase 5 |
-| **Qué NO bloquea** | Las Fases 0A, 0B (parte DEV), 1, 1B, 2, 3, 4 y 5: se construyen y se prueban íntegras contra DEV |
-| **Cómo se desbloquea** | Eliminar definitivamente un proyecto en desuso (los borrados siguen contando ~30 días) o pedir aumento de cuota en la consola de Google Cloud |
-| **Qué está prohibido mientras tanto** | Usar DEV como PROD, y crear `environment.production.ts` apuntando a `mi-pimpollito-dev` |
-| **Cuándo hay que revisarlo** | Antes de terminar la Fase 5, para no llegar al despliegue con la sorpresa |
+| **Qué bloquea hoy** | Únicamente el **despliegue a un Firebase de producción real**, al cerrar la Fase 5 |
+| **Qué NO bloquea** | Todo lo demás. Desde el 2026-09-12, ni siquiera el build de producción de Angular: `ng build` compila y apunta —temporalmente y a propósito— a `mi-pimpollito-dev` (§5.5) |
+| **Cómo se acorta** | Eliminar definitivamente un proyecto en desuso (los borrados siguen contando ~30 días, así que no acelera de inmediato) o pedir aumento de cuota en la consola de Google Cloud |
+| **Qué sigue prohibido** | Que el build de producción **finja** hablar con un PROD real: el archivo declara explícitamente que es temporal, y el badge de ambiente lo hace visible en pantalla |
+| **Cuándo hay que revisarlo** | En ~30 días desde el 2026-09-12, y de todos modos antes de terminar la Fase 5 |
 
 La disponibilidad del ID `mi-pimpollito-dev` ya está **confirmada**: el proyecto existe y
 `firebase projects:list` lo reconoce. La del ID `mi-pimpollito` se verificará al crearlo; si
@@ -2865,16 +2899,21 @@ explícito, porque el sistema es vendible sin gift cards ni reportes, pero no si
 Puede empezar en cuanto la Fase 3 esté desplegada en DEV, y correr en paralelo a las Fases 4
 y 5. Retrasarla hasta el final hace imposible cualquier fecha. Ver §24.
 
-> **Segundo camino crítico, externo al código:** la salida a producción exige que
-> `mi-pimpollito` exista, y hoy no se puede crear (§5.5, §22.1). El desarrollo completo del
-> MVP no lo necesita —todo se construye contra DEV—, pero **el día del despliegue sí**.
-> Conviene liberar la cuota de proyectos mientras se trabaja en las Fases 1 a 4, no al final.
+> **Segundo camino crítico, externo al código:** la salida a producción **frente a
+> clientes reales** exige que `mi-pimpollito` exista, y Google tarda ~30 días en permitirlo
+> (§5.5, §22.1). Eso ya no bloquea `ng build` —desde el 2026-09-12 el build de producción de
+> Angular compila y funciona, temporalmente contra `mi-pimpollito-dev` (§5.5)—, pero sigue
+> siendo cierto que **el negocio no puede abrir con datos reales hasta que exista un Firebase
+> de producción separado**. Conviene liberar la cuota de proyectos mientras se trabaja en las
+> Fases 1 a 4, no al final.
 >
-> Y una advertencia sobre la carga del catálogo: si se cargan los 1 000 productos en DEV y
-> después se crea PROD, **esos datos no se mueven solos**. O se espera a tener PROD para
-> cargar en serio, o se acepta que habrá que repetir la carga (o exportar e importar con el
-> Admin SDK, que es trabajo no planificado). **Es una razón más para desbloquear PROD
-> temprano.**
+> Y una advertencia sobre la carga del catálogo, que sigue vigente exactamente igual: todo lo
+> que se cargue hoy —sea con el build de desarrollo o con el de producción— vive en el mismo
+> y único proyecto, `mi-pimpollito-dev`. Si se cargan los 1 000 productos ahí y después se
+> crea el `mi-pimpollito` real, **esos datos no se mueven solos**. O se espera a tener el
+> PROD real para cargar en serio, o se acepta que habrá que repetir la carga (o exportar e
+> importar con el Admin SDK, que es trabajo no planificado). **Es una razón más para acortar
+> la espera de ~30 días si es posible.**
 
 ### 23.3 Dependencias entre fases
 
@@ -3020,10 +3059,12 @@ el login aprobado. Angular ya avisa de ello en consola: `NG0913` para `logo.png`
   2. `.firebaserc` con **el alias `dev` únicamente** y `default: dev`. El alias `prod` se
      añade cuando exista el proyecto (§5.5).
   3. `environment.model.ts` + `environment.ts` con las credenciales reales de DEV.
-     **`environment.production.ts` no se crea todavía.**
+     ~~`environment.production.ts` no se crea todavía~~ → **corregido el mismo día**: sí se
+     crea, temporalmente con el mismo Firebase que DEV (§5.5).
   4. `angular.json`: eliminar `production-sahtoso`, el reemplazo de `development` y el
-     `serve.staging` fantasma. El `fileReplacements` de `production` se declara cuando exista
-     `environment.production.ts`.
+     `serve.staging` fantasma. ~~El `fileReplacements` de `production` se declara cuando
+     exista `environment.production.ts`~~ → se declaró en la corrección de §5.5, apuntando al
+     archivo temporal.
   5. `npm i @angular/fire`, fijar `firebase@^10.7`, y los `provide*` en `app.config.ts`.
   6. `firestore.rules` y `storage.rules` **cerrados por completo**
      (`allow read, write: if false`), `firestore.indexes.json` vacío, y desplegarlos a DEV.
@@ -3042,19 +3083,91 @@ el login aprobado. Angular ya avisa de ello en consola: `NG0913` para `logo.png`
   prueba que valida toda la estrategia. Un `getDoc` cualquiera contra Firestore **debe ser
   denegado** por las reglas cerradas.
 - **Criterios de aceptación.**
-  - [ ] `ng serve` conecta a `mi-pimpollito-dev` y el bundle lo contiene.
-  - [ ] Un campo comentado en `environment.ts` rompe `ng build --configuration development`.
-  - [ ] Las Rules desplegadas en DEV niegan todo.
-  - [ ] El badge **DEV** se ve en `ng serve`.
-  - [ ] `.firebaserc` **no** contiene un alias `prod` apuntando a un proyecto inexistente.
-  - [ ] **No existe** `environment.production.ts`, y ningún archivo del repositorio contiene
-        las credenciales de DEV bajo el nombre de producción.
-  - [ ] `firebase deploy` sin `-P` apunta a DEV (`default: dev`).
-- **Condición para avanzar.** DEV funciona, las reglas están cerradas y PROD sigue
-  explícitamente pendiente y sin poder confundirse con DEV.
-- **Deuda declarada de esta fase.** Crear `mi-pimpollito`, su `environment.production.ts`,
-  el alias `prod` y el `fileReplacements` de `production`. Se retoma en cuanto la cuenta
-  permita crear el proyecto, y **antes** de cerrar la Fase 5 (§22.1).
+  - [x] `ng serve` conecta a `mi-pimpollito-dev` y el bundle lo contiene.
+  - [x] Un campo comentado en `environment.ts` rompe `ng build --configuration development`.
+  - [ ] Las Rules desplegadas en DEV niegan todo. **Los archivos están escritos y son
+        deny-by-default; no se han desplegado con `firebase deploy` en esta sesión** (ver
+        registro de ejecución).
+  - [x] El badge **DEV** se ve en `ng serve`.
+  - [x] `.firebaserc` **no** contiene un alias `prod` apuntando a un proyecto inexistente.
+  - [x] **`environment.production.ts` existe y declara explícitamente, dentro del propio
+        archivo, que su Firebase es temporal** (corrección del 2026-09-12, §5.5): la versión
+        original de este criterio exigía que el archivo no existiera; se revirtió porque
+        Google tarda ~30 días en permitir crear `mi-pimpollito`, y bloquear el build de
+        producción todo ese tiempo costaba más que ser explícitos sobre el backend real.
+  - [x] `firebase deploy` sin `-P` apunta a DEV (`default: dev`), confirmado con `firebase use`.
+  - [x] `ng build` (configuración `production`, la predeterminada) **compila** y usa
+        `environment.production.ts` vía `fileReplacements` — verificado en el bundle.
+- **Condición para avanzar.** DEV funciona en ambos builds de Angular, y PROD real sigue
+  explícitamente pendiente, con un aviso visible (badge) y textual (comentario en el
+  archivo) de que es temporal. **Pendiente: desplegar `firestore.rules`/`storage.rules` a
+  DEV** antes de que exista escritura real desde el cliente (se cierra, como muy tarde, al
+  abrir la Fase 1, que ya asume Rules activas para `users`).
+- **Deuda declarada de esta fase.** Crear `mi-pimpollito`, y reemplazar el bloque `firebase`
+  de `environment.production.ts` (el archivo ya existe) por sus datos reales, más el alias
+  `prod` en `.firebaserc`. Se retoma en cuanto la cuenta permita crear el proyecto —
+  aproximadamente 30 días desde el 2026-09-12— y **antes** de cerrar la Fase 5 (§22.1).
+
+#### Registro de ejecución (2026-09-12)
+
+- **`@angular/fire@18.0.1`** instalado — es la última versión estable con
+  `peerDependencies: { "@angular/core": "^18.0.0" }`, exacta para este proyecto. Requiere
+  `firebase: ^10.12.0`; el `firebase@10.14.1` ya instalado lo satisface, así que el rango en
+  `package.json` se fijó a `^10.14.1` (no hizo falta reinstalar `firebase`).
+- **`provideFirebase()`** vive en `core/firebase/firebase.providers.ts` (no directamente en
+  `app.config.ts`), con el mismo patrón que `provideTranslation()`: App, Auth, Firestore,
+  Storage y Functions (`getFunctions(getApp(), 'southamerica-west1')`) en un solo
+  `EnvironmentProviders`. **No se creó `firebase.tokens.ts`** del árbol de carpetas del plan
+  (§4.3): hoy no hay ningún token que declarar — se crea en la fase que lo necesite.
+- **Verificación de que los providers son correctos, sin inyectarlos en ningún componente**
+  (la Fase 1 es quien los consume): un script Node de un solo uso, con el SDK real
+  (`firebase@10.14.1`) y los valores exactos de `environment.ts`, confirmó que
+  `initializeApp`/`getAuth`/`getFirestore`/`getStorage`/`getFunctions` resuelven sin error
+  contra `mi-pimpollito-dev`, `(default)` y `southamerica-west1`. En el navegador, los cinco
+  paquetes `@angular/fire/*` aparecen empaquetados y sin errores de consola, y **no hay
+  ninguna llamada de red a `googleapis.com`**: los `provide*` de Angular son perezosos y no
+  instancian nada hasta que algo los inyecta, lo cual ocurre recién en la Fase 1.
+- **No se ejecutó `firebase deploy`.** Se creó y validó localmente todo lo necesario
+  (`firestore.rules`, `storage.rules`, `firestore.indexes.json`, `firebase.json`,
+  `.firebaserc`) y se confirmó `firebase use dev` → `mi-pimpollito-dev`, pero desplegar las
+  reglas a la nube no estaba en el alcance explícito de esta sesión. El proyecto ya se creó
+  en "modo producción" (§5.4), que en Firestore/Storage cierra el acceso por defecto hasta
+  que se publiquen reglas propias — así que la ausencia de despliegue no deja la base
+  abierta, pero **las reglas versionadas en el repositorio y las que rigen hoy en la consola
+  pueden no ser exactamente el mismo texto** hasta el primer `firebase deploy`.
+- **`functions/` es un esqueleto sin instalar.** Tiene `package.json` (con
+  `firebase-functions@^7.3.2` y `firebase-admin@^14.4.0` declaradas, no descargadas),
+  `tsconfig.json` y un `src/index.ts` con solo comentarios de qué Function va en cada fase
+  futura. No se ejecutó `npm install` dentro de `functions/` — no hay lógica que compilar
+  todavía, y bajar esas dependencias ahora no aporta nada a esta fase.
+- **`firebase.json` incluye ya el bloque de Hosting** de §20.1 (reescritura SPA + cabeceras
+  de caché), aunque el primer despliegue de Hosting es la Fase 1B. Es solo configuración: no
+  se ejecutó ningún `firebase deploy --only hosting`.
+
+#### Corrección de decisión (2026-09-12, misma fecha, sesión posterior)
+
+El cliente confirmó que Google no permitirá crear `mi-pimpollito` hasta dentro de
+~30 días, y decidió que el build de producción de Angular **no debía quedar roto** todo ese
+tiempo. Esto reemplaza la regla original de esta fase ("`environment.production.ts` no se
+crea todavía") por la de §5.5. Cambios de código de esta corrección:
+
+- `AppEnvironment` ganó un campo `production: boolean` (el alias estándar de Angular) y
+  `environment.model.ts` ganó la constante `FIREBASE_DEV_PROJECT_ID`.
+- `environment.production.ts` **se creó**, con `firebase` idéntico al de DEV y un bloque de
+  comentario en mayúsculas que no se puede pasar por alto.
+- `angular.json` → `production.fileReplacements` **se añadió** (`environment.ts` →
+  `environment.production.ts`).
+- El badge de ambiente (topbar) se reescribió para **no** depender de `name`/`production`
+  —que ahora describen honestamente el build de Angular, no el Firebase real— sino de
+  comparar `environment.firebase.projectId` contra `FIREBASE_DEV_PROJECT_ID`. Se verificó
+  en el navegador que el badge (rotulado "Firebase DEV") se sigue viendo sirviendo el build
+  de **producción**.
+- Se verificó, comentando un campo en cada archivo por turno, que **ambos** environments
+  siguen rompiendo la compilación si les falta un dato — la garantía central de §5.1 se
+  mantiene para los dos, no solo para DEV.
+- Se verificó con `grep` en el bundle minificado de producción que el `projectId` presente
+  es `mi-pimpollito-dev` en los dos builds, y que en ningún lado aparece un `mi-pimpollito`
+  (sin sufijo) inventado.
 
 ---
 
@@ -3297,13 +3410,16 @@ el login aprobado. Angular ya avisa de ello en consola: `NG0913` para `logo.png`
   - [ ] El cierre del día refleja los pendientes.
 - **Condición para avanzar.** **Fin del MVP.** El sistema puede cobrar en efectivo y por QR,
   con comprobante y con evidencia.
-- **Aquí aparece el bloqueo de PROD (§5.5, §22.1).** El paso natural al cerrar esta fase es
-  desplegar a producción y sembrar el primer admin allí, y **eso requiere que
-  `mi-pimpollito` exista**. Si al llegar aquí la cuenta sigue en el límite de proyectos:
-  liberar cuota o pedir aumento, crear el proyecto con los valores de §5.5, crear
-  `environment.production.ts`, añadir el alias `prod` y el `fileReplacements`, autorizar el
-  dominio en Authentication, desplegar Rules e índices, y sembrar el primer admin.
-  **Mientras eso no ocurra, el sistema se queda en DEV y no se usa para vender.**
+- **Aquí es donde el bloqueo de PROD real deja de ser transparente (§5.5, §22.1).** El paso
+  natural al cerrar esta fase es desplegar frente a clientes reales y sembrar el primer admin
+  ahí, y **eso requiere que `mi-pimpollito` exista** — el `ng build` de producción ya
+  funciona desde la Fase 0B, pero sigue hablando temporalmente con `mi-pimpollito-dev`. Si al
+  llegar aquí la cuenta sigue en el límite de proyectos: liberar cuota o pedir aumento, crear
+  el proyecto con los valores de §5.5, **reemplazar** el bloque `firebase` de
+  `environment.production.ts` (el archivo ya existe) con los datos reales, añadir el alias
+  `prod` a `.firebaserc`, autorizar el dominio en Authentication, desplegar Rules e índices,
+  y sembrar el primer admin. **Mientras eso no ocurra, todo — incluido cualquier build de
+  producción que se genere — sigue siendo, de hecho, DEV.**
 
 ---
 

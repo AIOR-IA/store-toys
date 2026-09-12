@@ -18,15 +18,17 @@ import { provideAnimations } from '@angular/platform-browser/animations';
 import { registerLocaleData } from '@angular/common';
 import localeEs from '@angular/common/locales/es';
 import { provideTranslation } from '@core/config';
+import { provideFirebase } from '@core/firebase/firebase.providers';
 
 registerLocaleData(localeEs);
 
 /**
- * FASE 0A: se retiró el interceptor JWT heredado. Los `provide*` de Firebase
- * se añaden en la FASE 0B.
+ * FASE 0B: conecta el SDK de Firebase (App, Auth, Firestore, Storage,
+ * Functions) contra `mi-pimpollito-dev`. Ningún componente los consume
+ * todavía — eso empieza en la FASE 1 con la cadena de sesión (plan §6).
  *
  * `provideTranslation()` carga `assets/i18n/es.json` — el catálogo central de
- * textos (§4.5 del plan).
+ * textos (plan §4.5).
  */
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -34,6 +36,7 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes, withComponentInputBinding(), withViewTransitions()),
     provideHttpClient(),
     provideTranslation(),
+    provideFirebase(),
     //PrimeNg
     MessageService,
     ConfirmationService,

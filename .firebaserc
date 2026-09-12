@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "dev": "mi-pimpollito-dev",
+    "default": "mi-pimpollito-dev"
+  }
+}
