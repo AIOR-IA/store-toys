@@ -147,7 +147,7 @@
 
                             <ng-template pTemplate>
 
-                                Correo o contraseña incorrectos.
+                                {{ "app.common.messages.errorLogin" | translate }}
 
                             </ng-template>
 
@@ -194,7 +194,7 @@
                         </p>
 
                         <p *ngIf="loginForm.get('username')?.errors?.['usrOrEmailInvalid']">
-                            *El usuario o correo no es válido
+                            {{ "app.common.errors.usrOrEmailInvalid" | translate }}
                         </p>
 
                     </div>

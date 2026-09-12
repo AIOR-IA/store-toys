@@ -3,14 +3,14 @@
         *ngIf="root && item.visible !== false"
         class="layout-menuitem-root-text truncate px-4"
     >
-        {{ item.label }}
+        {{ item.label | translate }}
     </div>
     <!-- nested menus -->
     <a
         *ngIf="(!item.routerLink || item.items) && item.visible !== false"
         [attr.href]="item.url"
         (click)="itemClick($event)"
-        [pTooltip]="item.label"
+        [pTooltip]="item.label | translate"
         [ngClass]="item.class"
         [attr.target]="item.target"
         tabindex="0"
@@ -32,7 +32,7 @@
             </div>
             } }
             <div class="layout-menuitem-text text-white text-base w-[65%]">
-                {{ item.label }}
+                {{ item.label | translate }}
             </div>
             <i
                 class="fa solid fa-angle-down layout-submenu-toggler"
@@ -57,7 +57,7 @@
         [queryParamsHandling]="item.queryParamsHandling"
         [preserveFragment]="item.preserveFragment"
         [skipLocationChange]="item.skipLocationChange"
-        [pTooltip]="item.label"
+        [pTooltip]="item.label | translate"
         [replaceUrl]="item.replaceUrl"
         [state]="item.state"
         [queryParams]="item.queryParams"
@@ -81,7 +81,7 @@
             </div>
             } }
             <div class="layout-menuitem-text text-white text-base w-[65%]">
-                {{ item.label }}
+                {{ item.label | translate }}
             </div>
         </div>
 

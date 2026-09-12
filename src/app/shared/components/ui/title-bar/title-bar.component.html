@@ -20,7 +20,7 @@
             type="button"
             icon="fas fa-plus"
             class="p-button-info p-button-text"
-            [label]="newLabel() || 'Nuevo'"
+            [label]="newLabel() || ('app.common.new' | translate)"
             (click)="goToNewPath(newPath(), $event)"
         ></button>
         } @if(editPath() || editLabel()){
@@ -29,7 +29,7 @@
             type="button"
             icon="fas fa-pencil-alt"
             class="p-button-info p-button-text"
-            [label]="editLabel() || 'Editar'"
+            [label]="editLabel() || ('app.common.edit' | translate)"
             (click)="goToEditPath(editPath(), $event)"
         ></button>
         }

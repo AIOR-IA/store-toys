@@ -355,7 +355,7 @@ con una juguetería**, más ~18 dependencias de dominio ajeno y las carpetas
 10. **Dependencias ajenas al dominio:** `leaflet`, `leaflet-draw`, `geoman`, `ol`, `shpjs`,
     `utm`, `cytoscape`(+popper), `d3`, `d3-org-chart`, `d3-flextree`, `ckeditor5`(+angular),
     `quill`, `socket.io-client`, `ngx-markdown`, `github-markdown-css`, `ng2-pdf-viewer`,
-    `ionicons`, `tippy.js`, `ts-mixer`, `@ngx-translate/*`. Los presupuestos de bundle
+    `ionicons`, `tippy.js`, `ts-mixer`. Los presupuestos de bundle
     están en **4 MB warning / 5 MB error**, señal de cuánto arrastra el proyecto original.
 11. **Bug heredado en rutas:** `admin/projects` declara `resource: RESOURCES.USERS` y
     `admin/theme` usa `GEOGRAPHIC_LAYER`. Irrelevante porque esas rutas se eliminan, pero
@@ -379,7 +379,7 @@ con una juguetería**, más ~18 dependencias de dominio ajeno y las carpetas
 | 6 | Menú construido dentro de un `subscribe` de traducción | Con sesión asíncrona el sidebar aparece vacío; se repuebla con un contador `refresSideBar` | Fase 2 |
 | 7 | `location.href` para navegar y `setInterval` para vigilar el token | Reinicia la app y el SDK en cada login/logout; el intervalo es redundante y puede provocar logouts espurios | Fase 1 |
 | 8 | ~18 dependencias de dominio ajeno, presupuestos de 4–5 MB | Tiempo de build, superficie de vulnerabilidades y ruido permanente | Fase 0A |
-| 9 | `@ngx-translate` en un sistema monolingüe | Añade una dependencia asíncrona en el arranque sin beneficio | Fase 0A |
+| 9 | El menú se construía dentro de `translate.get('app').subscribe()` | Con la sesión asíncrona el sidebar aparece vacío. **La librería se conserva** (§4.5); lo que se elimina es ese patrón: las etiquetas son claves y las resuelve el pipe | Fase 0A |
 | 10 | Assets de 10,8 MB y paleta teal/verde | Primera carga lenta y tokens que contradicen la marca | Fase 0A |
 | 11 | `User` heredado: `id: number`, `username`, `roleUsers[]`, `entity`, clase con lógica | Incompatible con `uid: string` y rol único. Mezclar ambos modelos garantiza bugs | Fase 2 |
 | 12 | NgModules por feature conviviendo con componentes standalone | No es un error, pero obliga a decidir en qué mundo vive cada componente nuevo | Fase 0A |
@@ -495,18 +495,62 @@ firebase.json · .firebaserc
 | `@ngx-translate/core`, `@ngx-translate/http-loader` | **Eliminar** | Ver §4.5 |
 | `ngxtension` | **Adaptar** | Revisar si algo del código conservado lo usa; si no, eliminar |
 
-### 4.5 Internacionalización: se retira
+### 4.5 Internacionalización: se CONSERVA ngx-translate como catálogo de textos
 
-- **Recomendación:** retirar `ngx-translate`. Textos en español directamente en las
-  plantillas, y la traducción de PrimeNG como un objeto estático en `core/config`.
-- **Por qué:** es una juguetería en Bolivia con un solo idioma. Hoy la librería añade dos
-  costes reales: el modelo del menú se construye dentro de `translate.get('app').subscribe()`
-  —una dependencia asíncrona en el arranque que ya se sabe frágil— y cada texto exige
-  mantener una clave en `assets/i18n`. Quitarla elimina una fuente de estados intermedios
-  justo en el arranque donde se resuelve la sesión.
-- **Descartadas:** *conservarla "por si acaso"* — mantener infraestructura sin usar tiene
-  coste continuo; añadir un idioma después es mecánico. *`@angular/localize`* — más
-  ceremonia (un build por locale) para un beneficio nulo hoy.
+> **Decisión del cliente (2026-09-12), posterior a la Fase 0A. Invierte la recomendación
+> anterior de este documento, que era retirar la librería.**
+>
+> **Mi Pimpollito conserva `ngx-translate` con `es.json` como catálogo central de textos,
+> aunque inicialmente solo exista idioma español.**
+
+- **Decisión vigente:** se mantiene `@ngx-translate/core@15` + `@ngx-translate/http-loader@8`
+  y `src/assets/i18n/es.json`.
+- **Por qué:** el objetivo **no** es tener varios idiomas — es que no queden strings
+  sueltos repartidos por los componentes. Un catálogo único hace que cambiar un texto sea
+  editar un JSON, y que los textos sean revisables de un vistazo.
+- **Alcance:** **solo español**. Idioma predeterminado `es`, sin selector de idiomas, sin
+  detección del idioma del navegador, sin segundo archivo de traducción.
+- **Patrón, compatible con la arquitectura standalone:**
+  `@ngx-translate/core@15` **no** expone `provideTranslateService`, así que la
+  infraestructura vive en `core/config/translate.config.ts` y se inyecta con
+  `provideTranslation()` en `app.config.ts`:
+
+  ```ts
+  importProvidersFrom(
+      TranslateModule.forRoot({
+          defaultLanguage: 'es',
+          loader: { provide: TranslateLoader,
+                    useFactory: translateHttpLoaderFactory, deps: [HttpClient] },
+      }),
+  )
+  ```
+
+  `defaultLanguage` dispara la carga de `es.json` por sí solo: **no hace falta ningún
+  `translate.use()` en el arranque**. Cada componente standalone importa `TranslateModule`
+  para disponer del pipe.
+
+- **REGLA que sí se conserva del análisis original.** Los textos se consumen con el **pipe**
+  `| translate` en las plantillas. **Prohibido construir modelos dentro de
+  `translate.get(...).subscribe(...)`**: ése es exactamente el patrón heredado de SAHTOSO que
+  dejaba el sidebar vacío en el arranque (§3.3, hallazgo 6). Por eso el menú guarda **claves**
+  (`label: 'app.menu.home'`) y la plantilla de `menu-item` las resuelve con el pipe.
+- **La traducción de PrimeNG sigue siendo estática** (`core/config/primeng-es.config.ts`).
+  Los nombres de meses y los botones de un calendario son configuración de librería, no
+  textos de la aplicación, y resolverlos de forma asíncrona provoca un parpadeo de texto sin
+  traducir en el arranque. El bloque `app.ng` del catálogo heredado se descartó.
+- **Descartada:** *`@angular/localize`* — un build por locale, más ceremonia para un beneficio
+  nulo con un solo idioma.
+- **Impacto futuro:** si algún día hiciera falta quechua o inglés, se añade `qu.json` o
+  `en.json` y un selector. El trabajo ya está hecho.
+
+#### El catálogo se podó
+
+El `es.json` restaurado era el catálogo íntegro de SAHTOSO (24,8 KB). Se eliminaron los
+bloques de dominio ajeno —`models`, `roles`, `audit`, `project`, `community`, `entity`,
+`dashboard`, `image`, `ng`— y las claves de `common` propias de los flujos de aprobación,
+agentes, comunidades y GIS. `app.menu` y `app.users` se reescribieron con el menú y los
+campos de `AppUser` de este proyecto (§8.2). Resultado: **5,6 KB**, con
+`common`, `menu`, `users` y `profile`.
 
 ### 4.6 Capa de acceso a datos
 
@@ -2737,7 +2781,7 @@ respuesta del cliente, y el motivo está en §2.1.
 | 32 | **Proveedores de Authentication** | **Solo Email/Password.** Google Sign-In, email link y MFA deshabilitados | Las cuentas las crea un admin (§7). Google Sign-In permitiría a cualquiera crear una sesión de Auth sin acceso real, ensuciando el proyecto | 0B | Medio — cuentas de Auth que nadie dio de alta |
 | 33 | **PROD mientras `mi-pimpollito` no exista** | **Bloqueado.** No se crea `environment.production.ts`, `.firebaserc` lleva solo el alias `dev`, y **DEV no se usa como PROD** | Escribir credenciales de DEV en el archivo de producción es precisamente el error que la §5 existe para hacer imposible | 5 (despliegue) | **Alto** — datos de prueba mezclados con ventas reales, sin forma de separarlos |
 | 34 | **SDK de Firebase en Angular** | `@angular/fire@^18` | Wrappers zone-aware (el proyecto usa zone.js) y adaptadores a Observable, que son las piezas del pipeline de sesión | 0B | Medio — bugs intermitentes de detección de cambios |
-| 35 | **Internacionalización** | Se retira `ngx-translate`; textos en español en las plantillas | Sistema monolingüe, y el menú dependía de una llamada asíncrona de traducción en el arranque | 0A | Bajo — una dependencia asíncrona frágil en el arranque, sin beneficio |
+| 35 ⟳ | **Internacionalización** | **Se conserva `ngx-translate`** con `es.json` como catálogo central de textos; solo español. Los textos se resuelven con el **pipe**, nunca en `translate.get().subscribe()` | Decisión del cliente: evitar strings sueltos en los componentes. El coste real del patrón heredado estaba en construir modelos dentro de un `subscribe`, no en la librería | 0A | Medio — o strings repartidos por el código, o el sidebar vacío en el arranque si se vuelve al `subscribe` |
 | 36 | **Estrategia CI/CD** | `main` → PROD · `develop` → DEV · PR → preview **en DEV**. Despliegue manual adelantado a la Fase 1B | Las previews sobre PROD darían a ramas sin revisar acceso a los datos reales. El despliegue temprano revela los problemas de Hosting cuando son baratos | 1B / 9 | Medio — problemas de hosting descubiertos tarde, o previews escribiendo en producción |
 | 37 | **Security Rules** | Se escriben **junto a cada fase**, con cierre explícito `match /{document=**} { allow read, write: if false; }` | Dejarlas para el final significa desarrollar meses contra una base abierta y descubrir al final qué se rompe al cerrarla | cada fase | **Crítico** — base de datos abierta en producción |
 
@@ -2866,8 +2910,10 @@ depende de la 6 (el reporte separa mercancía de gift cards).
      `task-priority-chip`. **Conservar** search-bar, spinner, field-error, title-bar,
      input-file y el resto.
   6. Desinstalar las ~18 dependencias de §4.4 y quitar sus entradas de `angular.json → styles`.
-  7. Retirar `@ngx-translate` y `src/assets/i18n`; textos en español en las plantillas; la
-     traducción de PrimeNG como objeto estático.
+  7. ~~Retirar `@ngx-translate` y `src/assets/i18n`~~ → **revertido por decisión del cliente
+     (§4.5)**: la librería y `src/assets/i18n/es.json` se conservan como catálogo central de
+     textos. Lo que sí se elimina es el patrón `translate.get('app').subscribe()` del menú.
+     La traducción de PrimeNG queda como objeto estático en `core/config`.
   8. Eliminar `src/assets/geovisor`.
   9. Repaletizar `tailwind.config.js` a los tokens de marca (§4.7); eliminar el bloque
      `clire: {...}`. **Mantener** `styles.scss` sin `@tailwind base`.
@@ -2915,11 +2961,14 @@ este documento decía:
    `AttachmentService` contra la API REST; sin ese servicio es un componente que no puede
    funcionar. La Fase 3 construye el subidor contra Storage con `image-compressor.service.ts`,
    que de todos modos es otro componente. Se retiró también `ng2-pdf-viewer`.
-5. **Retirar `@ngx-translate` fue más amplio de lo previsto.** No solo el menú: usaban el
-   pipe `translate` **siete** componentes de `shared` (field-error, search-bar,
-   items-not-found, cards-paginator, icons-dropdown, title-list, unauthorized), la directiva
-   `truncate-toggle` y `ToastService`. Todos quedaron con texto en español directo, y
-   `ToastService` ahora recibe el mensaje en lugar de una clave.
+5. **`@ngx-translate` se retiró y el cliente lo revirtió el mismo día.** Primero se comprobó
+   que el uso era mucho más amplio de lo previsto —no solo el menú: el pipe `translate` lo
+   usaban **siete** componentes de `shared` (field-error, search-bar, items-not-found,
+   cards-paginator, icons-dropdown, title-list, unauthorized), la directiva `truncate-toggle`
+   y `ToastService`—. Tras la decisión de **conservar la librería como catálogo central de
+   textos** (§4.5), todos ellos volvieron al pipe y `ToastService` volvió a recibir una clave.
+   **Lo que no volvió** es el patrón `translate.get('app').subscribe()` del menú: las
+   etiquetas son claves y las resuelve el pipe en la plantilla.
 6. **La paleta del layout no estaba en Tailwind.** Vive en
    `src/assets/layout/styles/theme/tailwind-light/theme.css` como un bloque de variables CSS
    `--clire-*`, renombrado a `--pimpollito-*` y repaletizado. `--sidebar-bg`,

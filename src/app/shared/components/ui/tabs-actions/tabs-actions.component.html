@@ -42,13 +42,13 @@
             } @if (!hideReloadButton()) {
             <p-button
                 styleClass="p-button-info"
-                pTooltip="Recargar"
+                [pTooltip]="'app.common.reload' | translate"
                 tooltipPosition="top"
                 (onClick)="emitReload($event)"
             >
                 <i class="fas fa-rotate"></i>
                 <label class="ml-2 hidden md:block">{{
-                    "Recargar"
+                    "app.common.reload" | translate
                 }}</label>
             </p-button>
             }

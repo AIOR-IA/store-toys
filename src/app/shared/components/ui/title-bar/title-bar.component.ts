@@ -3,11 +3,12 @@ import { ButtonModule } from 'primeng/button';
 import { Location } from '@angular/common';
 import { SplitButtonModule } from 'primeng/splitbutton';
 import { Router } from '@angular/router';
+import { TranslateModule } from '@ngx-translate/core';
 
 @Component({
     selector: 'app-title-bar',
     standalone: true,
-    imports: [ButtonModule, SplitButtonModule],
+    imports: [ButtonModule, SplitButtonModule, TranslateModule],
     templateUrl: './title-bar.component.html',
     styleUrl: './title-bar.component.scss',
 })

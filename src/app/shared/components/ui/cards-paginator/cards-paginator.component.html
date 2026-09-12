@@ -6,7 +6,7 @@
         (click)="onPreviousPage($event)"
         loadingIcon="fas fa-spinner fa-spin"
     >
-        Anterior
+        {{ 'app.common.previous' | translate }}
     </button>
     } @if(hasNextPage()) {
     <button
@@ -15,7 +15,7 @@
         (click)="onNextPage($event)"
         loadingIcon="fas fa-spinner fa-spin"
     >
-        Siguiente
+        {{ 'app.common.next' | translate }}
     </button>
     }
 </div>

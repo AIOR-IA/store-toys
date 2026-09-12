@@ -17,6 +17,7 @@ import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { ButtonModule } from 'primeng/button';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SplitButtonModule } from 'primeng/splitbutton';
+import { TranslateService } from '@ngx-translate/core';
 
 @Component({
     selector: 'app-body-header',
@@ -37,7 +38,8 @@ export class BodyHeaderComponent implements OnChanges {
     options = input<MenuItem[]>([]);
     createPath = input<string>();
     createParams = input<any>();
-    createLabel = input<string>('Nuevo');
+    translate = inject(TranslateService);
+    createLabel = input<string>(this.translate.instant('app.common.new'));
     viewButtons = input<boolean>(true);
 
     home!: MenuItem;

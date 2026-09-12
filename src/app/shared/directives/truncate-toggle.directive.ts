@@ -6,6 +6,7 @@ import {
     ElementRef,
     Renderer2,
 } from '@angular/core';
+import { TranslateService } from '@ngx-translate/core';
 
 @Directive({
     selector: '[appTruncateToggle]',
@@ -14,8 +15,8 @@ import {
 export class TruncateToggleDirective implements AfterViewInit, OnDestroy {
     /** Longitud máxima antes de truncar */
     @Input('appTruncateToggle') maxLength!: number;
-    @Input() moreText: string = 'Ver más';
-    @Input() lessText: string = 'Ver menos';
+    @Input() moreTextKey: string = 'app.common.viewMore';
+    @Input() lessTextKey: string = 'app.common.viewLess';
 
     private originalText: string = '';
     private truncatedText: string = '';
@@ -25,6 +26,7 @@ export class TruncateToggleDirective implements AfterViewInit, OnDestroy {
     constructor(
         private el: ElementRef<HTMLElement>,
         private renderer: Renderer2,
+        private translate: TranslateService,
     ) {}
 
     ngAfterViewInit(): void {
@@ -53,8 +55,8 @@ export class TruncateToggleDirective implements AfterViewInit, OnDestroy {
     }
 
     private render(): void {
-        const moreLabel = this.moreText;
-        const lessLabel = this.lessText;
+        const moreLabel = this.translate.instant(this.moreTextKey);
+        const lessLabel = this.translate.instant(this.lessTextKey);
         const text = this.isTruncated ? this.truncatedText : this.originalText;
         const label = this.isTruncated ? moreLabel : lessLabel;
 

@@ -1,4 +1,5 @@
 import { Component, inject, input, model, OnInit, output } from '@angular/core';
+import { TranslateModule } from '@ngx-translate/core';
 import {
     FilterTabComponent,
     FilterTabOption,
@@ -19,6 +20,7 @@ import { Location } from '@angular/common';
         FilterTabComponent,
         ButtonModule,
         TooltipModule,
+        TranslateModule,
     ],
     templateUrl: './tabs-actions.component.html',
     styleUrl: './tabs-actions.component.scss',

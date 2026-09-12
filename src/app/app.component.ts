@@ -8,17 +8,24 @@ import {
     RouterOutlet,
 } from '@angular/router';
 import { PrimeNGConfig } from 'primeng/api';
-import { NgConfig } from './core/config';
+import { NgConfig } from '@core/config';
 import { ToastModule } from 'primeng/toast';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { SpinnerComponent } from '@shared/components';
+import { TranslateModule } from '@ngx-translate/core';
 import { showHideSpinner } from '@core/utils';
-import { PRIMENG_ES } from './core/config/primeng-es.config';
+import { PRIMENG_ES } from '@core/config';
 
 @Component({
     selector: 'app-root',
     standalone: true,
-    imports: [RouterOutlet, ToastModule, ConfirmDialogModule, SpinnerComponent],
+    imports: [
+        RouterOutlet,
+        ToastModule,
+        ConfirmDialogModule,
+        SpinnerComponent,
+        TranslateModule,
+    ],
     templateUrl: './app.component.html',
     styleUrl: './app.component.scss',
 })

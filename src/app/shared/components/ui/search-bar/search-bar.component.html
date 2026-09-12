@@ -11,7 +11,11 @@
         [(ngModel)]="searchValue"
         class="w-full py-3 px-4 border border-gray-300 rounded-r-none rounded-l-lg shadow-sm"
         (keyup.enter)="search()"
-        [placeholder]="(placeholder() || '') === '' ? 'Buscar...' : placeholder()"
+        [placeholder]="
+          (placeholder() || '') === ''
+            ? ('app.common.search' | translate) + '...'
+            : (placeholder() || '' | translate)
+        "
       />
       @if(thin()) {
       <p-button
@@ -24,7 +28,7 @@
 
       } @else {
       <p-button
-        label="Buscar"
+        [label]="'app.common.search' | translate"
         icon="fas fa-search"
         iconPos="right"
         (onClick)="search()"

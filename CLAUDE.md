@@ -21,6 +21,7 @@ Si una decisión cambia: se cambia **primero en el plan**, luego en el código.
 Angular 18 (standalone, Signals + RxJS) · PrimeNG 17 · Tailwind · SCSS · FontAwesome
 Firebase: Authentication · Cloud Firestore · Storage · Functions (solo lo privilegiado) · Hosting
 `@angular/fire@^18` sobre `firebase@^10.7+` · dayjs (utc + timezone) · pdfmake · jsbarcode
+`@ngx-translate/core@15` + `http-loader@8` — catálogo de textos, **solo español**
 
 **No hay API REST propia ni NestJS.** El cliente habla directo con Firestore donde las Rules
 pueden validarlo; lo demás pasa por Cloud Functions.
@@ -68,6 +69,86 @@ pueden validarlo; lo demás pasa por Cloud Functions.
   compilación**. Nunca se comenta ni descomenta configuración.
 - Un `firebase deploy` sin `-P` apunta a DEV.
 - **No mezclar ambientes.** Badge `DEV` visible en el topbar cuando `environment.name !== 'prod'`.
+
+## Textos e i18n
+
+**Mi Pimpollito conserva `ngx-translate` con `es.json` como catálogo central de textos,
+aunque inicialmente solo exista idioma español.**
+
+- Todo texto de la aplicación vive en `src/assets/i18n/es.json`. **No hardcodear strings
+  en componentes ni plantillas.**
+- Se consume con el **pipe**: `{{ 'app.users.title' | translate }}`. Cada componente
+  standalone importa `TranslateModule`.
+- **PROHIBIDO construir modelos dentro de `translate.get(...).subscribe(...)`.** Es el
+  patrón heredado de SAHTOSO que dejaba el sidebar vacío en el arranque. Si un modelo necesita
+  etiquetas (el menú, por ejemplo), guarda **claves** y la plantilla las resuelve con el pipe.
+- Infraestructura en `core/config/translate.config.ts`, inyectada con `provideTranslation()`
+  en `app.config.ts`. `defaultLanguage: 'es'` carga `es.json` solo: **no llamar
+  `translate.use()` en el arranque**.
+- **Solo español.** Sin selector de idiomas, sin detección del navegador, sin segundo archivo.
+- La traducción de **PrimeNG es estática** (`core/config/primeng-es.config.ts`): es
+  configuración de librería, no texto de la aplicación.
+- Detalle y motivos: plan §4.5.
+
+<!-- ADDED BY CHATGPT -->
+
+### Internationalization (i18n)
+
+User-visible text must use the existing `ngx-translate` system.
+
+Mi Pimpollito currently uses Spanish only, but `ngx-translate` is kept as the
+centralized UI text system.
+
+The primary translation catalog is:
+
+`src/assets/i18n/es.json`
+
+Do **not** hardcode Spanish UI text in templates or TypeScript when the text
+belongs to the application's translation system.
+
+Before adding a new:
+
+- title
+- subtitle
+- label
+- button text
+- menu option
+- validation message
+- success/error message
+- tooltip
+- placeholder
+- empty-state message
+- dialog text
+- confirmation message
+- table header
+- form field text
+
+follow this process:
+
+1. Search `src/assets/i18n/es.json` for an appropriate existing translation key.
+2. Reuse the existing key whenever possible.
+3. If it does not exist, add a new key to `src/assets/i18n/es.json`.
+4. Organize keys by feature/domain, for example:
+   - `common.*`
+   - `auth.*`
+   - `users.*`
+   - `products.*`
+   - `sales.*`
+   - `payments.*`
+   - `giftCards.*`
+   - `validation.*`
+5. Use the existing `translate` pipe in templates or the translation service
+   pattern already used by the surrounding TypeScript code.
+6. Do not create duplicate keys for text that already exists elsewhere in the
+   translation catalog.
+7. Do not restore old SAHTOSO/CLIRE translation keys unless they are genuinely
+   reusable by Mi Pimpollito.
+8. Do not introduce another i18n library.
+
+Example:
+
+```html
+{{ 'users.actions.create' | translate }}
 
 ## Roles
 
@@ -197,8 +278,10 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 ## Estado actual
 
 - **Fase 0A COMPLETADA** (rama `phase-0a-cleanup`, sin commit). El fork de SAHTOSO quedó
-  limpio: 398 archivos eliminados, 35 dependencias desinstaladas, identidad de Mi Pimpollito
+  limpio: 398 archivos eliminados, 33 dependencias desinstaladas, identidad de Mi Pimpollito
   aplicada. Build de producción: 758 kB iniciales (164 kB transferidos).
+- **Corrección posterior a la Fase 0A:** `ngx-translate` y `es.json` se **conservan** por
+  decisión del cliente — ver *Textos e i18n* arriba y plan §4.5.
 - **No hay nada de Firebase escrito todavía** (`firebase@^10` está en `package.json` sin usar).
   El proyecto DEV existe en la consola, pero el repositorio aún no tiene `firebase.json`,
   `.firebaserc`, reglas ni `environment` conectados: eso es la Fase 0B.

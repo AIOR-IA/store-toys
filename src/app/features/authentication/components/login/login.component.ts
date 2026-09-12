@@ -11,6 +11,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { MessagesModule } from 'primeng/messages';
 import { PasswordModule } from 'primeng/password';
+import { TranslateModule } from '@ngx-translate/core';
 
 /**
  * Pantalla de login.
@@ -35,6 +36,7 @@ import { PasswordModule } from 'primeng/password';
         InputTextModule,
         MessagesModule,
         PasswordModule,
+        TranslateModule,
     ],
     templateUrl: './login.component.html',
     styleUrls: ['./login.component.scss'],

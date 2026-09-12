@@ -10,6 +10,7 @@ import { Router, NavigationEnd, RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { RippleModule } from 'primeng/ripple';
 import { TooltipModule } from 'primeng/tooltip';
+import { TranslateModule } from '@ngx-translate/core';
 import { Subscription, filter } from 'rxjs';
 import { LayoutService } from '../../../services/app.layout.service';
 import {
@@ -23,7 +24,14 @@ import { MenuService } from '../../../services/app.menu.service';
 
 @Component({
     standalone: true,
-    imports: [CommonModule, RouterModule, RippleModule, TooltipModule, AppMenuItemComponent],
+    imports: [
+        CommonModule,
+        RouterModule,
+        RippleModule,
+        TooltipModule,
+        TranslateModule,
+        AppMenuItemComponent,
+    ],
     selector: '[app-menu-item]',
     templateUrl: './menu-item.component.html',
     styleUrl: './menu-item.component.scss',
