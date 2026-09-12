@@ -10,7 +10,8 @@
 | **Negocio** | Artículos y accesorios para niños · Oruro, Bolivia |
 | **Estado del documento** | Planificación cerrada · aprobada · **ninguna fase implementada** |
 | **Última consolidación** | 2026-09-12 |
-| **Fuentes consolidadas** | Plan técnico completo + cuestionario de 48 preguntas respondido por el cliente |
+| **Fuentes consolidadas** | Plan técnico completo + cuestionario de 48 preguntas respondido por el cliente + **configuración real de Firebase DEV** (§5.4) |
+| **Infraestructura** | DEV `mi-pimpollito-dev` **creado y configurado** · PROD `mi-pimpollito` **pendiente**, límite de proyectos de la cuenta (§5.5) |
 | **Siguiente paso** | FASE 0A — Limpieza controlada del proyecto heredado |
 
 ---
@@ -100,13 +101,13 @@ Tel. +591 77966329
 @mipimpollito
 ```
 
-**Proyectos Firebase objetivo** (IDs deseados, globalmente únicos: se **verifican** al
-ejecutar la Fase 0B, no antes):
+**Proyectos Firebase.** La configuración completa y real de DEV está en **§5.4**; el estado
+de PROD y sus reglas, en **§5.5**.
 
-| Ambiente | Project ID | Hosting esperado |
-|---|---|---|
-| PROD | `mi-pimpollito` | `https://mi-pimpollito.web.app` |
-| DEV | `mi-pimpollito-dev` | `https://mi-pimpollito-dev.web.app` |
+| Ambiente | Project ID | Hosting | Estado |
+|---|---|---|---|
+| **DEV** | `mi-pimpollito-dev` | `https://mi-pimpollito-dev.web.app` | **Creado y configurado** (§5.4) |
+| **PROD** | `mi-pimpollito` | `https://mi-pimpollito.web.app` | **No creado todavía** — la cuenta alcanzó el límite de proyectos (§5.5) |
 
 Cuenta: `lenar.toledo@gmail.com`. **Nunca se solicitan** contraseñas, tokens personales,
 claves privadas ni service account JSON: la autenticación de Firebase CLI la ejecuta el
@@ -592,7 +593,7 @@ export const environment: AppEnvironment = {
 ```
 
 ```ts
-// src/environments/environment.production.ts   ← PROD
+// src/environments/environment.production.ts   ← PROD · NO SE CREA TODAVÍA (§5.5)
 import { AppEnvironment } from './environment.model';
 export const environment: AppEnvironment = {
   name: 'prod',
@@ -600,6 +601,11 @@ export const environment: AppEnvironment = {
   useEmulators: false,
 };
 ```
+
+> **`environment.production.ts` está pendiente.** `mi-pimpollito` no existe todavía (§5.5),
+> así que el archivo **no se crea** y, sobre todo, **nunca lleva las credenciales de DEV**.
+> Mientras eso sea así, el build de producción no está disponible y se trabaja con
+> `ng build --configuration development`.
 
 Las claves `firebase.*` del cliente web **no son secretos**: son identificadores públicos
 del proyecto. Lo que protege los datos son las Security Rules y App Check, no ocultar el
@@ -613,7 +619,7 @@ repositorio es un service account JSON.
 | Nombre del proyecto | `sahtoso-frontend` | `pimpollo-frontend` |
 | `outputPath` | `dist/sahtoso-frontend` | `dist/pimpollo-frontend` |
 | `defaultConfiguration` de `build` | `production` | `production` (se mantiene) |
-| `fileReplacements` en `production` | **no existe** | `environment.ts` → `environment.production.ts` |
+| `fileReplacements` en `production` | **no existe** | `environment.ts` → `environment.production.ts` · *se declara cuando exista PROD (§5.5)* |
 | Configuración `production-sahtoso` | existe | **eliminar** |
 | Configuración `development` | reemplaza a `environment.development.ts` | **eliminar el reemplazo**: DEV es ya el archivo base |
 | `serve.staging` | apunta a un `build:staging` inexistente | **eliminar** |
@@ -630,42 +636,142 @@ Scripts de `package.json` objetivo:
 "deploy:prod": "ng build && firebase deploy --only hosting -P prod"
 ```
 
+`build` y `deploy:prod` quedan declarados pero **no son ejecutables** hasta que exista
+`mi-pimpollito` (§5.5): faltan el archivo de entorno y el alias `prod`. Durante todo el
+desarrollo se usan `start`, `build:dev` y `deploy:dev`.
+
 ### 5.3 Un badge de ambiente en la interfaz
 
 En el topbar, cuando `environment.name !== 'prod'`, se muestra un badge **DEV** visible y
 de color distinto. Es tres líneas de código y elimina la clase entera de errores de
 "estaba tocando la base equivocada". En PROD no se renderiza nada.
 
-### 5.4 Configuración de cada proyecto Firebase (Fase 0B)
+### 5.4 DEV — configuración real, ya creada y aprobada
 
-Idéntica en DEV y PROD, salvo el ID:
+**Este es el estado de hecho, no una intención.** El proyecto se creó manualmente por
+consola y estos son sus valores definitivos. Cualquier discrepancia entre el código y esta
+tabla es un error del código.
 
-1. Crear el proyecto (verificando la disponibilidad del ID; si `mi-pimpollito` estuviera
-   tomado, se elige el siguiente y se **actualiza este documento**).
-2. **Región de Firestore: `southamerica-east1`** (São Paulo). Es **inmutable** y se elige
-   al crear la base: por latencia desde Bolivia, que se nota en el mostrador.
-   `us-central1` es marginalmente más barata; no compensa.
-3. Firestore en **modo producción** (reglas cerradas desde el minuto cero), nunca en modo test.
-4. Habilitar **Authentication → Email/Password**. **Deshabilitar el registro público**
-   (solo un admin crea cuentas, §7).
-5. Habilitar **Storage**. *Nota operativa:* los proyectos Firebase nuevos pueden exigir
-   plan **Blaze** para aprovisionar el bucket por defecto — se comprueba en este paso.
-6. **Plan Blaze** con **alerta de presupuesto en USD 5**. El volumen de esta tienda cabe
-   con holgura en los tramos gratuitos; la alerta es la red de seguridad, no un gasto previsto.
-7. `.firebaserc` con alias:
+| Concepto | Valor |
+|---|---|
+| Project ID | **`mi-pimpollito-dev`** |
+| Web App | **Mi Pimpollito Web DEV** |
+| Hosting | `https://mi-pimpollito-dev.web.app` |
 
-   ```json
-   { "projects": { "dev": "mi-pimpollito-dev", "prod": "mi-pimpollito", "default": "mi-pimpollito-dev" } }
-   ```
+**Authentication**
 
-   `default` apunta a **DEV** deliberadamente: un `firebase deploy` sin `-P` no puede
-   tocar producción.
+| Proveedor / ajuste | Estado |
+|---|---|
+| Email/Password | **Habilitado** |
+| Google Sign-In | **Deshabilitado** |
+| Email link (passwordless) | **Deshabilitado** |
+| MFA | **Deshabilitado por ahora** |
+
+Solo Email/Password, que es lo que el modelo de usuarios necesita (§7): las cuentas las crea
+un admin, no el propio usuario. Google Sign-In queda deshabilitado deliberadamente — con él
+activo, cualquiera con una cuenta de Google podría crear una sesión de Authentication; no
+accedería a nada por falta de documento en `users` (§7.1), pero ensuciaría el proyecto y
+rompería la premisa de que solo existen las cuentas que el admin dio de alta.
+
+**Cloud Firestore**
+
+| Concepto | Valor |
+|---|---|
+| Edition | **Standard** |
+| Database ID | **`(default)`** |
+| Location | **`southamerica-west1`** (Santiago de Chile) |
+| Security initialization | **Production mode** (reglas cerradas desde el minuto cero) |
+
+**Cloud Storage**
+
+| Concepto | Valor |
+|---|---|
+| Default bucket | **`mi-pimpollito-dev.firebasestorage.app`** |
+| Location | **`US-CENTRAL1`** |
+| Storage class | **Standard** |
+| Security initialization | **Production mode** |
+
+La elección de `US-CENTRAL1` para Storage **es intencional**: es la región que da acceso a
+la cuota gratuita correspondiente de Cloud Storage. Consecuencia que conviene tener escrita:
+el bucket queda en otra región que Firestore, así que las imágenes de producto viajan desde
+Estados Unidos. Con imágenes comprimidas a 120–200 KB (§9.2) y servidas por CDN eso no se
+nota en el mostrador, y el ahorro es real; pero es el motivo por el que la **compresión en el
+cliente no es negociable**. La ubicación de un bucket es **inmutable**: cambiarla exigiría
+crear otro bucket y mover los archivos.
+
+**Billing**
+
+| Concepto | Valor |
+|---|---|
+| Plan | **Blaze** |
+| Budget alert | **USD 5** |
+
+> **El presupuesto es una alerta, no un límite duro.** Google **no corta el servicio** al
+> alcanzarlo: solo envía un correo. Si algo consumiera de forma descontrolada, el gasto
+> sigue. La alerta es para enterarse a tiempo, y la defensa real son las reglas de
+> disciplina de §19.3 (nunca `getDocs()` sin `limit()`, sin listeners innecesarios).
+
+**Firebase CLI**
+
+| Concepto | Valor |
+|---|---|
+| `firebase-tools` | instalado, versión **15.3.0** |
+| `firebase login` | realizado correctamente (por navegador, por el desarrollador) |
+| `firebase projects:list` | reconoce `mi-pimpollito-dev` |
 
 > **Blaze y el orden de las fases.** Cloud Functions requiere Blaze, y Functions aparece en
 > la Fase 2 (`createUser`). Storage lo necesita la Fase 3. La Fase 1 completa (login,
 > sesión, guards, recuperación de contraseña, primer admin sembrado a mano) **no necesita
-> Functions**. El cliente asocia su tarjeta manualmente cuando llegue el momento; el
-> documento no lo requiere antes.
+> Functions**. Con Blaze ya activo en DEV, nada de esto bloquea ninguna fase.
+
+### 5.5 PROD — pendiente y bloqueado
+
+**`mi-pimpollito` no existe todavía: la cuenta alcanzó el límite de proyectos de Firebase.**
+
+Reglas que se derivan de ese hecho y que no se negocian:
+
+1. **DEV no se usa como PROD.** Ni temporalmente, ni "solo para mostrarlo al cliente". La
+   base de DEV contiene datos de prueba, y el día que se mezclen con ventas reales no hay
+   forma de separarlos.
+2. **`environment.production.ts` no se crea todavía**, y **nunca** apuntará a
+   `mi-pimpollito-dev`. Escribir las credenciales de DEV en el archivo de producción es
+   exactamente el error que toda la §5 existe para hacer imposible.
+3. **Consecuencia operativa:** mientras PROD no exista, el build de producción no está
+   disponible. Durante todo el desarrollo se usa `ng build --configuration development`.
+   `ng build` a secas (configuración `production`, que es la predeterminada) **fallará por
+   falta del archivo de entorno** — y eso es lo correcto: es imposible generar por accidente
+   un bundle "de producción" que escriba en DEV.
+4. **`.firebaserc` lleva solo el alias `dev`** hasta que PROD exista:
+
+   ```json
+   { "projects": { "dev": "mi-pimpollito-dev", "default": "mi-pimpollito-dev" } }
+   ```
+
+   El alias `prod` se añade cuando haya un proyecto al que apuntar. Un alias que apunta a un
+   proyecto inexistente falla en el momento del deploy, que es el peor momento posible.
+5. **Qué hay que hacer cuando `mi-pimpollito` pueda crearse** — se configura y se despliega
+   **por separado**, repitiendo la §5.4 con estos valores:
+
+   | Concepto | Valor para PROD |
+   |---|---|
+   | Project ID | `mi-pimpollito` (verificar disponibilidad; si estuviera tomado, elegir otro y **actualizar este documento**) |
+   | Firestore Location | **`southamerica-west1`** — la misma que DEV, para que el comportamiento y la latencia sean comparables |
+   | Firestore Edition / Database ID | Standard / `(default)` |
+   | Storage Location | **`US-CENTRAL1`** — el mismo criterio de cuota gratuita que DEV |
+   | Authentication | solo Email/Password; Google, passwordless y MFA deshabilitados |
+   | Security initialization | Production mode en Firestore y en Storage |
+   | Billing | Blaze + alerta de USD 5 |
+   | Además | crear `environment.production.ts`, añadir el alias `prod` a `.firebaserc`, autorizar el dominio en Authentication, y sembrar el primer admin (§7.1) |
+
+6. **Cómo desbloquear el límite de proyectos**, cuando toque: eliminar definitivamente algún
+   proyecto de Firebase/Google Cloud que ya no se use (un proyecto borrado sigue contando
+   durante su periodo de retención de ~30 días), o solicitar aumento de cuota desde la
+   consola de Google Cloud. Es una gestión de cuenta del desarrollador, no una tarea de
+   código.
+
+> **Esto no bloquea el desarrollo.** Las Fases 0A a 5 se construyen y se prueban íntegras
+> contra DEV. Lo único que queda en espera es el **despliegue a producción** al cerrar la
+> Fase 5 (§23.2).
 
 ---
 
@@ -902,8 +1008,8 @@ la consola o en una Function; y un usuario sin documento en `users` queda en
 - **Por qué:** A resuelve *solo* el síntoma de que crear un usuario te desloguee. No puede
   verificar en servidor que quien llama es admin (cualquiera con la consola del navegador
   invoca `createUserWithEmailAndPassword`), no puede editar el correo de otro usuario, no
-  puede deshabilitar su cuenta y no puede escribir claims. Con el registro público
-  **deshabilitado** en la consola, A directamente no funciona. La prioridad declarada es
+  puede deshabilitar su cuenta y no puede escribir claims. Y en cuanto se deshabilite la
+  auto-creación de cuentas en la consola (§19.4), A directamente **deja de funcionar**. La prioridad declarada es
   **seguridad por encima de ahorrar líneas de código**, y esto es exactamente ese caso.
 - **Descartada C:** el correo de invitación deja al invitado eligiendo su contraseña, lo
   cual está bien, pero no cubre ninguna de las otras tres operaciones privilegiadas.
@@ -911,7 +1017,10 @@ la consola o en una Function; y un usuario sin documento en `users` queda en
 ### 7.3 Contrato de las Functions
 
 Todas son **callables 2ª generación**, en la misma región que Firestore
-(`southamerica-east1`), y todas empiezan por la misma comprobación.
+(**`southamerica-west1`**, §5.4), y todas empiezan por la misma comprobación. Que la Function
+y la base estén en la misma región importa: `createSale` hace varias lecturas y escrituras
+dentro de una transacción, y cada salto entre regiones se paga tantas veces como operaciones
+tenga la transacción.
 
 ```ts
 // functions/src/guards.ts
@@ -2487,9 +2596,13 @@ problemas de coste en Firestore no vienen del volumen: vienen de romper una de e
   en cada máquina. *Recomendación:* activarlo en DEV primero, comprobar que todo sigue
   funcionando, y solo después en PROD.
 - **Alerta de presupuesto en USD 5** desde la Fase 0B. Es la red de seguridad real.
-- **Registro público de usuarios deshabilitado** en la consola de Authentication desde la
-  Fase 0B. Sin esto, cualquiera con el `apiKey` —que es público— podría crear una cuenta;
-  no accedería a nada por falta de perfil (§7.1), pero ensuciaría el proyecto.
+- **Deshabilitar la auto-creación de cuentas** en Authentication → Settings → *User actions*
+  (la opción que impide el *sign-up* desde el cliente). **Pendiente de verificar en DEV**: la
+  configuración registrada en §5.4 confirma que solo Email/Password está habilitado, pero no
+  se ha comprobado ese interruptor. Sin él, cualquiera con el `apiKey` —que es público—
+  podría crear una cuenta de Authentication; no accedería a nada por falta de documento en
+  `users` (§7.1), pero ensuciaría el proyecto. **Se comprueba al ejecutar la Fase 0B** y se
+  vuelve a comprobar en la auditoría.
 
 ---
 
@@ -2619,11 +2732,14 @@ respuesta del cliente, y el motivo está en §2.1.
 | 27 | **Borrado** | Soft delete con `isActive` en `users` y `products`; `delete` denegado en Rules. Las ventas nunca se borran: `status: 'cancelled'` | Una venta de hace un año debe seguir siendo legible aunque el producto ya no se venda y el vendedor no trabaje aquí. Los snapshots hacen que nada se rompa | 2–4 | **Alto** — historial de ventas con referencias roídas e irreparables |
 | 28 | **Cloud Functions** | Sí, un `functions/` pequeño: administración de Auth, ventas, vouchers y gift cards. Nada más | Cubre exactamente lo que el cliente no puede hacer con seguridad. Firestore sigue siendo el backend principal | 2 | **Crítico** — sin esto no hay forma de garantizar integridad de dinero ni stock |
 | 29 | **Estrategia DEV/PROD** | Dos proyectos; `environment.ts` = DEV como base; `fileReplacements` solo en `production`; interfaz `AppEnvironment` obligatoria; badge de ambiente | El tipo hace que comentar un campo rompa la compilación: el patrón de MEDIDENT deja de ser posible | 0B | **Alto** — escribir en PROD creyendo estar en DEV |
-| 30 | **Región de Firestore** | `southamerica-east1` (São Paulo) | Latencia desde Bolivia, que se nota en el mostrador. Es **inmutable** tras crear la base | 0B | Medio — irreversible sin recrear el proyecto |
-| 31 | **SDK de Firebase en Angular** | `@angular/fire@^18` | Wrappers zone-aware (el proyecto usa zone.js) y adaptadores a Observable, que son las piezas del pipeline de sesión | 0B | Medio — bugs intermitentes de detección de cambios |
-| 32 | **Internacionalización** | Se retira `ngx-translate`; textos en español en las plantillas | Sistema monolingüe, y el menú dependía de una llamada asíncrona de traducción en el arranque | 0A | Bajo — una dependencia asíncrona frágil en el arranque, sin beneficio |
-| 33 | **Estrategia CI/CD** | `main` → PROD · `develop` → DEV · PR → preview **en DEV**. Despliegue manual adelantado a la Fase 1B | Las previews sobre PROD darían a ramas sin revisar acceso a los datos reales. El despliegue temprano revela los problemas de Hosting cuando son baratos | 1B / 9 | Medio — problemas de hosting descubiertos tarde, o previews escribiendo en producción |
-| 34 | **Security Rules** | Se escriben **junto a cada fase**, con cierre explícito `match /{document=**} { allow read, write: if false; }` | Dejarlas para el final significa desarrollar meses contra una base abierta y descubrir al final qué se rompe al cerrarla | cada fase | **Crítico** — base de datos abierta en producción |
+| 30 ⟳ | **Región de Firestore** | **`southamerica-west1`** (Santiago). Ya aplicada en DEV; PROD usará la misma | Latencia desde Bolivia, que se nota en el mostrador. Es **inmutable** tras crear la base. Las Functions van en la misma región | 0B | Medio — irreversible sin recrear el proyecto |
+| 31 | **Región de Cloud Storage** | **`US-CENTRAL1`**, Standard — distinta de Firestore, a propósito | Es la región con cuota gratuita de Cloud Storage. El coste es que las imágenes viajan desde EE. UU., por eso la compresión en el cliente (§9.2) no es negociable | 0B | Bajo — la ubicación de un bucket es inmutable |
+| 32 | **Proveedores de Authentication** | **Solo Email/Password.** Google Sign-In, email link y MFA deshabilitados | Las cuentas las crea un admin (§7). Google Sign-In permitiría a cualquiera crear una sesión de Auth sin acceso real, ensuciando el proyecto | 0B | Medio — cuentas de Auth que nadie dio de alta |
+| 33 | **PROD mientras `mi-pimpollito` no exista** | **Bloqueado.** No se crea `environment.production.ts`, `.firebaserc` lleva solo el alias `dev`, y **DEV no se usa como PROD** | Escribir credenciales de DEV en el archivo de producción es precisamente el error que la §5 existe para hacer imposible | 5 (despliegue) | **Alto** — datos de prueba mezclados con ventas reales, sin forma de separarlos |
+| 34 | **SDK de Firebase en Angular** | `@angular/fire@^18` | Wrappers zone-aware (el proyecto usa zone.js) y adaptadores a Observable, que son las piezas del pipeline de sesión | 0B | Medio — bugs intermitentes de detección de cambios |
+| 35 | **Internacionalización** | Se retira `ngx-translate`; textos en español en las plantillas | Sistema monolingüe, y el menú dependía de una llamada asíncrona de traducción en el arranque | 0A | Bajo — una dependencia asíncrona frágil en el arranque, sin beneficio |
+| 36 | **Estrategia CI/CD** | `main` → PROD · `develop` → DEV · PR → preview **en DEV**. Despliegue manual adelantado a la Fase 1B | Las previews sobre PROD darían a ramas sin revisar acceso a los datos reales. El despliegue temprano revela los problemas de Hosting cuando son baratos | 1B / 9 | Medio — problemas de hosting descubiertos tarde, o previews escribiendo en producción |
+| 37 | **Security Rules** | Se escriben **junto a cada fase**, con cierre explícito `match /{document=**} { allow read, write: if false; }` | Dejarlas para el final significa desarrollar meses contra una base abierta y descubrir al final qué se rompe al cerrarla | cada fase | **Crítico** — base de datos abierta en producción |
 
 ---
 
@@ -2641,7 +2757,7 @@ cuestionario:
 | ¿Códigos EAN, internos o ambos? | B3 | Ambos, con generador e impresión de etiquetas |
 | ¿Las gift cards caducan? | E5 | No. `expiresAt` reservado sin lógica |
 | ¿El vendedor ve todas las ventas? | A5, C5 | Solo las suyas del día |
-| Región de Firestore | decisión técnica | `southamerica-east1` |
+| Región de Firestore | decisión técnica | **`southamerica-west1`** · ya aplicada en DEV (§5.4) |
 | ¿Cuántos usuarios y puestos? | A4, C2 | 1 usuario inicial, 1 puesto |
 | ¿Dominio propio? | A8 | No por ahora; `*.web.app` sirve |
 
@@ -2654,10 +2770,23 @@ antes porque hoy no hay información que los haga urgentes:
 | 2 | **Tarjeta física perdida con saldo** (E8 quedó sin responder) | Recomendación: el admin anula la emisión con `cancelGiftCardIssue` y deja el motivo en `note`; no se reemplaza salvo decisión del dueño. El modelo ya lo soporta | Fase 6 |
 | 3 | **Activar App Check** | Recomendado, pero se activa primero en DEV y se verifica antes de PROD | Fase 8 |
 
-Y el único **hecho externo** que hay que verificar, no decidir: **la disponibilidad de los
-IDs `mi-pimpollito` y `mi-pimpollito-dev`**, que son globalmente únicos. Se comprueba al
-ejecutar la Fase 0B; si alguno está tomado, se elige el siguiente y **se actualiza este
-documento**.
+### 22.1 Un bloqueo externo, real, que no afecta a las Fases 0A–5
+
+**`mi-pimpollito` (PROD) no se puede crear todavía: la cuenta alcanzó el límite de proyectos
+de Firebase** (§5.5). No es una decisión pendiente —está decidido qué hacer— sino un hecho de
+la cuenta que hay que resolver fuera del código.
+
+| | |
+|---|---|
+| **Qué bloquea** | Únicamente el **despliegue a producción**, al cerrar la Fase 5 |
+| **Qué NO bloquea** | Las Fases 0A, 0B (parte DEV), 1, 1B, 2, 3, 4 y 5: se construyen y se prueban íntegras contra DEV |
+| **Cómo se desbloquea** | Eliminar definitivamente un proyecto en desuso (los borrados siguen contando ~30 días) o pedir aumento de cuota en la consola de Google Cloud |
+| **Qué está prohibido mientras tanto** | Usar DEV como PROD, y crear `environment.production.ts` apuntando a `mi-pimpollito-dev` |
+| **Cuándo hay que revisarlo** | Antes de terminar la Fase 5, para no llegar al despliegue con la sorpresa |
+
+La disponibilidad del ID `mi-pimpollito-dev` ya está **confirmada**: el proyecto existe y
+`firebase projects:list` lo reconoce. La del ID `mi-pimpollito` se verificará al crearlo; si
+estuviera tomado, se elige otro y **se actualiza este documento**.
 
 ---
 
@@ -2691,6 +2820,17 @@ explícito, porque el sistema es vendible sin gift cards ni reportes, pero no si
 **El camino crítico no es el código: es la carga de 500–1 000 productos a mano** (B1, B2).
 Puede empezar en cuanto la Fase 3 esté desplegada en DEV, y correr en paralelo a las Fases 4
 y 5. Retrasarla hasta el final hace imposible cualquier fecha. Ver §24.
+
+> **Segundo camino crítico, externo al código:** la salida a producción exige que
+> `mi-pimpollito` exista, y hoy no se puede crear (§5.5, §22.1). El desarrollo completo del
+> MVP no lo necesita —todo se construye contra DEV—, pero **el día del despliegue sí**.
+> Conviene liberar la cuota de proyectos mientras se trabaja en las Fases 1 a 4, no al final.
+>
+> Y una advertencia sobre la carga del catálogo: si se cargan los 1 000 productos en DEV y
+> después se crea PROD, **esos datos no se mueven solos**. O se espera a tener PROD para
+> cargar en serio, o se acepta que habrá que repetir la carga (o exportar e importar con el
+> Admin SDK, que es trabajo no planificado). **Es una razón más para desbloquear PROD
+> temprano.**
 
 ### 23.3 Dependencias entre fases
 
@@ -2758,45 +2898,66 @@ depende de la 6 (el reporte separa mercancía de gift cards).
 
 ### FASE 0B — Proyectos Firebase y ambientes
 
-- **Objetivo.** Dos proyectos Firebase separados y una configuración de ambientes en la que
-  el error de MEDIDENT sea imposible.
+- **Objetivo.** Conectar el proyecto Angular con **DEV**, con una configuración de ambientes
+  en la que el error de MEDIDENT sea imposible.
 - **Dependencias.** 0A.
-- **Alcance.**
-  1. **Verificar la disponibilidad** de los IDs `mi-pimpollito` y `mi-pimpollito-dev`. Si
-     alguno está tomado, elegir el siguiente y **actualizar este documento**.
-  2. Crear ambos proyectos (el cliente, por navegador, con su cuenta). Región de Firestore
-     **`southamerica-east1`**, **modo producción**.
-  3. Habilitar Authentication → Email/Password. **Deshabilitar el registro público.**
-  4. Habilitar Storage.
-  5. Plan **Blaze** con **alerta de presupuesto en USD 5**.
-  6. `firebase login` (manual, por navegador, por el cliente). **Nunca se solicitan
-     credenciales ni service accounts.**
-  7. `firebase init` → Firestore, Storage, Hosting, Functions (sin escribir lógica).
-     `.firebaserc` con alias `dev` / `prod` y `default` apuntando a **dev**.
-  8. `environment.model.ts` + `environment.ts` (DEV) + `environment.production.ts` (PROD).
-  9. `angular.json`: `fileReplacements` en `production`; eliminar `production-sahtoso`,
-     el reemplazo de `development` y el `serve.staging` fantasma.
-  10. `npm i @angular/fire`, fijar `firebase@^10.7`, y los `provide*` en `app.config.ts`.
-  11. `firestore.rules` y `storage.rules` **cerrados por completo**
-      (`allow read, write: if false`), `firestore.indexes.json` vacío, y desplegarlos.
-  12. Badge de ambiente en el topbar cuando `environment.name !== 'prod'`.
+- **Estado de partida.** La parte de consola **ya está hecha**: `mi-pimpollito-dev` existe,
+  configurado y verificado (§5.4). **PROD queda fuera de esta fase** porque
+  `mi-pimpollito` no se puede crear todavía (§5.5).
+
+**Ya completado — no repetir** (§5.4 tiene los valores exactos):
+
+  - [x] Proyecto `mi-pimpollito-dev` creado · Web App *Mi Pimpollito Web DEV*.
+  - [x] Firestore Standard, `(default)`, **`southamerica-west1`**, **modo producción**.
+  - [x] Storage, bucket `mi-pimpollito-dev.firebasestorage.app`, **`US-CENTRAL1`**,
+        Standard, **modo producción**.
+  - [x] Authentication → **solo Email/Password**; Google Sign-In, email link y MFA
+        deshabilitados.
+  - [x] Plan **Blaze** + **alerta de presupuesto de USD 5**.
+  - [x] `firebase-tools` 15.3.0 instalado, `firebase login` hecho, y
+        `firebase projects:list` reconoce el proyecto.
+
+- **Alcance de esta fase (lo que falta):**
+  1. `firebase init` → Firestore, Storage, Hosting, Functions (sin escribir lógica),
+     apuntando **solo a DEV**.
+  2. `.firebaserc` con **el alias `dev` únicamente** y `default: dev`. El alias `prod` se
+     añade cuando exista el proyecto (§5.5).
+  3. `environment.model.ts` + `environment.ts` con las credenciales reales de DEV.
+     **`environment.production.ts` no se crea todavía.**
+  4. `angular.json`: eliminar `production-sahtoso`, el reemplazo de `development` y el
+     `serve.staging` fantasma. El `fileReplacements` de `production` se declara cuando exista
+     `environment.production.ts`.
+  5. `npm i @angular/fire`, fijar `firebase@^10.7`, y los `provide*` en `app.config.ts`.
+  6. `firestore.rules` y `storage.rules` **cerrados por completo**
+     (`allow read, write: if false`), `firestore.indexes.json` vacío, y desplegarlos a DEV.
+  7. Badge de ambiente en el topbar cuando `environment.name !== 'prod'`.
+  8. **Confirmar que la configuración de este documento coincide con la consola.** Si algo
+     difiere, manda la consola y se corrige el documento.
+  9. **Deshabilitar la auto-creación de cuentas** en Authentication → Settings → *User
+     actions* (§19.4). Es lo único de la configuración de consola que queda por verificar.
 - **Cambios esperados.** `src/environments/*`, `angular.json`, `package.json`,
   `app.config.ts`, `firebase.json`, `.firebaserc`, `firestore.rules`, `storage.rules`,
   `firestore.indexes.json`, `functions/` (esqueleto).
-- **Seguridad.** Reglas **cerradas desde el primer despliegue**. Registro público
-  deshabilitado. Alerta de presupuesto activa.
-- **Pruebas.** `ng serve` conecta a DEV y `ng build` produce un bundle que apunta a PROD
-  (verificable buscando el `projectId` en `dist/`). Comentar un campo de `environment.ts`
-  **debe romper la compilación**: ésa es la prueba que valida toda la estrategia.
+- **Seguridad.** Reglas **cerradas desde el primer despliegue** (ya están en modo producción
+  en la consola). Solo Email/Password habilitado. Alerta de presupuesto activa.
+- **Pruebas.** `ng serve` conecta a DEV (verificable buscando `mi-pimpollito-dev` en el
+  bundle). Comentar un campo de `environment.ts` **debe romper la compilación**: ésa es la
+  prueba que valida toda la estrategia. Un `getDoc` cualquiera contra Firestore **debe ser
+  denegado** por las reglas cerradas.
 - **Criterios de aceptación.**
-  - [ ] Dos proyectos Firebase existen y son independientes.
-  - [ ] `firebase deploy` sin `-P` no puede tocar PROD.
-  - [ ] El bundle de DEV contiene `mi-pimpollito-dev` y el de PROD `mi-pimpollito`.
-  - [ ] Un campo comentado en cualquiera de los dos `environment` rompe `ng build`.
-  - [ ] Las Rules desplegadas niegan todo.
-  - [ ] El badge **DEV** se ve en `ng serve` y no en el build de producción.
-- **Condición para avanzar.** Los dos ambientes funcionan, están separados y las reglas están
-  cerradas.
+  - [ ] `ng serve` conecta a `mi-pimpollito-dev` y el bundle lo contiene.
+  - [ ] Un campo comentado en `environment.ts` rompe `ng build --configuration development`.
+  - [ ] Las Rules desplegadas en DEV niegan todo.
+  - [ ] El badge **DEV** se ve en `ng serve`.
+  - [ ] `.firebaserc` **no** contiene un alias `prod` apuntando a un proyecto inexistente.
+  - [ ] **No existe** `environment.production.ts`, y ningún archivo del repositorio contiene
+        las credenciales de DEV bajo el nombre de producción.
+  - [ ] `firebase deploy` sin `-P` apunta a DEV (`default: dev`).
+- **Condición para avanzar.** DEV funciona, las reglas están cerradas y PROD sigue
+  explícitamente pendiente y sin poder confundirse con DEV.
+- **Deuda declarada de esta fase.** Crear `mi-pimpollito`, su `environment.production.ts`,
+  el alias `prod` y el `fileReplacements` de `production`. Se retoma en cuanto la cuenta
+  permita crear el proyecto, y **antes** de cerrar la Fase 5 (§22.1).
 
 ---
 
@@ -3038,8 +3199,14 @@ depende de la 6 (el reporte separa mercancía de gift cards).
   - [ ] La pantalla de pendientes funciona en un celular real.
   - [ ] El cierre del día refleja los pendientes.
 - **Condición para avanzar.** **Fin del MVP.** El sistema puede cobrar en efectivo y por QR,
-  con comprobante y con evidencia. Es el momento de desplegar a PROD y sembrar el primer
-  admin allí.
+  con comprobante y con evidencia.
+- **Aquí aparece el bloqueo de PROD (§5.5, §22.1).** El paso natural al cerrar esta fase es
+  desplegar a producción y sembrar el primer admin allí, y **eso requiere que
+  `mi-pimpollito` exista**. Si al llegar aquí la cuenta sigue en el límite de proyectos:
+  liberar cuota o pedir aumento, crear el proyecto con los valores de §5.5, crear
+  `environment.production.ts`, añadir el alias `prod` y el `fileReplacements`, autorizar el
+  dominio en Authentication, desplegar Rules e índices, y sembrar el primer admin.
+  **Mientras eso no ocurra, el sistema se queda en DEV y no se usa para vender.**
 
 ---
 
@@ -3179,7 +3346,8 @@ depende de la 6 (el reporte separa mercancía de gift cards).
 | 3 | **La fecha objetivo de fin de septiembre no alcanza** para las 12 fases (G4) | **Alta** | Medio | El corte de MVP de §23.2 es explícito: las Fases 6 y 7 (gift cards y reportes) son la segunda entrega. Conviene confirmarlo con el cliente antes de empezar |
 | 4 | **Stock negativo acumulado** por vender sin stock (C4) sin conteo físico ni ajustes registrados | **Alta** | Medio | El listado marca el stock negativo. `stockMovements` está diseñado y postergado (§13.2): **el primer conteo físico con diferencias es la señal para implementarlo** |
 | 5 | El lector de código de barras comprado **no emula teclado** (C3: aún no se ha comprado) | Baja | Medio | Al comprarlo, pedir explícitamente un lector **USB HID / emulación de teclado**. El diseño de §14.4 funciona con cualquiera que lo haga |
-| 6 | Un ID de proyecto Firebase **no está disponible** | Media | Bajo | Se verifica en la Fase 0B y se actualiza este documento |
+| 6 | **`mi-pimpollito` (PROD) no se puede crear:** la cuenta está en el límite de proyectos de Firebase | **Confirmado — ya ocurre** | Medio | No bloquea las Fases 0A–5, que se construyen contra DEV. Se resuelve liberando cuota (los proyectos borrados cuentan ~30 días) o pidiendo aumento en Google Cloud. **Revisar antes de cerrar la Fase 5** (§22.1). Prohibido usar DEV como PROD |
+| 6b | **El bucket de Storage está en `US-CENTRAL1`** y Firestore en `southamerica-west1` | Confirmado — decisión intencional | Bajo | Las imágenes viajan desde EE. UU. Se compensa con compresión obligatoria a 120–200 KB (§9.2) y CDN. La ubicación de un bucket es inmutable: si algún día molestara, exigiría un bucket nuevo y mover los archivos |
 | 7 | **Arranque en frío de Cloud Functions** percibido como lentitud en el mostrador | Media | Bajo | Invocación de calentamiento al abrir el POS. Si molestara, `minInstances: 1` cuesta céntimos |
 | 8 | **Vouchers QR que nunca se adjuntan** (§2.1 C-4) | Media | Medio | El cierre del día no se completa con pendientes, y el listado los marca. La deuda es visible, no silenciosa |
 | 9 | **Dos fuentes de verdad** entre `dailySummaries` y `sales` | Baja | Medio | Se escriben en la misma transacción, y el cierre de caja compara ambas y avisa si difieren (§19.2) |

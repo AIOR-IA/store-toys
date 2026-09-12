@@ -10,7 +10,7 @@ Sistema administrativo para juguetería (Oruro, Bolivia). Una sola tienda, 1–2
 **Antes de implementar una fase, leer `docs/architecture/mi-pimpollito-plan.md`.**
 
 Ese documento contiene la arquitectura completa, el modelo de datos, las Security Rules, el
-roadmap con criterios de aceptación y las 34 decisiones aprobadas. Este archivo es solo la
+roadmap con criterios de aceptación y las 37 decisiones aprobadas. Este archivo es solo la
 guía rápida. Si algo de aquí y algo de allí se contradicen, **manda el plan** — y hay que
 corregir este archivo.
 
@@ -27,17 +27,46 @@ pueden validarlo; lo demás pasa por Cloud Functions.
 
 ## Ambientes
 
-| | Project ID | Hosting |
-|---|---|---|
-| DEV | `mi-pimpollito-dev` | `https://mi-pimpollito-dev.web.app` |
-| PROD | `mi-pimpollito` | `https://mi-pimpollito.web.app` |
+| | Project ID | Hosting | Estado |
+|---|---|---|---|
+| **DEV** | `mi-pimpollito-dev` | `https://mi-pimpollito-dev.web.app` | **creado y configurado** |
+| **PROD** | `mi-pimpollito` | `https://mi-pimpollito.web.app` | **NO CREADO** — límite de proyectos de la cuenta |
 
-- `ng serve` → **DEV** (`environment.ts` es la base, sin reemplazo)
-- `ng build --configuration production` → **PROD** (vía `fileReplacements`)
-- Ambos archivos implementan la interfaz `AppEnvironment`: **comentar un campo rompe la
+### DEV — configuración real (detalle en el plan, §5.4)
+
+| | |
+|---|---|
+| Web App | Mi Pimpollito Web DEV |
+| Authentication | **solo Email/Password**. Google Sign-In, email link y MFA **deshabilitados** |
+| Firestore | Standard · `(default)` · **`southamerica-west1`** (Santiago) · production mode |
+| Storage | bucket `mi-pimpollito-dev.firebasestorage.app` · **`US-CENTRAL1`** · Standard · production mode |
+| Billing | **Blaze** + alerta de **USD 5** (es una alerta, **no un límite duro**) |
+| CLI | `firebase-tools` 15.3.0 · login hecho · `projects:list` reconoce el proyecto |
+
+- **Cloud Functions van en `southamerica-west1`**, la misma región que Firestore.
+- El bucket está en `US-CENTRAL1` a propósito (cuota gratuita): por eso la **compresión de
+  imágenes en el cliente no es negociable**.
+
+### PROD — bloqueado (detalle en el plan, §5.5 y §22.1)
+
+- **`mi-pimpollito` no existe todavía.** La cuenta alcanzó el límite de proyectos de Firebase.
+- **DEV NO se usa como PROD.** Ni temporalmente.
+- **No se crea `environment.production.ts`**, y **nunca** apuntará a `mi-pimpollito-dev`.
+- `.firebaserc` lleva **solo el alias `dev`** (+ `default: dev`) hasta que PROD exista.
+- Por eso **`ng build` a secas (configuración `production`) no es ejecutable**: durante todo
+  el desarrollo se usa `ng build --configuration development`.
+- Cuando PROD se pueda crear: misma región de Firestore (`southamerica-west1`), mismo
+  criterio de Storage (`US-CENTRAL1`), solo Email/Password, production mode, Blaze + alerta.
+  Se configura y se despliega **por separado**.
+- No bloquea las Fases 0A–5, que se construyen contra DEV. **Sí bloquea el despliegue a
+  producción al cerrar la Fase 5**: hay que desbloquear la cuota antes de llegar ahí.
+
+### Reglas de ambiente
+
+- `ng serve` → **DEV** (`environment.ts` es la base, sin reemplazo).
+- `environment.ts` implementa la interfaz `AppEnvironment`: **comentar un campo rompe la
   compilación**. Nunca se comenta ni descomenta configuración.
-- `.firebaserc` tiene `default: dev`: un `firebase deploy` sin `-P` no puede tocar producción.
-- Región de Firestore: `southamerica-east1` (inmutable).
+- Un `firebase deploy` sin `-P` apunta a DEV.
 - **No mezclar ambientes.** Badge `DEV` visible en el topbar cuando `environment.name !== 'prod'`.
 
 ## Roles
@@ -171,6 +200,8 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   archivos de `features/` son de dominio ajeno, más ~18 dependencias GIS/editores/sockets.
   **La limpieza es la Fase 0A** y empieza con un commit de los cambios pendientes.
 - **No hay nada de Firebase escrito todavía** (`firebase@^10` está en `package.json` sin usar).
+  El proyecto DEV existe en la consola, pero el repositorio aún no tiene `firebase.json`,
+  `.firebaserc`, reglas ni `environment` conectados: eso es la Fase 0B.
 - `login.component.html` y `login.component.scss` **ya tienen el diseño aprobado: no se
   rediseñan.** Solo se reescribe el `.ts`.
 - **Ninguna fase implementada.** Siguiente paso: **FASE 0A**.
@@ -179,7 +210,11 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 
 ```bash
 npm start                      # ng serve → DEV
-npm run build                  # ng build → PROD
+npm run build:dev              # ng build --configuration development → DEV
 firebase deploy --only hosting -P dev
 firebase deploy --only firestore:rules,firestore:indexes,storage -P dev
+
+# NO ejecutable hasta que exista mi-pimpollito (PROD):
+# npm run build                # ng build (configuración production)
+# firebase deploy -P prod
 ```
