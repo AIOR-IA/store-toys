@@ -46,9 +46,13 @@
         class="cursor-pointer layout-topbar-profile rounded-full bg-white relative overflow-hidden"
         (click)="toggleMenu($event)"
     >
+        @if (initials()) {
+        <div class="font-bold text-primary text-2xl">{{ initials() }}</div>
+        } @else {
         <div class="text-primary">
             <i class="fas fa-user text-4xl"></i>
         </div>
+        }
     </button>
     } @else {
     <div class="flex items-center layout-topbar-session gap-4 w-32 md:w-60">
@@ -56,14 +60,23 @@
             routerLink="/auth/login"
             class="text-white hover:text-white hover:underline text-lg md:text-xl"
         >
-            Iniciar Sesión
+            {{ "app.auth.login.submit" | translate }}
         </a>
     </div>
     }
 </div>
 
 <p-overlayPanel #overlay [dismissable]="true" styleClass="user-menu-panel">
-    <div class="p-3 text-sm text-gray-500">
-        Menú de usuario disponible en la Fase 1.
+    <div class="p-3 text-sm min-w-[180px]">
+        <div class="font-semibold text-carbon">{{ fullName() }}</div>
+        <div class="text-gray-500 text-xs mb-3 truncate">{{ userEmail() }}</div>
+        <button
+            type="button"
+            class="w-full text-left text-danger hover:underline flex items-center gap-2"
+            (click)="logout()"
+        >
+            <i class="fas fa-right-from-bracket"></i>
+            {{ "app.auth.logout" | translate }}
+        </button>
     </div>
 </p-overlayPanel>

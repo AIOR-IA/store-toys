@@ -1,10 +1,26 @@
 rules_version = '2';
 
-// FASE 0B — deny-by-default. Ninguna colección se abre todavía.
-// Users/Products/Sales se habilitan colección por colección en sus fases
-// (docs/architecture/mi-pimpollito-plan.md §10.2), nunca todas a la vez.
+// FASE 1 — deny-by-default global, salvo lo mínimo que esta fase necesita.
+//
+// Un usuario autenticado puede leer ÚNICAMENTE su propio documento en
+// users/{uid}: es el paso 2 de la cadena de sesión (plan §6.2) y no puede
+// depender de nada más que `request.auth.uid == userId`, porque ese
+// documento es justo lo que decide si el usuario está activo.
+//
+// Deliberadamente NO se abre en esta fase (docs/architecture/mi-pimpollito-plan.md §10.2):
+//   - list de users            → Fase 2 (listado administrativo)
+//   - create/update/delete     → Fase 2 (Cloud Function createUser + edición)
+//   - cualquier otra colección → sus fases respectivas
+// Antes de abrir algo aquí, revisar si de verdad hace falta en esta fase.
+// Si no hace falta, no se abre.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

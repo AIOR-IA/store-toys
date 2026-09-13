@@ -58,14 +58,6 @@ export function isValidDate(value: any): boolean {
     return isDateObject(value) || isDateString(value);
 }
 
-export function showHideSpinner(show: boolean) {
-    const staticSpinner = document.getElementById('app-loading-spinner');
-    const display = show ? 'flex' : 'none';
-    if (staticSpinner) {
-        staticSpinner.style.display = display;
-    }
-}
-
 export function mbToBytes(mb: number): number {
     return mb * 1000000;
 }

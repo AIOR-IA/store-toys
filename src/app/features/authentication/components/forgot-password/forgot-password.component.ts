@@ -1,4 +1,4 @@
-import { Component, signal, WritableSignal } from '@angular/core';
+import { Component, WritableSignal, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
     FormControl,
@@ -7,16 +7,22 @@ import {
     Validators,
 } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { FirebaseError } from '@angular/fire/app';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { TranslateModule } from '@ngx-translate/core';
+import { SessionService } from '@core/session';
 
 /**
  * Recuperación de contraseña.
  *
- * FASE 0A: la pantalla se conserva pero SIN backend. El envío real se conecta
- * en la FASE 1 con `sendPasswordResetEmail()` de Firebase Auth
- * (docs/architecture/mi-pimpollito-plan.md §6.7), con respuesta neutra: el
- * mensaje no debe revelar si el correo existe.
+ * FASE 1: conectada a `sendPasswordResetEmail()` vía `SessionService.resetPassword()`
+ * (docs/architecture/mi-pimpollito-plan.md §6.7).
+ *
+ * Por seguridad, un envío exitoso y la mayoría de los errores responden con
+ * el MISMO mensaje neutral: no se revela si el correo está registrado. Solo
+ * se distinguen los errores que no son una fuga de información (sin
+ * conexión, demasiados intentos).
  */
 @Component({
     selector: 'app-forget-password',
@@ -27,22 +33,20 @@ import { InputTextModule } from 'primeng/inputtext';
         RouterLink,
         ButtonModule,
         InputTextModule,
+        TranslateModule,
     ],
     templateUrl: './forgot-password.component.html',
     styleUrl: './forgot-password.component.scss',
 })
 export class ForgetPasswordComponent {
+    private readonly sessionService = inject(SessionService);
+
     protected forgotPasswordForm!: FormGroup;
-    protected loading: WritableSignal<boolean>;
-    protected responseMessage: WritableSignal<string>;
-    protected attemptsMessage: WritableSignal<string>;
-    protected success: WritableSignal<boolean>;
+    protected loading: WritableSignal<boolean> = signal(false);
+    protected responseMessageKey: WritableSignal<string | null> = signal(null);
+    protected success: WritableSignal<boolean> = signal(false);
 
     constructor() {
-        this.responseMessage = signal('');
-        this.attemptsMessage = signal('');
-        this.loading = signal(false);
-        this.success = signal(false);
         this._buildForm();
     }
 
@@ -52,11 +56,40 @@ export class ForgetPasswordComponent {
             return;
         }
 
-        // FASE 1: aquí va sendPasswordResetEmail(). Hasta entonces no hay envío.
+        this.loading.set(true);
+        this.responseMessageKey.set(null);
+        const { email } = this.forgotPasswordForm.value;
+
+        this.sessionService.resetPassword(email).subscribe({
+            next: () => {
+                this.loading.set(false);
+                this.showNeutralMessage();
+            },
+            error: (err: FirebaseError) => {
+                this.loading.set(false);
+
+                if (err?.code === 'auth/too-many-requests') {
+                    this.showError('app.auth.errors.tooManyRequests');
+                } else if (err?.code === 'auth/network-request-failed') {
+                    this.showError('app.auth.errors.network');
+                } else {
+                    // Cualquier otro código (incluido un hipotético
+                    // user-not-found) responde igual que el éxito: no se
+                    // revela si el correo existe (plan §6.7).
+                    this.showNeutralMessage();
+                }
+            },
+        });
+    }
+
+    private showNeutralMessage(): void {
+        this.success.set(true);
+        this.responseMessageKey.set('app.auth.forgotPassword.neutralMessage');
+    }
+
+    private showError(key: string): void {
         this.success.set(false);
-        this.responseMessage.set(
-            'La recuperación de contraseña se habilita en la siguiente fase.',
-        );
+        this.responseMessageKey.set(key);
     }
 
     private _buildForm(): void {

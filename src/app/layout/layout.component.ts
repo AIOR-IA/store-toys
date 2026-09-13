@@ -1,9 +1,5 @@
-import {
-    Component,
-    OnDestroy,
-    Renderer2,
-    ViewChild,
-} from '@angular/core';
+import { Component, DestroyRef, OnDestroy, Renderer2, ViewChild, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { Router, NavigationEnd, RouterOutlet } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
@@ -12,6 +8,7 @@ import { AppSidebarComponent } from './components/sidebar/sidebar.component';
 import { LayoutService } from './services/app.layout.service';
 import { AppTopbarComponent } from './components/topbar/topbar.component';
 import { AppFooterComponent } from './components/footer/footer.component';
+import { SessionService } from '@core/session';
 
 @Component({
     selector: 'app-layout',
@@ -33,6 +30,9 @@ export class AppLayoutComponent implements OnDestroy {
     menuOutsideClickListener: any;
 
     profileMenuOutsideClickListener: any;
+
+    private readonly sessionService = inject(SessionService);
+    private readonly destroyRef = inject(DestroyRef);
 
     @ViewChild(AppSidebarComponent) appSidebar!: AppSidebarComponent;
 
@@ -82,6 +82,37 @@ export class AppLayoutComponent implements OnDestroy {
             .subscribe(() => {
                 this.hideMenu();
                 this.hideProfileMenu();
+            });
+
+        this.watchSessionForDeactivation();
+    }
+
+    /**
+     * Este layout SOLO se monta detrás de `authGuard`, así que al entrar la
+     * sesión ya era `active`. Si más tarde, con la sesión abierta, un admin
+     * desactiva la cuenta desde la consola (`isActive: false`), `docData`
+     * dentro de `SessionService.session$` reacciona y esta suscripción expulsa
+     * al usuario SIN esperar a que recargue la página (plan §6, prueba
+     * "desactivación en caliente"). Un `CanActivate`/`CanActivateChild` no
+     * serviría aquí: solo se evalúan en una navegación, y este caso no
+     * dispara ninguna — hace falta una suscripción viva mientras el layout
+     * está montado.
+     */
+    private watchSessionForDeactivation(): void {
+        this.sessionService.session$
+            .pipe(
+                filter((s) => s.status !== 'loading'),
+                takeUntilDestroyed(this.destroyRef),
+            )
+            .subscribe((session) => {
+                if (session.status !== 'active') {
+                    this.sessionService.logout().subscribe();
+                    const queryParams =
+                        session.status === 'rejected'
+                            ? { denied: session.reason }
+                            : undefined;
+                    this.router.navigate(['/auth/login'], { queryParams });
+                }
             });
     }
 

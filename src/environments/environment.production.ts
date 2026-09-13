@@ -29,7 +29,7 @@ export const environment: AppEnvironment = {
     production: true,
     firebase: {
         // TEMPORAL: mismo proyecto que DEV — ver el aviso de arriba.
-        apiKey: 'AIzaSyDFJlVXAqP3gTwCa1gUGuA8GDqNZ6CV0Yo',
+        apiKey: 'AIzaSyDFJlVXAqP3gTwCalgUGuA8GDqNZGCV0Yo',
         authDomain: 'mi-pimpollito-dev.firebaseapp.com',
         projectId: 'mi-pimpollito-dev',
         storageBucket: 'mi-pimpollito-dev.firebasestorage.app',

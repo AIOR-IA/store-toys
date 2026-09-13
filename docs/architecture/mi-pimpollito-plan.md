@@ -8,11 +8,12 @@
 |---|---|
 | **Proyecto** | Mi Pimpollito — sistema administrativo para juguetería |
 | **Negocio** | Artículos y accesorios para niños · Oruro, Bolivia |
-| **Estado del documento** | Planificación cerrada · aprobada · **Fases 0A y 0B implementadas** |
+| **Estado del documento** | Planificación cerrada · aprobada · **Fases 0A y 0B implementadas · Fase 1 implementada, verificación en vivo bloqueada** (§22.2) |
 | **Última consolidación** | 2026-09-12 |
 | **Fuentes consolidadas** | Plan técnico completo + cuestionario de 48 preguntas respondido por el cliente + **configuración real de Firebase DEV** (§5.4) |
 | **Infraestructura** | DEV `mi-pimpollito-dev` **creado, configurado y conectado a Angular** (en `development` y, **temporalmente**, también en `production`) · PROD `mi-pimpollito` **pendiente**, ~30 días por límite de proyectos de la cuenta (§5.5) |
-| **Siguiente paso** | FASE 1 — Autenticación, sesión y recuperación de contraseña |
+| **Bloqueante activo** | La Web API Key de `mi-pimpollito-dev` es rechazada por Firebase Authentication (§22.2) — pendiente de revisión en Google Cloud Console por el dueño de la cuenta |
+| **Siguiente paso** | Resolver §22.2, luego sembrar el primer admin (§7.1) y verificar la Fase 1 en vivo. Después: FASE 2 |
 
 ---
 
@@ -2866,6 +2867,33 @@ La disponibilidad del ID `mi-pimpollito-dev` ya está **confirmada**: el proyect
 `firebase projects:list` lo reconoce. La del ID `mi-pimpollito` se verificará al crearlo; si
 estuviera tomado, se elige otro y **se actualiza este documento**.
 
+### 22.2 Bloqueo activo — la API key de Authentication, rechazada (2026-09-12)
+
+> **Este es, a día de hoy, el único bloqueante real para terminar de verificar la Fase 1.**
+
+Al conectar el login real contra Firebase (plan §6.5), **toda** llamada a Firebase
+Authentication —`signInWithEmailAndPassword`, y por la misma causa
+`sendPasswordResetEmail`— falla con:
+
+```
+auth/api-key-not-valid.-please-pass-a-valid-api-key.
+```
+
+Confirmado con `curl` directo contra `identitytoolkit.googleapis.com`, fuera de Angular y
+del navegador — no es un bug del cliente. La misma API key **sí funciona** contra
+Firestore (`firestore.googleapis.com` devuelve `PERMISSION_DENIED` de las Rules, no un
+rechazo de la key), lo que acota el problema a la API de Identity Toolkit específicamente,
+no a la key en general ni al proyecto.
+
+| | |
+|---|---|
+| **Qué bloquea** | Cualquier operación de Firebase Authentication desde el cliente: login y recuperación de contraseña |
+| **Qué NO bloquea** | Firestore (confirmado funcionando con las Rules de esta fase), el resto de la app, los builds |
+| **Diagnóstico más probable** | La API "Identity Toolkit API" no está habilitada para el proyecto en Google Cloud Console, o la Web API Key tiene una restricción de "API restrictions" que no incluye esa API |
+| **Cómo revisarlo** | Google Cloud Console → el proyecto `mi-pimpollito-dev` → *APIs & Services* → *Credentials* → abrir la key que empieza por `AIzaSyDFJl...` → en *API restrictions*, confirmar que "Identity Toolkit API" (y idealmente "Token Service API") están permitidas, o que la key no tiene restricciones. Alternativa: *APIs & Services* → *Library* → buscar "Identity Toolkit API" → confirmar que aparece como "Habilitada" |
+| **Quién puede resolverlo** | Solo el dueño de la cuenta de Google Cloud — es configuración de consola, no de código |
+| **Qué se hace en cuanto se resuelva** | Repetir exactamente la Fase 1: login válido, hard reload, logout, `isActive`, forgot password. Ningún código cambia |
+
 ---
 
 ## 23. Roadmap por fases
@@ -3178,23 +3206,32 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
 - **Dependencias.** 0B.
 - **Alcance.**
   1. Sembrar el **primer administrador** a mano (§7.1) en DEV, y más adelante idéntico en PROD.
+     ~~Ejecutado ahora~~ → **pendiente del usuario**: ver el registro de ejecución (bloqueado
+     además por un hallazgo de infraestructura, ver abajo).
   2. `core/session/session.model.ts` — `Session`, `SessionStatus`, `RoleUser`, `AppUser`.
   3. `core/session/session.service.ts` — la cadena `authState → docData → session$` con
      `shareReplay(1)`, `startWith(LOADING)`, `distinctUntilChanged`, señales derivadas y `ready$`.
-  4. `core/session/session.guards.ts` — `authGuard`, `roleGuard`, `guestGuard`.
+  4. `core/session/session.guards.ts` — `authGuard`, `guestGuard`.
+     ~~`roleGuard`~~ → **movido a Fase 2** por instrucción explícita del cliente en esta
+     sesión: con un solo rol relevante hasta ahora (`admin` sembrado a mano) no hay nada que
+     un `roleGuard` proteja todavía, y el modelo de permisos administrativo es, en sí mismo,
+     trabajo de Fase 2.
   5. Reescribir `login.component.ts` sobre `signInWithEmailAndPassword`, **conservando el
      HTML y el SCSS** ya diseñados. Mapa de errores de §6.5.
   6. `forgot-password` con `sendPasswordResetEmail()` y respuesta neutra. Plantilla de correo
      personalizada en la consola.
   7. Splash mientras `status === 'loading'`.
   8. Rutas mínimas: `/auth/login`, `/auth/forgot-password`, `/` protegida.
-  9. **Firestore Rules de `users`** completas (§10.2) y desplegadas.
+  9. **Firestore Rules de `users`**, con un alcance **más estrecho que el §10.2 completo**
+     — ver el registro de ejecución — y desplegadas a DEV.
 - **Cambios esperados.** `core/session/*`, `features/auth/*`, `app.routes.ts`,
   `app.component.*`, `firestore.rules`. Eliminación definitiva de `auth.guard.ts`,
-  `authenticated.guard.ts`, `permissions.guard.ts` y el `SessionService` heredado si quedara algo.
-- **Seguridad.** Rules de `users` activas: lectura propia por `uid`, `create`/`delete`
-  denegados, `role`/`isActive`/`email` protegidos por `untouched()`. Sin registro público.
-  Mensajes de error que no revelan qué correos existen.
+  `authenticated.guard.ts`, `permissions.guard.ts` y el `SessionService` heredado si quedara algo
+  — ya no quedaba nada de eso: la Fase 0A los había eliminado.
+- **Seguridad.** Rules de `users` activas: lectura propia por `uid`. `create`, `update` y
+  `delete` **denegados por completo desde el cliente** en esta fase (más estricto que el
+  §10.2 original — ver abajo). Sin registro público. Mensajes de error que no revelan qué
+  correos existen.
 - **Pruebas — las cuatro que importan.**
   1. **Recarga en frío en una ruta protegida** (`F5` en `/`): la app muestra el splash y
      entra. **No** pasa por el login. Repetir con caché limpia y con red lenta (throttling).
@@ -3204,15 +3241,102 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
      consola → el usuario cae sin recargar.
   - Además: desde la consola del navegador, intentar `updateDoc(users/{miUid}, {role:'admin'})`
     **debe fallar**.
+  - **Ninguna de las cuatro se pudo ejecutar de punta a punta en esta sesión** — requieren un
+    usuario real, y su creación quedó bloqueada por un hallazgo de infraestructura (ver
+    registro de ejecución). Sí se verificó, con Firebase real (no simulado): que `/` sin
+    sesión redirige a `/auth/login` (prueba 1, mitad); que unas credenciales inválidas
+    producen el mensaje genérico correcto sin exponer detalles técnicos; y que
+    `getDoc(users/cualquiera)` sin sesión es rechazado por las Rules ya desplegadas
+    (`PERMISSION_DENIED`, verificado con `curl` directo contra la REST API de Firestore).
 - **Criterios de aceptación.**
-  - [ ] Las cuatro pruebas anteriores pasan.
-  - [ ] **Cero** `setTimeout`, `setInterval`, polling o `subscribe` anidados en el código de sesión.
-  - [ ] **Cero** lecturas de `auth.currentUser` fuera de `SessionService`.
-  - [ ] La navegación usa `Router`; no queda ningún `location.href`.
-  - [ ] El correo de recuperación llega y permite cambiar la contraseña.
-  - [ ] Un usuario no puede elevar su propio rol desde la consola del navegador.
-- **Condición para avanzar.** La cadena de sesión es la única fuente de verdad y el bug de
-  recarga en frío no se reproduce en ningún intento.
+  - [x] **Cero** `setTimeout`, `setInterval`, polling o `subscribe` anidados en el código de sesión.
+  - [x] **Cero** lecturas de `auth.currentUser` fuera de `SessionService`.
+  - [x] La navegación usa `Router`; no queda ningún `location.href`.
+  - [ ] Las cuatro pruebas de arriba pasan — **pendientes**, bloqueadas por infraestructura.
+  - [ ] El correo de recuperación llega y permite cambiar la contraseña — **pendiente**, la
+        API key rota bloquea también `sendPasswordResetEmail()` (misma causa raíz).
+  - [ ] Un usuario no puede elevar su propio rol desde la consola — **verificado de forma
+        indirecta**: con las Rules de esta fase, un usuario autenticado no puede escribir
+        `users/{uid}` en absoluto, ni siquiera sus propios datos de contacto, así que
+        tampoco puede escribir `role`. Falta la prueba con un usuario real.
+- **Condición para avanzar.** La cadena de sesión es la única fuente de verdad, el código no
+  tiene ninguna de las carreras prohibidas, y las Rules están desplegadas y cierran lo que
+  tenían que cerrar. **No se cumple todavía** la condición completa: falta verificar en
+  vivo que el bug de recarga en frío no se reproduce con un usuario real, y eso requiere
+  resolver primero el hallazgo de infraestructura de abajo.
+
+#### Registro de ejecución (2026-09-12)
+
+- **Alcance de las Rules de `users`, deliberadamente más estrecho que §10.2.** El §10.2
+  original permite además `list`/`get` a un admin y que el propio usuario edite sus datos de
+  contacto. Ninguna de las dos cosas tiene todavía una pantalla que la use en esta fase —no
+  hay listado de usuarios ni edición de perfil— así que, seguiendo la instrucción explícita
+  de "revisar si una escritura es realmente necesaria antes de abrirla", el alcance
+  desplegado es:
+
+  ```
+  match /users/{userId} {
+    allow get: if request.auth != null && request.auth.uid == userId;
+    allow list, create, update, delete: if false;
+  }
+  ```
+
+  Es un subconjunto estricto de §10.2 (nunca lo contradice: todo lo que §10.2 permitiría,
+  esto también lo permitiría si se ampliara; nada de lo que esto deniega, §10.2 lo abría de
+  más). **Desplegado** con `firebase deploy --only firestore:rules -P dev`, confirmando antes
+  el proyecto activo con `firebase use` (`mi-pimpollito-dev`). No se tocó `storage.rules` ni
+  se desplegó Hosting, tal como se pidió.
+- **`roleGuard` se pospuso a la Fase 2** por instrucción explícita, no por hallazgo técnico.
+  `core/session/session.guards.ts` exporta `authGuard` y `guestGuard`
+  (`guestGuard` es lo que el prompt de esta fase llama "IsNotAuthGuard": si ya hay sesión
+  `active`, no deja ver `/auth/login` ni `/auth/forgot-password`).
+- **La "desactivación en caliente" necesitaba algo más que el guard.** Un `CanActivate` solo
+  se evalúa en una navegación; la prueba pide expulsar al usuario **sin que navegue a
+  ningún lado**, solo porque su documento cambió en Firestore. Se resolvió con una
+  suscripción persistente a `session$` dentro de `AppLayoutComponent` (que solo se monta
+  detrás de `authGuard`): en cuanto la sesión deja de ser `active`, cierra la sesión de
+  Firebase y navega a login. No es una segunda fuente de verdad — sigue leyendo
+  exclusivamente `SessionService.session$`.
+- **El splash de arranque se re-cableó** para depender de `session().status === 'loading'`
+  en vez de los eventos de navegación del router (`NavigationStart`/`NavigationEnd`), tal
+  como pide §6.4. Se retiró el mecanismo heredado de mostrar/ocultar el spinner por
+  manipulación directa del DOM (`showHideSpinner()`, con un `id` fijo) porque ya no tenía
+  consumidores; el componente `SpinnerComponent` pasó a controlarse con `@if` de Angular.
+- **Dos errores de datos encontrados y corregidos durante la propia implementación,
+  antes de llegar a producción:**
+  1. El campo de "usuario o correo" del login heredado tenía dibujado (pero inactivo, sin
+     validador) un mensaje de "máximo 20 caracteres". Al conectar la validación real se
+     activó por descuido para ese campo, y **bloqueaba el envío del formulario con
+     cualquier correo electrónico real** (casi todos superan 20 caracteres) sin ni siquiera
+     intentar la llamada a Firebase. Se detectó probando el propio formulario y se corrigió
+     quitando ese límite del campo de correo (sigue aplicando a la contraseña, que sí tiene
+     sentido acotar).
+  2. El mismo login tenía `Validators.minLength(8)` en la contraseña, pero el mensaje ya
+     dibujado en el HTML decía "al menos 6 caracteres" — y 6 es, además, el mínimo real que
+     exige Firebase Authentication. Se corrigió el validador a 6 para que compilación,
+     mensaje visible y regla de Firebase queden alineados.
+- **Hallazgo de infraestructura, bloqueante — no es un bug de código.** Al probar el login
+  contra Firebase real (con credenciales deliberadamente inválidas, para no depender de que
+  ya existiera un usuario), Firebase Authentication rechazó **todas** las llamadas con
+  `auth/api-key-not-valid.-please-pass-a-valid-api-key.`. Se confirmó con `curl` directo
+  contra `identitytoolkit.googleapis.com` (fuera de Angular, fuera del navegador): mismo
+  resultado. En cambio, la misma API key sí es aceptada por Firestore
+  (`firestore.googleapis.com` devuelve `PERMISSION_DENIED` —de las Rules, no de la key— para
+  una lectura sin sesión), lo que acota el problema: la key identifica bien el proyecto
+  `mi-pimpollito-dev`, pero **la API de Identity Toolkit (Authentication) la rechaza
+  específicamente**. La causa más probable es que esa API no esté habilitada para el
+  proyecto en Google Cloud, o que la key tenga una restricción de "API restrictions" en
+  Google Cloud Console que no incluya Identity Toolkit API. Bloquea `signInWithEmailAndPassword`
+  **y** `sendPasswordResetEmail` por igual — cualquier llamada de Authentication, no solo el
+  login. Se documenta como pendiente del cliente en §22 y en `CLAUDE.md`.
+- **Consecuencia observada en `forgot-password`, que conviene tener presente.** Se probó el
+  formulario con un correo de prueba: la pantalla mostró el mensaje neutral de éxito ("Si el
+  correo está registrado, recibirás un mensaje...") **aunque `sendPasswordResetEmail` falló
+  por el bloqueo de arriba**. Esto es el diseño funcionando exactamente como especifica el
+  §6.7 —cualquier error que no sea de red o de límite de intentos responde igual que un
+  envío correcto, para no revelar nada— pero significa que, **mientras dure el bloqueo, la
+  pantalla de recuperación parece funcionar y no envía ningún correo de verdad.** No es un
+  bug nuevo: es la misma causa raíz de §22.2 manifestándose aquí.
 
 ---
 

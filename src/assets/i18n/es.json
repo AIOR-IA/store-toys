@@ -36,6 +36,7 @@
       "showForm": "Visualizar Formulario",
       "viewMore": "Ver más",
       "viewLess": "Ver menos",
+      "loading": "Cargando, por favor espera...",
       "messages": {
         "confirmDelete": "¿Está seguro que desea eliminar este registro?",
         "created": "El registro ha sido creado satisfactoriamente.",
@@ -129,6 +130,51 @@
       "breadcrumbs": {
         "main": "Perfil"
       }
+    },
+    "auth": {
+      "logout": "Cerrar sesión",
+      "login": {
+        "welcomeTitle": "Bienvenido a Mi Pimpollito",
+        "welcomeSubtitle": "Ingresa para comenzar",
+        "usernameLabel": "Usuario o correo",
+        "usernamePlaceholder": "Usuario o correo",
+        "passwordLabel": "Contraseña",
+        "passwordPlaceholder": "Contraseña",
+        "forgotPasswordLink": "¿Olvidaste tu contraseña?",
+        "submit": "Iniciar sesión",
+        "submitting": "Ingresando...",
+        "footerSecure": "Plataforma segura y confiable",
+        "marketing": {
+          "headline1": "Donde la imaginación",
+          "headline2": "cobra vida",
+          "description": "Descubre un mundo lleno de juegos, aventuras y momentos para compartir. En Mi Pimpollito encontrarás juguetes pensados para despertar la imaginación, crear sonrisas y hacer especial cada momento.",
+          "contactTitle": "Encuéntranos y conócenos",
+          "contactDescription": "Descubre nuestros canales, novedades y todo lo que Mi Pimpollito tiene para ti.",
+          "happyMessageLine1": "Grandes aventuras",
+          "happyMessageLine2": "comienzan jugando",
+          "categoryPlay": "JUEGA",
+          "categoryImagine": "IMAGINA",
+          "categoryCreate": "CREA"
+        }
+      },
+      "forgotPassword": {
+        "title": "Recuperar contraseña",
+        "helperText": "Ingresa tu correo electrónico para recuperar tu contraseña.",
+        "emailLabel": "Correo",
+        "emailPlaceholder": "correo@ejemplo.com",
+        "submit": "Enviar",
+        "submitting": "Enviando...",
+        "neutralMessage": "Si el correo está registrado, recibirás un mensaje con las instrucciones para restablecer tu contraseña."
+      },
+      "errors": {
+        "inactive": "Tu cuenta está desactivada. Contacta al administrador.",
+        "noProfile": "Tu cuenta no está habilitada. Contacta al administrador.",
+        "tooManyRequests": "Demasiados intentos. Espera unos minutos e inténtalo nuevamente.",
+        "network": "Sin conexión a internet. Verifica tu conexión e inténtalo nuevamente."
+      }
+    },
+    "validation": {
+      "passwordMinLength": "La contraseña debe tener al menos {{value}} caracteres"
     }
   }
 }

@@ -1,13 +1,12 @@
 import { Routes } from '@angular/router';
 import { NotFoundComponent, UnauthorizedComponent } from '@shared/components';
 import { AppLayoutComponent } from './layout/layout.component';
+import { authGuard } from '@core/session';
 
 /**
- * FASE 0A: estructura mínima para navegar y compilar.
- *
- * Todavía NO hay guards: `authGuard`/`roleGuard` llegan en la FASE 1 y las
- * rutas definitivas de Usuarios, Productos, Ventas, Gift Cards y Reportes en
- * sus fases (ver docs/architecture/mi-pimpollito-plan.md §11.2).
+ * FASE 1: `authGuard` protege todo lo que cuelga del layout. Sigue sin
+ * existir `roleGuard` (Fase 2) ni las rutas definitivas de Usuarios,
+ * Productos, Ventas, Gift Cards y Reportes (ver plan §11.2).
  */
 export const routes: Routes = [
     {
@@ -17,6 +16,7 @@ export const routes: Routes = [
     {
         path: '',
         component: AppLayoutComponent,
+        canActivate: [authGuard],
         children: [
             {
                 path: '',

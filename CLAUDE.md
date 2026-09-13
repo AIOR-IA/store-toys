@@ -278,12 +278,38 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   existe**, con `fileReplacements` en `angular.json`, pero **apunta temporalmente a
   `mi-pimpollito-dev`** — el proyecto PROD real (`mi-pimpollito`) tarda ~30 días más por el
   límite de proyectos de Google. Ver la sección *Ambientes* arriba, es la fuente de verdad.
-- `login.component.html` y `login.component.scss` **siguen con el diseño aprobado, intacto.**
-  El `.ts` sigue sin lógica de autenticación.
-- **Qué existe hoy en `src/app`**: `layout/` completo y desacoplado de la sesión ·
-  `shared/` podado, con i18n restaurado · `core/{config,firebase,models,services/toast,utils}` ·
-  `features/authentication` (login + forgot-password, sin backend) · `features/home`
-  (**placeholder temporal**).
+- `login.component.html` y `login.component.scss` **siguen con el diseño aprobado, intacto**
+  (verificado en navegador: byte-idéntico). El `.ts` ya tiene lógica real de autenticación.
+- **Fase 1 IMPLEMENTADA (rama `phase-1-auth`, sin commit); verificación en vivo BLOQUEADA.**
+  - `core/session/` (`session.model.ts`, `session.service.ts`, `session.guards.ts`) —
+    `SessionService` con la cadena `authState → docData(users/{uid}) → session$`,
+    `shareReplay(1)`, `distinctUntilChanged`, `ready$`; `login()`, `logout()`,
+    `resetPassword()`. Guards `authGuard` y `guestGuard` (`roleGuard` se pospuso a Fase 2 por
+    instrucción explícita: con un solo rol sembrado a mano, no hay nada que proteja todavía).
+  - `login.component.ts`/`forgot-password.component.ts` conectados a Firebase real.
+    `app.component`/`AppLayoutComponent`/`topbar` reaccionan a la sesión (splash, expulsión
+    en caliente si `isActive` cambia a `false`, iniciales + logout real).
+  - **`firestore.rules` con Rules reales de `users`, desplegadas a `mi-pimpollito-dev`**:
+    un usuario autenticado lee únicamente su propio documento; `list`/`create`/`update`/
+    `delete` denegados por completo desde el cliente en esta fase (más estricto que el
+    §10.2 completo del plan — el resto llega en Fase 2, cuando exista la UI que lo necesite).
+  - **⚠️ BLOQUEO ACTIVO — no es un bug de código:** Firebase Authentication rechaza toda
+    llamada (`signInWithEmailAndPassword`, `sendPasswordResetEmail`) con
+    `auth/api-key-not-valid`. Confirmado con `curl` directo contra
+    `identitytoolkit.googleapis.com`, fuera de Angular. La misma key sí funciona contra
+    Firestore. Diagnóstico y pasos de revisión en Google Cloud Console: plan §22.2.
+    **Hasta que esto se resuelva, no se puede verificar en vivo ningún flujo de login real**
+    (hard reload autenticado, logout, `isActive`, forgot password) — sí se verificó, con
+    Firebase real, el redirect de `/` sin sesión, el mensaje de credenciales inválidas, y
+    que las Rules deniegan una lectura sin sesión.
+  - Dos bugs encontrados y corregidos durante la propia conexión (ver plan, registro de
+    ejecución de la Fase 1): el campo de correo tenía un `maxLength(20)` heredado que
+    bloqueaba cualquier email real, y la contraseña exigía mínimo 8 mientras el mensaje ya
+    dibujado decía 6 (que es además el mínimo real de Firebase Auth) — ambos corregidos.
+- **Qué existe hoy en `src/app`**: `layout/` completo, reactivo a la sesión ·
+  `shared/` podado, con i18n restaurado · `core/{config,firebase,session,models,services/toast,utils}` ·
+  `features/authentication` (login + forgot-password, con Firebase real) · `features/home`
+  (**placeholder temporal**, sin cambios — Fase 2 lo reemplaza).
 - **Pendientes heredados** que las fases siguientes deben cerrar:
   - Assets sin convertir a WebP: 6,3 MB en `src/assets/images` (Angular avisa `NG0913`).
     No hay conversor en el entorno; requiere además tocar 4 rutas del login aprobado.
@@ -295,7 +321,9 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 - **Deshabilitar la auto-creación de cuentas** en Authentication → Settings → *User actions*
   quedó **verificado por el cliente** al describir la configuración de consola (registro
   público deshabilitado); no requiere acción de código.
-- **Siguiente paso: FASE 1** — Autenticación, sesión y recuperación de contraseña.
+- **Siguiente paso:** resolver el bloqueo de la API key (plan §22.2), sembrar el primer
+  admin a mano (§7.1 abajo), y verificar en vivo lo que la Fase 1 no pudo probar. Después:
+  **FASE 2** — Usuarios, roles, guards y sidebar.
 
 ## Comandos
 

@@ -18,14 +18,12 @@
             <div class="marketing-content">
 
                 <h1>
-                    Donde la imaginación
-                    <span>cobra vida</span>
+                    {{ "app.auth.login.marketing.headline1" | translate }}
+                    <span>{{ "app.auth.login.marketing.headline2" | translate }}</span>
                 </h1>
 
                 <p class="marketing-description">
-                    Descubre un mundo lleno de juegos, aventuras y momentos para compartir.
-                    En Mi Pimpollito encontrarás juguetes pensados para despertar la
-                    imaginación, crear sonrisas y hacer especial cada momento.
+                    {{ "app.auth.login.marketing.description" | translate }}
                 </p>
 
             </div>
@@ -46,11 +44,10 @@
 
                     <div class="contact-info">
 
-                        <strong>Encuéntranos y conócenos</strong>
+                        <strong>{{ "app.auth.login.marketing.contactTitle" | translate }}</strong>
 
                         <span>
-                            Descubre nuestros canales, novedades
-                            y todo lo que Mi Pimpollito tiene para ti.
+                            {{ "app.auth.login.marketing.contactDescription" | translate }}
                         </span>
 
                         <a
@@ -71,8 +68,8 @@
                     <i class="fa-regular fa-star"></i>
 
                     <span>
-                        Grandes aventuras<br />
-                        comienzan jugando
+                        {{ "app.auth.login.marketing.happyMessageLine1" | translate }}<br />
+                        {{ "app.auth.login.marketing.happyMessageLine2" | translate }}
                     </span>
 
                 </div>
@@ -84,21 +81,21 @@
 
                 <div class="category-item">
                     <i class="fa-solid fa-gamepad"></i>
-                    <span>JUEGA</span>
+                    <span>{{ "app.auth.login.marketing.categoryPlay" | translate }}</span>
                 </div>
 
                 <div class="separator"></div>
 
                 <div class="category-item">
                     <i class="fa-solid fa-lightbulb"></i>
-                    <span>IMAGINA</span>
+                    <span>{{ "app.auth.login.marketing.categoryImagine" | translate }}</span>
                 </div>
 
                 <div class="separator"></div>
 
                 <div class="category-item">
                     <i class="fa-solid fa-star"></i>
-                    <span>CREA</span>
+                    <span>{{ "app.auth.login.marketing.categoryCreate" | translate }}</span>
                 </div>
 
             </div>
@@ -126,10 +123,10 @@
             <!-- HEADER -->
             <div class="login-card-header">
 
-                <h2>Bienvenido a Mi Pimpollito</h2>
+                <h2>{{ "app.auth.login.welcomeTitle" | translate }}</h2>
 
                 <p>
-                    Ingresa para comenzar
+                    {{ "app.auth.login.welcomeSubtitle" | translate }}
                 </p>
 
             </div>
@@ -147,7 +144,7 @@
 
                             <ng-template pTemplate>
 
-                                {{ "app.common.messages.errorLogin" | translate }}
+                                {{ errorMessageKey() | translate }}
 
                             </ng-template>
 
@@ -165,7 +162,7 @@
                         class="form-label"
                         for="username"
                     >
-                        Usuario o correo
+                        {{ "app.auth.login.usernameLabel" | translate }}
                     </label>
 
                     <div class="form-item">
@@ -175,7 +172,7 @@
                         <input
                             id="username"
                             type="text"
-                            placeholder="Usuario o correo"
+                            [placeholder]="'app.auth.login.usernamePlaceholder' | translate"
                             pInputText
                             class="form-input"
                             formControlName="username"
@@ -186,15 +183,15 @@
                     <div class="error-message">
 
                         <p *ngIf="loginForm.get('username')?.errors?.['required']">
-                            *Campo requerido
+                            *{{ "app.common.errors.required" | translate }}
+                        </p>
+
+                        <p *ngIf="loginForm.get('username')?.errors?.['email'] && !loginForm.get('username')?.errors?.['required']">
+                            *{{ "app.common.errors.email" | translate }}
                         </p>
 
                         <p *ngIf="loginForm.get('username')?.errors?.['maxlength']">
-                            *Máximo de caracteres permitido es 20
-                        </p>
-
-                        <p *ngIf="loginForm.get('username')?.errors?.['usrOrEmailInvalid']">
-                            {{ "app.common.errors.usrOrEmailInvalid" | translate }}
+                            *{{ "app.common.errors.maxlength" | translate : { value: 20 } }}
                         </p>
 
                     </div>
@@ -209,7 +206,7 @@
                         class="form-label"
                         for="password"
                     >
-                        Contraseña
+                        {{ "app.auth.login.passwordLabel" | translate }}
                     </label>
 
                     <div class="form-item password-item">
@@ -219,7 +216,7 @@
                         <p-password
                             id="password"
                             class="password-control"
-                            placeholder="Contraseña"
+                            [placeholder]="'app.auth.login.passwordPlaceholder' | translate"
                             [toggleMask]="true"
                             formControlName="password"
                             [feedback]="false"
@@ -233,15 +230,15 @@
                     <div class="error-message">
 
                         <p *ngIf="loginForm.get('password')?.errors?.['required']">
-                            *Campo requerido
+                            *{{ "app.common.errors.required" | translate }}
                         </p>
 
                         <p *ngIf="loginForm.get('password')?.errors?.['minlength']">
-                            *La contraseña debe tener al menos 6 caracteres
+                            *{{ "app.validation.passwordMinLength" | translate : { value: 6 } }}
                         </p>
 
                         <p *ngIf="loginForm.get('password')?.errors?.['maxlength']">
-                            *Máximo de caracteres permitido es 20
+                            *{{ "app.common.errors.maxlength" | translate : { value: 20 } }}
                         </p>
 
                     </div>
@@ -253,7 +250,7 @@
                 <div class="forgot-link">
 
                     <a [routerLink]="['/auth/forgot-password']">
-                        ¿Olvidaste tu contraseña?
+                        {{ "app.auth.login.forgotPasswordLink" | translate }}
                     </a>
 
                 </div>
@@ -269,11 +266,11 @@
 
                     @if (loading()) {
 
-                        <span>Ingresando...</span>
+                        <span>{{ "app.auth.login.submitting" | translate }}</span>
 
                     } @else {
 
-                        <span>Iniciar sesión</span>
+                        <span>{{ "app.auth.login.submit" | translate }}</span>
 
                         <i class="fa-solid fa-arrow-right"></i>
 
@@ -290,7 +287,7 @@
                 <i class="fa-solid fa-shield-halved"></i>
 
                 <span>
-                    Plataforma segura y confiable
+                    {{ "app.auth.login.footerSecure" | translate }}
                 </span>
 
             </div>
