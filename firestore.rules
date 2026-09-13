@@ -1,28 +1,60 @@
 rules_version = '2';
 
-// FASE 1 — deny-by-default global, salvo lo mínimo que esta fase necesita.
+// FASE 2 — amplía lo mínimo de la Fase 1 sin abrir nada que esta fase no use
+// todavía (docs/architecture/mi-pimpollito-plan.md §10.2).
 //
-// Un usuario autenticado puede leer ÚNICAMENTE su propio documento en
-// users/{uid}: es el paso 2 de la cadena de sesión (plan §6.2) y no puede
-// depender de nada más que `request.auth.uid == userId`, porque ese
-// documento es justo lo que decide si el usuario está activo.
+// Se abre en esta fase:
+//   - `get`/`list` de `users` para admin  → listado administrativo.
+//   - `update` de `users` para admin, restringida a los campos de perfil no
+//     privilegiados (nombre, CI, teléfono, dirección, `searchName`).
 //
-// Deliberadamente NO se abre en esta fase (docs/architecture/mi-pimpollito-plan.md §10.2):
-//   - list de users            → Fase 2 (listado administrativo)
-//   - create/update/delete     → Fase 2 (Cloud Function createUser + edición)
-//   - cualquier otra colección → sus fases respectivas
-// Antes de abrir algo aquí, revisar si de verdad hace falta en esta fase.
-// Si no hace falta, no se abre.
+// Deliberadamente SIGUE cerrado en esta fase — TODO lo privilegiado pasa por
+// Cloud Functions con Admin SDK, nunca por escritura directa del cliente:
+//   - `create`/`delete` de `users`      → solo `createUser` (Admin SDK).
+//   - `role`                            → solo `setUserRole`, para que el
+//     custom claim de Authentication nunca quede desincronizado del
+//     documento (y para que "un admin no puede cambiar su propio rol" se
+//     aplique en un único lugar, no en la Rule también).
+//   - `isActive`                        → solo `setUserActive`, para que
+//     Firestore y el `disabled` de Authentication no se desincronicen (y
+//     mismo motivo de self-protection que `role`).
+//   - `email`/`emailLower`              → solo `updateUserAuth` (§7.5).
+//   - `createdAt`                       → nunca se reescribe.
+//   - edición de campos propios (self-service) → no hay pantalla que la use
+//     todavía; se abre cuando exista.
+//   - `settings`, `counters`, `products`, `sales`, `giftCards*`  → sus fases.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    match /users/{userId} {
-      allow get: if request.auth != null && request.auth.uid == userId;
-      allow list, create, update, delete: if false;
+    function signedIn() { return request.auth != null; }
+
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isActive() { return signedIn() && me().isActive == true; }
+    function isAdmin()  { return isActive() && me().role == 'admin'; }
+
+    // campos que el cliente no puede tocar nunca, ni siquiera un admin
+    function untouched(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields.toSet());
     }
 
-    match /{document=**} {
-      allow read, write: if false;
+    match /users/{userId} {
+      // la lectura propia es el paso 2 de la cadena de sesión: no puede
+      // depender de me(), porque ese documento es justo lo que decide si el
+      // usuario está activo.
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow get, list: if isAdmin();
+
+      // crear y borrar: solo Cloud Function (el Admin SDK ignora estas reglas)
+      allow create, delete: if false;
+
+      // el admin edita el perfil de cualquiera — nunca los campos
+      // privilegiados: esos SIEMPRE pasan por una Function (arriba).
+      allow update: if isAdmin()
+                    && untouched(['email', 'emailLower', 'createdAt', 'isActive', 'role']);
     }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

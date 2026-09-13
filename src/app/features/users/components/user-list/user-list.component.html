@@ -1,0 +1,117 @@
+<app-title-bar
+    [title]="'app.users.title' | translate"
+    [description]="'app.users.list' | translate"
+    [newLabel]="'app.users.new' | translate"
+    (onClickNew)="openCreate()"
+></app-title-bar>
+
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+    <app-filter-tab
+        [options]="filterOptions"
+        [selectedOption]="filter()"
+        (onChange)="onFilterChange($event)"
+    ></app-filter-tab>
+
+    <app-search-bar
+        [placeholder]="'app.users.searchPlaceholder'"
+        [compact]="true"
+        (onSearch)="onSearch($event)"
+    ></app-search-bar>
+</div>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!rows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p-table [value]="rows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+    <ng-template pTemplate="header">
+        <tr>
+            <th>{{ "app.users.firstName" | translate }} / {{ "app.users.lastName" | translate }}</th>
+            <th>{{ "app.users.email" | translate }}</th>
+            <th>{{ "app.users.role" | translate }}</th>
+            <th>{{ "app.users.isActive" | translate }}</th>
+            <th class="text-right">{{ "app.common.actions" | translate }}</th>
+        </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-user>
+        <tr>
+            <td>
+                {{ user.firstName }} {{ user.lastName }}
+                @if (user.uid === currentUid()) {
+                <span class="text-xs text-gray-400 ml-1">({{ "app.users.you" | translate }})</span>
+                }
+            </td>
+            <td>{{ user.email }}</td>
+            <td>
+                <p-tag
+                    [value]="('app.users.roles.' + user.role) | translate"
+                    [severity]="user.role === 'admin' ? 'warning' : 'info'"
+                ></p-tag>
+            </td>
+            <td>
+                <p-tag
+                    [value]="(user.isActive ? 'app.users.status.active' : 'app.users.status.inactive') | translate"
+                    [severity]="user.isActive ? 'success' : 'danger'"
+                ></p-tag>
+            </td>
+            <td class="text-right">
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-pencil-alt"
+                    class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.common.edit' | translate"
+                    (click)="openEdit(user)"
+                ></button>
+                <button
+                    pButton
+                    type="button"
+                    [icon]="user.isActive ? 'fas fa-toggle-on' : 'fas fa-toggle-off'"
+                    class="p-button-text p-button-rounded"
+                    [class.text-danger]="user.isActive"
+                    [class.text-green-600]="!user.isActive"
+                    [disabled]="user.uid === currentUid()"
+                    [pTooltip]="
+                        user.uid === currentUid()
+                            ? ('app.users.messages.cannotToggleSelf' | translate)
+                            : ((user.isActive ? 'app.common.disable' : 'app.common.activate') | translate)
+                    "
+                    (click)="confirmToggleActive(user)"
+                ></button>
+            </td>
+        </tr>
+    </ng-template>
+</p-table>
+}
+
+<!--
+  El paginador vive FUERA del bloque de arriba a propósito: si se monta y
+  desmonta cada vez que `loading()` cambia, PrimeNG dispara un evento
+  espurio del `p-dropdown` de tamaño de página en su primer render que
+  vuelve a llamar a `loadFirstPage()` — un ciclo infinito real (ver
+  `hasLoadedOnce` en el componente). Una vez que existe la primera
+  respuesta, el paginador permanece montado durante toda la vida del
+  componente; solo sus valores (hasNext/hasPrev/total) cambian.
+-->
+@if (hasLoadedOnce()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+}
+
+<app-user-form-dialog
+    [visible]="formVisible()"
+    [user]="editingUser()"
+    (visibleChange)="formVisible.set($event)"
+    (saved)="onSaved()"
+></app-user-form-dialog>

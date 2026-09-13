@@ -33,10 +33,16 @@
       "next": "Siguiente",
       "previous": "Anterior",
       "add": "Añadir",
+      "activate": "Activar",
       "showForm": "Visualizar Formulario",
       "viewMore": "Ver más",
       "viewLess": "Ver menos",
       "loading": "Cargando, por favor espera...",
+      "paginator": {
+        "first": "Primera",
+        "pageSize": "Por página",
+        "range": "{{count}} de {{total}}"
+      },
       "messages": {
         "confirmDelete": "¿Está seguro que desea eliminar este registro?",
         "created": "El registro ha sido creado satisfactoriamente.",
@@ -100,6 +106,7 @@
       "edit": "Editar usuario",
       "details": "Detalles de usuario",
       "delete": "Eliminar usuario",
+      "you": "tú",
       "firstName": "Nombres",
       "lastName": "Apellidos",
       "ci": "Carnet de identidad",
@@ -109,9 +116,20 @@
       "role": "Rol",
       "isActive": "Activo",
       "photo": "Foto",
+      "initialPassword": "Contraseña inicial",
+      "searchPlaceholder": "Buscar por nombre o correo",
       "roles": {
         "admin": "Administrador",
         "user": "Vendedor"
+      },
+      "status": {
+        "active": "Activo",
+        "inactive": "Inactivo"
+      },
+      "filters": {
+        "all": "Todos",
+        "active": "Activos",
+        "inactive": "Inactivos"
       },
       "form": {
         "personalInfo": "Información personal",
@@ -123,12 +141,31 @@
         "list": "Usuarios",
         "new": "Nuevo usuario",
         "edit": "Editar usuario"
+      },
+      "messages": {
+        "cannotEditOwnRole": "No puedes cambiar tu propio rol.",
+        "cannotToggleSelf": "No puedes activar o desactivar tu propia cuenta.",
+        "confirmActivate": "¿Activar a {{name}}?",
+        "confirmDeactivate": "¿Desactivar a {{name}}? No podrá iniciar sesión mientras esté inactivo.",
+        "activated": "Usuario activado correctamente.",
+        "deactivated": "Usuario desactivado correctamente."
       }
     },
     "profile": {
       "title": "Perfil",
+      "changePassword": "Cambiar contraseña",
+      "currentPassword": "Contraseña actual",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar nueva contraseña",
       "breadcrumbs": {
         "main": "Perfil"
+      },
+      "messages": {
+        "passwordChanged": "Tu contraseña se actualizó correctamente."
+      },
+      "errors": {
+        "passwordsMismatch": "Las contraseñas no coinciden.",
+        "wrongCurrentPassword": "La contraseña actual es incorrecta."
       }
     },
     "auth": {

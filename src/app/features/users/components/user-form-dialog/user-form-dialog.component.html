@@ -1,0 +1,206 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="visibleChange.emit($event)"
+    [modal]="true"
+    [style]="{ width: '32rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="
+        (isEdit() ? 'app.users.edit' : 'app.users.new') | translate
+    "
+>
+    <form [formGroup]="form" (ngSubmit)="submit()" class="flex flex-col gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="firstName">{{
+                    "app.users.firstName" | translate
+                }}</label>
+                <input
+                    pInputText
+                    id="firstName"
+                    formControlName="firstName"
+                    class="w-full"
+                />
+                <div class="text-danger text-xs">
+                    @if (form.get('firstName')?.touched &&
+                    form.get('firstName')?.errors?.['required']) {
+                    <p>*{{ "app.common.errors.required" | translate }}</p>
+                    } @if (form.get('firstName')?.errors?.['onlyLetters']) {
+                    <p>*{{ "app.common.errors.onlyLetters" | translate }}</p>
+                    }
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="lastName">{{
+                    "app.users.lastName" | translate
+                }}</label>
+                <input
+                    pInputText
+                    id="lastName"
+                    formControlName="lastName"
+                    class="w-full"
+                />
+                <div class="text-danger text-xs">
+                    @if (form.get('lastName')?.touched &&
+                    form.get('lastName')?.errors?.['required']) {
+                    <p>*{{ "app.common.errors.required" | translate }}</p>
+                    } @if (form.get('lastName')?.errors?.['onlyLetters']) {
+                    <p>*{{ "app.common.errors.onlyLetters" | translate }}</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="ci">{{
+                    "app.users.ci" | translate
+                }}</label>
+                <input
+                    pInputText
+                    id="ci"
+                    formControlName="ci"
+                    class="w-full"
+                />
+                <div class="text-danger text-xs">
+                    @if (form.get('ci')?.touched &&
+                    form.get('ci')?.errors?.['required']) {
+                    <p>*{{ "app.common.errors.required" | translate }}</p>
+                    } @if (form.get('ci')?.errors?.['invalidCI']) {
+                    <p>*{{ "app.common.errors.invalidCI" | translate }}</p>
+                    }
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="role">{{
+                    "app.users.role" | translate
+                }}</label>
+                <p-dropdown
+                    id="role"
+                    formControlName="role"
+                    [options]="roleOptions"
+                    optionLabel="label"
+                    optionValue="value"
+                    styleClass="w-full"
+                >
+                    <ng-template let-option pTemplate="item">{{
+                        option.label | translate
+                    }}</ng-template>
+                    <ng-template let-option pTemplate="selectedItem">{{
+                        option.label | translate
+                    }}</ng-template>
+                </p-dropdown>
+                @if (isEditingSelf()) {
+                <p class="text-xs text-gray-500">
+                    {{ "app.users.messages.cannotEditOwnRole" | translate }}
+                </p>
+                }
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="email">{{
+                "app.users.email" | translate
+            }}</label>
+            <input
+                pInputText
+                id="email"
+                type="email"
+                formControlName="email"
+                class="w-full"
+            />
+            <div class="text-danger text-xs">
+                @if (form.get('email')?.touched &&
+                form.get('email')?.errors?.['required']) {
+                <p>*{{ "app.common.errors.required" | translate }}</p>
+                } @if (form.get('email')?.errors?.['email']) {
+                <p>*{{ "app.common.errors.email" | translate }}</p>
+                }
+            </div>
+        </div>
+
+        @if (!isEdit()) {
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="password">{{
+                "app.users.initialPassword" | translate
+            }}</label>
+            <p-password
+                inputId="password"
+                formControlName="password"
+                [toggleMask]="true"
+                [feedback]="false"
+                styleClass="w-full"
+                inputStyleClass="w-full"
+            ></p-password>
+            <div class="text-danger text-xs">
+                @if (form.get('password')?.touched &&
+                form.get('password')?.errors?.['required']) {
+                <p>*{{ "app.common.errors.required" | translate }}</p>
+                } @if (form.get('password')?.errors?.['minlength']) {
+                <p>
+                    *{{
+                        "app.common.errors.minlength"
+                            | translate : { value: 8 }
+                    }}
+                </p>
+                }
+            </div>
+        </div>
+        }
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="phoneNumber">{{
+                    "app.users.phoneNumber" | translate
+                }}</label>
+                <input
+                    pInputText
+                    id="phoneNumber"
+                    formControlName="phoneNumber"
+                    class="w-full"
+                />
+                <div class="text-danger text-xs">
+                    @if (form.get('phoneNumber')?.errors?.['phoneInvalid']) {
+                    <p>*{{ "app.common.errors.phoneInvalid" | translate }}</p>
+                    }
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="address">{{
+                    "app.users.address" | translate
+                }}</label>
+                <input
+                    pInputText
+                    id="address"
+                    formControlName="address"
+                    class="w-full"
+                />
+                <div class="text-danger text-xs">
+                    @if (form.get('address')?.errors?.['addressInvalid']) {
+                    <p>*{{ "app.common.errors.addressInvalid" | translate }}</p>
+                    }
+                </div>
+            </div>
+        </div>
+    </form>
+
+    <ng-template pTemplate="footer">
+        <button
+            pButton
+            type="button"
+            class="p-button-secondary"
+            [label]="'app.common.cancel' | translate"
+            (click)="close()"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="'app.common.save' | translate"
+            [loading]="saving()"
+            (click)="submit()"
+        ></button>
+    </ng-template>
+</p-dialog>

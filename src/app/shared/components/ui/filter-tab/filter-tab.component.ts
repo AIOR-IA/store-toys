@@ -10,6 +10,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { BadgeModule } from 'primeng/badge';
 import { SelectButtonModule } from 'primeng/selectbutton';
+import { TranslateModule } from '@ngx-translate/core';
 
 export interface FilterTabOption<T> {
     label: string;
@@ -20,7 +21,7 @@ export interface FilterTabOption<T> {
 @Component({
     selector: 'app-filter-tab',
     standalone: true,
-    imports: [SelectButtonModule, FormsModule, BadgeModule],
+    imports: [SelectButtonModule, FormsModule, BadgeModule, TranslateModule],
     templateUrl: './filter-tab.component.html',
     styleUrl: './filter-tab.component.scss',
 })

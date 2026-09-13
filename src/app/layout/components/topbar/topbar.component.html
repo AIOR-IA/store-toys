@@ -72,6 +72,14 @@
         <div class="text-gray-500 text-xs mb-3 truncate">{{ userEmail() }}</div>
         <button
             type="button"
+            class="w-full text-left hover:underline flex items-center gap-2 mb-2"
+            (click)="openChangePassword()"
+        >
+            <i class="fas fa-key"></i>
+            {{ "app.profile.changePassword" | translate }}
+        </button>
+        <button
+            type="button"
             class="w-full text-left text-danger hover:underline flex items-center gap-2"
             (click)="logout()"
         >
@@ -80,3 +88,8 @@
         </button>
     </div>
 </p-overlayPanel>
+
+<app-change-password-dialog
+    [visible]="changePasswordVisible()"
+    (visibleChange)="changePasswordVisible.set($event)"
+></app-change-password-dialog>

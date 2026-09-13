@@ -18,6 +18,7 @@ import { LayoutService } from '../../services/app.layout.service';
 import { environment } from '../../../../environments/environment';
 import { FIREBASE_DEV_PROJECT_ID } from '../../../../environments/environment.model';
 import { SessionService } from '@core/session';
+import { ChangePasswordDialogComponent } from '../../../features/profile/components/change-password-dialog/change-password-dialog.component';
 
 /**
  * Barra superior.
@@ -40,7 +41,13 @@ import { SessionService } from '@core/session';
 @Component({
     selector: 'app-topbar',
     standalone: true,
-    imports: [CommonModule, RouterLink, OverlayPanelModule, TranslateModule],
+    imports: [
+        CommonModule,
+        RouterLink,
+        OverlayPanelModule,
+        TranslateModule,
+        ChangePasswordDialogComponent,
+    ],
     templateUrl: './topbar.component.html',
     styleUrl: './topbar.component.scss',
 })
@@ -49,6 +56,7 @@ export class AppTopbarComponent implements OnInit {
 
     showProfile = input<boolean>(true);
     isDarkTheme = signal(false);
+    changePasswordVisible = signal(false);
     isDevFirebase = environment.firebase.projectId === FIREBASE_DEV_PROJECT_ID;
     firebaseProjectId = environment.firebase.projectId;
 
@@ -94,6 +102,11 @@ export class AppTopbarComponent implements OnInit {
 
     public toggleMenu(event: any): void {
         this.overlay?.toggle(event);
+    }
+
+    openChangePassword(): void {
+        this.overlay?.hide();
+        this.changePasswordVisible.set(true);
     }
 
     logout(): void {

@@ -16,6 +16,19 @@ export class ToastService {
             });
         });
     }
+    /**
+     * Muestra un texto ya resuelto, sin pasar por `translate.get()`.
+     *
+     * Para mensajes que no son claves de `es.json` sino texto dinámico que ya
+     * llega en español — por ejemplo, el `message` de un `HttpsError` que
+     * nosotros mismos redactamos en una Cloud Function (`functions/src/users.ts`).
+     * Mostrar ESE texto no es el "mensaje crudo de Firebase" que CLAUDE.md
+     * prohíbe: es nuestro propio mensaje, ya localizado en el servidor.
+     */
+    public errorMessage(detail: string): void {
+        this.toast.add({ severity: 'error', summary: 'Error', detail });
+    }
+
     public error(key: string | string[]): void {
         this.t.get(key).subscribe((message) => {
             if (Array.isArray(message)) {

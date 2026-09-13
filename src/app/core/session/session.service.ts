@@ -2,14 +2,17 @@ import { Injectable, computed, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
     Auth,
+    EmailAuthProvider,
     User,
     authState,
+    reauthenticateWithCredential,
     sendPasswordResetEmail,
     signInWithEmailAndPassword,
     signOut,
+    updatePassword,
 } from '@angular/fire/auth';
 import { Firestore, doc, docData } from '@angular/fire/firestore';
-import { Observable, from, of } from 'rxjs';
+import { Observable, from, of, throwError } from 'rxjs';
 import {
     catchError,
     distinctUntilChanged,
@@ -138,5 +141,34 @@ export class SessionService {
 
     resetPassword(email: string): Observable<void> {
         return from(sendPasswordResetEmail(this.auth, email));
+    }
+
+    /**
+     * Cambio de contraseña por el propio usuario autenticado (plan §7, Fase
+     * 2 — `features/profile`). Firebase exige reautenticar antes de una
+     * operación sensible como esta si la sesión no es "reciente".
+     *
+     * Es la única operación de la app que lee `auth.currentUser` fuera del
+     * flujo de `session$` — y lo hace aquí, no en el componente, porque
+     * `SessionService` es el único lugar permitido para tocar `auth.*`
+     * directamente (CLAUDE.md, "Sesión y autorización").
+     */
+    changePassword(
+        currentPassword: string,
+        newPassword: string,
+    ): Observable<void> {
+        const user = this.auth.currentUser;
+        if (!user?.email) {
+            return throwError(() => new Error('no-active-session'));
+        }
+
+        const credential = EmailAuthProvider.credential(
+            user.email,
+            currentPassword,
+        );
+
+        return from(reauthenticateWithCredential(user, credential)).pipe(
+            switchMap(() => from(updatePassword(user, newPassword))),
+        );
     }
 }

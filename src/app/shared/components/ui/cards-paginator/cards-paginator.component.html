@@ -1,21 +1,56 @@
-<div class="w-full flex justify-center mt-4 gap-6">
-    @if(hasPreviousPage()) {
-    <button
-        pButton
-        type="button"
-        (click)="onPreviousPage($event)"
-        loadingIcon="fas fa-spinner fa-spin"
-    >
-        {{ 'app.common.previous' | translate }}
-    </button>
-    } @if(hasNextPage()) {
-    <button
-        pButton
-        type="button"
-        (click)="onNextPage($event)"
-        loadingIcon="fas fa-spinner fa-spin"
-    >
-        {{ 'app.common.next' | translate }}
-    </button>
+<div
+    class="w-full flex flex-col md:flex-row items-center justify-between gap-3 mt-4"
+>
+    <div class="text-sm text-gray-500 order-2 md:order-1">
+        @if (total() !== null) {
+        {{
+            "app.common.paginator.range"
+                | translate : { count: currentCount(), total: total() }
+        }}
+        }
+    </div>
+
+    <div class="flex items-center gap-2 order-1 md:order-2">
+        @if (hasPreviousPage()) {
+        <button
+            pButton
+            type="button"
+            icon="fas fa-angles-left"
+            class="p-button-secondary p-button-outlined"
+            [pTooltip]="'app.common.paginator.first' | translate"
+            (click)="onFirstPage()"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="'app.common.previous' | translate"
+            class="p-button-secondary"
+            (click)="onPreviousPage()"
+        ></button>
+        } @if (hasNextPage()) {
+        <button
+            pButton
+            type="button"
+            [label]="'app.common.next' | translate"
+            iconPos="right"
+            icon="fas fa-angle-right"
+            (click)="onNextPage()"
+        ></button>
+        }
+    </div>
+
+    @if (pageSizeOptions().length) {
+    <div class="flex items-center gap-2 order-3 text-sm">
+        <span class="text-gray-500">{{
+            "app.common.paginator.pageSize" | translate
+        }}</span>
+        <p-dropdown
+            [options]="pageSizeOptions()"
+            [ngModel]="pageSize()"
+            (ngModelChange)="changePageSize($event)"
+            [autoDisplayFirst]="false"
+            styleClass="w-20"
+        ></p-dropdown>
+    </div>
     }
 </div>

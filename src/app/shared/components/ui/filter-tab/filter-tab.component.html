@@ -10,7 +10,7 @@
         <ng-template let-item pTemplate="item">
             <div class="btn-content">
                 <i [class]="item.icon"></i>
-                <span class="text-sm">{{ item.label }}</span>
+                <span class="text-sm">{{ item.label | translate }}</span>
             </div>
 
             @if(item.counter >= 0) {

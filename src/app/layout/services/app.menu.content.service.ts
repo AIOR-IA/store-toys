@@ -1,42 +1,45 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, inject } from '@angular/core';
+import { SessionService } from '@core/session';
+import { MENU } from '../menu/menu.config';
 
 /**
- * Contenido del menú lateral.
+ * Contenido del menú lateral, filtrado por rol (plan §11.1, Fase 2).
  *
- * FASE 0A: menú mínimo, sin el modelo de permisos heredado.
+ * `computed()` sobre la señal de sesión: se recalcula solo cuando la sesión
+ * cambia (login, logout, o un `isActive`/`role` que cambia en caliente), sin
+ * ningún contador manual (`refresSideBar`) ni dependencia de
+ * `translate.get(...).subscribe(...)` — ese patrón heredado evaluaba los
+ * permisos una sola vez, en el arranque, y dejaba el sidebar vacío si la
+ * sesión todavía no había resuelto (plan §3.3, hallazgo 6).
  *
- * `label` guarda una **clave del catálogo** (`assets/i18n/es.json`), no el
- * texto: la plantilla de `menu-item` la resuelve con el pipe `| translate`.
- * Es deliberado — el servicio heredado construía el modelo dentro de
- * `translate.get('app').subscribe(...)`, una dependencia asíncrona en el
- * arranque que dejaba el sidebar vacío (plan §3.3, hallazgo 6). Con el pipe no
- * hay orden de inicialización que respetar.
- *
- * En la FASE 2 esto pasa a `layout/menu/menu.config.ts` como menú declarativo
- * por rol, filtrado con un `computed()` sobre la señal de sesión (plan §11.1).
+ * `label` sigue siendo una **clave** de `es.json`, no el texto: la plantilla
+ * de `menu-item` la resuelve con el pipe `| translate`.
  */
 @Injectable({
     providedIn: 'root',
 })
 export class AppMenuContentService {
-    model = signal<any[]>([]);
+    private readonly sessionService = inject(SessionService);
 
-    constructor() {
-        this.populateMenuContent();
-    }
+    readonly model = computed(() => {
+        const session = this.sessionService.session();
+        const role = session.status === 'active' ? session.role : null;
 
-    populateMenuContent(): void {
-        this.model.set([
+        const items = role
+            ? MENU.filter((entry) => entry.roles.includes(role)).map(
+                  (entry) => ({
+                      label: entry.label,
+                      icon: entry.icon,
+                      routerLink: entry.routerLink,
+                  }),
+              )
+            : [];
+
+        return [
             {
                 label: 'app.common.options',
-                items: [
-                    {
-                        label: 'app.menu.home',
-                        icon: 'fas fa-house',
-                        routerLink: ['/'],
-                    },
-                ],
+                items,
             },
-        ]);
-    }
+        ];
+    });
 }

@@ -23,10 +23,12 @@ export interface AppUser {
     photoUrl?: string;
     photoPath?: string;
 
-    /** "apellidos nombres" normalizado → búsqueda por prefijo (Fase 2). */
+    /** "apellidos nombres" normalizado → orden alfabético del listado (Fase 2). */
     searchName: string;
     /** Búsqueda exacta insensible a mayúsculas (Fase 2). */
     emailLower: string;
+    /** Palabras normalizadas de nombre/apellido → búsqueda con `array-contains-any` (Fase 2). */
+    searchTokens: string[];
 
     createdAt: Timestamp;
     updatedAt: Timestamp;

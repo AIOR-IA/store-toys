@@ -53,3 +53,33 @@ export const guestGuard: CanActivateFn = () => {
         map((s) => (s.status === 'active' ? router.createUrlTree(['/']) : true)),
     );
 };
+
+/**
+ * Protege las rutas administrativas (`/usuarios`, plan §7 y §11.2): solo
+ * entra una sesión `active` con `role === 'admin'`. No relee Firestore — usa
+ * exactamente el mismo `ready$` que ya resolvió `authGuard`, así que no hay
+ * lecturas duplicadas.
+ *
+ * Un `user` autenticado y activo se manda a `/` (no tiene sentido devolverlo
+ * al login: su sesión es válida, solo no tiene permiso para este módulo). Un
+ * `rejected` o sin sesión sigue el mismo camino que `authGuard`.
+ */
+export const adminGuard: CanActivateFn = () => {
+    const session = inject(SessionService);
+    const router = inject(Router);
+
+    return session.ready$.pipe(
+        take(1),
+        map((s) => {
+            if (s.status === 'active') {
+                return s.role === 'admin' ? true : router.createUrlTree(['/']);
+            }
+            if (s.status === 'rejected') {
+                return router.createUrlTree(['/auth/login'], {
+                    queryParams: { denied: s.reason },
+                });
+            }
+            return router.createUrlTree(['/auth/login']);
+        }),
+    );
+};
