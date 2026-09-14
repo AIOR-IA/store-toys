@@ -1,0 +1,95 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="visibleChange.emit($event)"
+    [modal]="true"
+    [style]="{ width: '32rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="'app.giftCards.register.title' | translate"
+    (onHide)="close()"
+>
+    <form (ngSubmit)="submit()" class="flex flex-col gap-4">
+        <p-selectButton
+            [options]="modeOptions"
+            [ngModel]="mode()"
+            (ngModelChange)="mode.set($event)"
+            optionLabel="label"
+            optionValue="value"
+            [name]="'mode'"
+        >
+            <ng-template let-item pTemplate="item">{{ item.label | translate }}</ng-template>
+        </p-selectButton>
+
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="amountBs">{{
+                "app.giftCards.amount" | translate
+            }}</label>
+            <p-inputNumber
+                inputId="amountBs"
+                [ngModel]="amountBs()"
+                (ngModelChange)="amountBs.set($event)"
+                [name]="'amountBs'"
+                mode="currency"
+                currency="BOB"
+                locale="es-BO"
+                [minFractionDigits]="2"
+                styleClass="w-full"
+                inputStyleClass="w-full"
+            ></p-inputNumber>
+            <div class="text-xs text-gray-500">{{ "app.giftCards.register.amountHelp" | translate }}</div>
+        </div>
+
+        @if (mode() === 'single') {
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="code">{{
+                "app.giftCards.code" | translate
+            }}</label>
+            <input
+                pInputText
+                id="code"
+                [ngModel]="code()"
+                (ngModelChange)="code.set($event)"
+                [name]="'code'"
+                class="w-full"
+                [placeholder]="'app.giftCards.register.codePlaceholder' | translate"
+            />
+        </div>
+        } @else {
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="codes">{{
+                "app.giftCards.register.codesLabel" | translate
+            }}</label>
+            <textarea
+                pInputTextarea
+                id="codes"
+                [ngModel]="codesText()"
+                (ngModelChange)="codesText.set($event)"
+                [name]="'codes'"
+                rows="6"
+                class="w-full font-mono"
+                [placeholder]="'app.giftCards.register.codesPlaceholder' | translate"
+            ></textarea>
+            <div class="text-xs text-gray-500">
+                {{ "app.giftCards.register.codesCount" | translate: { count: batchCodes().length } }}
+            </div>
+        </div>
+        }
+
+        <div class="flex justify-end gap-2 pt-2">
+            <button
+                pButton
+                type="button"
+                class="p-button-text"
+                [label]="'app.common.cancel' | translate"
+                (click)="close()"
+            ></button>
+            <button
+                pButton
+                type="submit"
+                [label]="'app.giftCards.register.action' | translate"
+                [loading]="saving()"
+                [disabled]="saving()"
+            ></button>
+        </div>
+    </form>
+</p-dialog>

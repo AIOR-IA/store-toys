@@ -1127,11 +1127,15 @@ en propagarse al token, y una operación privilegiada no puede depender de eso.
 | `updateUserAuth` | admin | Cambia el correo en Auth **y** el espejo en Firestore, en ese orden |
 | `setUserActive` | admin | `isActive` en Firestore **y** `disabled` en Auth |
 | `deleteUserAuth` | admin | Reservado. Por defecto **no se usa**: el borrado es lógico (§21) |
-| `createSale` | staff | Registra la venta, descuenta stock, consume gift card. §15 |
-| `cancelSale` | admin | Anula una venta, devuelve stock, revierte gift card. §15 |
+| `createSale` | staff | Registra la venta, descuenta stock, redime gift card si aplica. §15, §16 |
+| `cancelSale` | admin | Anula una venta, devuelve stock; revierte la gift card SOLO si el ciclo sigue intacto (§16.7) |
 | `attachVoucher` | staff | Adjunta el comprobante de un pago QR. §2.1 C-4 |
-| `issueGiftCard` | staff | Emite saldo sobre una tarjeta física. §16 |
-| `cancelGiftCardIssue` | admin | Anula una emisión. §16 |
+| `registerGiftCard` | admin | Registra una tarjeta física nueva, individual. §16 |
+| `registerGiftCardBatch` | admin | Registra un lote bajo una denominación, atómico. §16 |
+| `activateGiftCard` | staff | Vende/activa una tarjeta AVAILABLE: abre un ciclo nuevo. §16 |
+| `suspendGiftCard` | staff | Pérdida/robo: ACTIVE → SUSPENDED, mismo ciclo. §16 |
+| `reactivateGiftCard` | staff | La tarjeta apareció: SUSPENDED → ACTIVE, mismo ciclo. §16 |
+| `cancelGiftCard` | admin | Baja definitiva de la tarjeta física. Terminal. §16 |
 
 ### 7.4 `createUser`: el orden importa
 
@@ -1195,7 +1199,7 @@ después el espejo.
 | `barcodes` | **el código** (EAN o interno) | staff vía Rules | ≥ `products` | 3 |
 | `sales` | Auto-ID **pre-generado en cliente** | **solo Function** | ~4 000–8 000/año | 4 |
 | `dailySummaries` | `dateKey` (`2026-09-15`) | **solo Function** | 365/año | 4 escribe · 7 lee |
-| `giftCards` | **el código impreso** en el plástico | admin vía Rules | decenas | 6 |
+| `giftCards` | **el código impreso**, normalizado | **solo Function** | decenas | 6 |
 | `giftCardIssues` | Auto-ID | **solo Function** | decenas/año | 6 |
 | `giftCardMovements` | Auto-ID | **solo Function** | cientos/año | 6 |
 
@@ -1396,6 +1400,15 @@ export interface DailySummary {
   giftCardsIssuedCents: number;   // tarjetas nuevas vendidas (dinero nuevo)
   giftCardForfeitedCents: number; // saldo no reclamado (§2.1 C-2)
 
+  // Fase 6: desglose de CÓMO se cobró la venta de la tarjeta (§16.9) — separado
+  // de cashCents/qrCents porque esos dos son estrictamente "mercancía vendida"
+  // (§18.2) y mezclar ahí el dinero de una emisión de gift card rompería la
+  // identidad `mercancía vendida == Σ pagos de las ventas`. Estos dos campos
+  // son los que permiten calcular "dinero recibido hoy" (§18.2) sin leer
+  // `giftCardIssues`.
+  giftCardIssuesCashCents: number;
+  giftCardIssuesQrCents: number;
+
   // detalle por producto del día. Solo los productos que se vendieron
   products: Record<string, { code: string; name: string; qty: number; totalCents: number }>;
 
@@ -1414,45 +1427,115 @@ documento. Y la escritura es **una sola por venta** sobre un documento que recib
 escrituras repartidas en 12 horas: sin contención (el límite práctico es ~1 escritura por
 segundo y documento).
 
-### 8.8 Gift cards
+### 8.8 Gift cards — modelo vigente desde la Fase 6 (reemplaza el diseño original de este §8.8)
+
+> **Decisión revisada en la Fase 6.** El diseño original de este documento asumía tarjetas
+> vírgenes con "importe libre, con decimales" (E2) decidido en cada emisión. El cliente
+> confirmó en vivo, al ejecutar la Fase 6, que las tarjetas las fabrica una imprenta externa
+> **con la denominación ya impresa** (100/500/1000 Bs…): el monto se fija **una sola vez**,
+> al registrar la tarjeta física, nunca en cada activación. Los nombres de estado también
+> cambian (`AVAILABLE`/`ACTIVE`/`SUSPENDED`/`CANCELLED` en vez de
+> `in_stock`/`active`/`retired`) para incorporar el estado `SUSPENDED` (pérdida/robo, E8) que
+> el diseño original no contemplaba. La arquitectura de tres colecciones (§16.1) **no
+> cambia** — sigue respondiendo las mismas tres preguntas — pero el modelo de campos sí. Ver
+> el §16 reescrito más abajo para el ciclo de vida completo.
 
 ```ts
-// giftCards/{cardCode} — el PLÁSTICO. El código impreso es el ID
-export interface GiftCardPhysical {
-  cardCode: string;                // 'GC0001' — del ID del documento
-  status: 'in_stock' | 'active' | 'retired';
-  activeIssueId: string | null;    // puntero a la emisión vigente → lookup O(1)
+export type GiftCardStatus = 'AVAILABLE' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
+
+// giftCards/{cardCode} — el PLÁSTICO. El código impreso, normalizado, es el ID.
+// Reutilizable: el estado corriente completo se lee en 1 sola lectura (ya no
+// hace falta el segundo salto a giftCardIssues que preveía el §16.5 original).
+export interface GiftCard {
+  cardCode: string;
+  amountCents: number;             // denominación FIJA, decidida al registrar (nunca cambia)
+  status: GiftCardStatus;
+
+  // Mecanismo anti-carrera entre ciclos (E5, prompt Fase 6 §7/§23/§44):
+  // cycleNumber es el identificador legible; activeCycleId es el id real de
+  // giftCardIssues que hay que citar para operar sobre el ciclo vigente.
+  // Cualquier operación que cite un activeCycleId viejo se rechaza server-side.
+  cycleNumber: number;
+  activeCycleId: string | null;
+
+  currentBuyerName: string | null;
+  activatedAt: Timestamp | null;
+  activatedBy: string | null;
+  activatedByName: string | null;
+
+  suspendedAt: Timestamp | null;
+  suspendedBy: string | null;
+  suspendedByName: string | null;
+  suspensionReason: string | null;
+
+  cancelledAt: Timestamp | null;    // baja DEFINITIVA — terminal, nunca vuelve a AVAILABLE
+  cancelledBy: string | null;
+  cancelledByName: string | null;
+  cancelReason: string | null;
+
   createdAt: Timestamp;
+  createdBy: string;
+  createdByName: string;
   updatedAt: Timestamp;
 }
 
-// giftCardIssues/{issueId} — una EMISIÓN (carga de saldo)
+// giftCardIssues/{issueId} — un CICLO de uso (antes "emisión"). Nace al
+// vender/activar, vive mientras la tarjeta está ACTIVE/SUSPENDED, se cierra
+// al redimirse (dentro de createSale) o al cancelarse. Solo admin lo lee
+// directo (auditoría) — el mostrador no lo necesita: el estado corriente ya
+// está denormalizado en GiftCard.
 export interface GiftCardIssue {
   id: string;
-  cardCode: string;                // tarjeta física usada en esta emisión
-  initialAmountCents: number;      // importe libre, con decimales (E2)
-  remainingAmountCents: number;    // denormalizado: saldo consultable en 1 lectura
-  status: 'active' | 'depleted' | 'cancelled';
-  issuedAt: Timestamp;
-  issuedBySellerId: string;
-  issuedBySellerName: string;      // snapshot
-  payments: Payment[];             // cómo pagó el comprador de la tarjeta (cash | qr)
-  expiresAt?: Timestamp;           // reservado, sin lógica: las tarjetas no caducan (E5)
-  closedAt?: Timestamp;
+  cardCode: string;
+  cycleNumber: number;
+  amountCents: number;             // snapshot de GiftCard.amountCents en la activación
+  status: 'active' | 'suspended' | 'redeemed' | 'cancelled';
+  buyerName: string | null;
+
+  activatedAt: Timestamp;
+  activatedBy: string;
+  activatedByName: string;
+  dateKey: string;                 // America/La_Paz — el día a corregir si se cancela después
+  monthKey: string;
+  year: number;
+  payments: { method: 'cash' | 'qr'; amountCents: number }[]; // cómo pagó el comprador LA TARJETA
+
+  suspendedAt: Timestamp | null;
+  suspendedBy: string | null;
+  suspensionReason: string | null;
+  reactivatedAt: Timestamp | null;
+  reactivatedBy: string | null;
+
+  redeemedAt: Timestamp | null;
+  saleId: string | null;
+  redeemedAmountCents: number | null;
+  forfeitedAmountCents: number | null;
+
+  cancelledAt: Timestamp | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+
+  closedAt: Timestamp | null;
 }
 
-// giftCardMovements/{moveId} — el LIBRO MAYOR
+// giftCardMovements/{moveId} — el LIBRO MAYOR, append-only. Un evento por
+// transición, con snapshot de comprador/venta/ciclo. Solo admin lee, nadie
+// escribe desde el cliente.
 export interface GiftCardMovement {
   id: string;
-  issueId: string;
-  cardCode: string;
-  type: 'load' | 'redeem' | 'forfeit' | 'cancel' | 'adjustment';
-  amountCents: number;             // siempre positivo; 'type' da el signo
-  balanceAfterCents: number;       // saldo resultante: auditable sin recalcular
-  saleId?: string;                 // en 'redeem' y en 'forfeit'
-  createdBySellerId: string;
+  giftCardId: string;              // = cardCode
+  codeSnapshot: string;
+  amountCents: number;
+  cycleNumber: number | null;      // null en REGISTERED (todavía no hay ciclo)
+  cycleId: string | null;
+  type: 'REGISTERED' | 'ACTIVATED' | 'SUSPENDED' | 'REACTIVATED' | 'REDEEMED'
+      | 'FORFEITED' | 'CANCELLED' | 'ADJUSTMENT';
   createdAt: Timestamp;
-  note?: string;
+  performedBy: string;
+  performedByName: string;
+  buyerNameSnapshot: string | null;
+  saleId: string | null;
+  reason: string | null;
 }
 ```
 
@@ -1469,8 +1552,8 @@ export interface GiftCardMovement {
 | `sales` | `sellerId ASC, createdAt DESC` | Ventas por vendedor, rango libre (admin) |
 | `sales` | `status ASC, dateKey ASC` | Reportes que excluyen anuladas |
 | `sales` | `paymentMethods ARRAY, dateKey ASC` | Desglose por forma de pago |
-| `giftCardIssues` | `status ASC, issuedAt DESC` | Tarjetas con saldo vigente |
-| `giftCardMovements` | `issueId ASC, createdAt ASC` | Historial de una emisión |
+| `giftCards` | `status ASC, cardCode ASC` | Listado filtrado por estado, orden por código (§16) |
+| `giftCardMovements` | `giftCardId ASC, createdAt ASC` | Historial completo de una tarjeta, TODOS sus ciclos (§16) |
 
 Se declaran en `firestore.indexes.json` y se despliegan con el resto. Cuando falta un
 índice, Firestore devuelve un error con un enlace directo para crearlo: **conviene
@@ -1656,14 +1739,26 @@ service cloud.firestore {
       allow write: if false;                // solo la Function
     }
 
+    // ⟳ Fase 6 — reglas REALMENTE desplegadas (reemplazan el boceto anterior,
+    // que todavía dejaba `create/update` directo para admin en `giftCards`).
+    // Las tres colecciones son SOLO LECTURA desde el cliente, sin excepción:
+    // registrar, activar/vender, suspender, reactivar y cancelar definitivamente
+    // son operaciones que exigen leer y validar el estado real dentro de una
+    // transacción (ciclo vigente, denominación, rol) — el mismo argumento que ya
+    // cierra `sales` (§10.2, arriba). Todo pasa por
+    // `functions/src/giftcards.ts` y por el pago `giftcard` de `createSale`.
     match /giftCards/{cardCode} {
-      allow get: if isStaff();              // consultar saldo en el mostrador
-      allow list: if isAdmin();
-      allow create, update: if isAdmin();   // registrar plástico nuevo es inventario
-      allow delete: if false;
+      allow get, list: if isStaff();        // 1 lectura: estado completo ya denormalizado
+      allow write: if false;
     }
-    match /giftCardIssues/{issueId}   { allow get, list: if isStaff(); allow write: if false; }
-    match /giftCardMovements/{moveId} { allow get, list: if isAdmin(); allow write: if false; }
+    match /giftCardIssues/{issueId} {
+      allow get, list: if isAdmin();        // auditoría — el mostrador no lo necesita (§16.1)
+      allow write: if false;
+    }
+    match /giftCardMovements/{moveId} {
+      allow get, list: if isAdmin();
+      allow write: if false;
+    }
 
     match /{document=**} { allow read, write: if false; }   // cierre explícito
   }
@@ -2303,90 +2398,213 @@ Diseñado para **laptop, teclado y lector** (G1: monitores no táctiles), un sol
 > Las tarjetas son **físicas y reutilizables**: salen con saldo, se consumen, vuelven a la
 > tienda y se vuelven a vender. La decisión estructural es que **el plástico y el saldo no
 > son el mismo objeto**.
+>
+> **§16 reescrito en la Fase 6** con información nueva confirmada por el cliente que
+> reemplaza varios supuestos del diseño original (marcados abajo). La arquitectura de tres
+> colecciones (§16.1) no cambió — sigue siendo correcta — pero el modelo de campos, los
+> nombres de estado y el ciclo de vida completo sí.
 
 ### 16.1 Tres entidades con responsabilidades separadas
 
 Modelos en §8.8.
 
-- **Recomendación:** las tres colecciones — `giftCards` (el plástico), `giftCardIssues`
-  (la emisión, que es la unidad de saldo) y `giftCardMovements` (el libro mayor), con el
-  saldo denormalizado en la emisión **y** un movimiento por cada operación.
-- **Por qué:** cada una responde una pregunta que las otras no pueden.
-  **El plástico** permite reutilizar la tarjeta: cuando vuelve a la tienda se emite otra vez
-  sobre el mismo `cardCode` y el historial anterior no acompaña al nuevo dueño (E5:
-  *"la idea es reusar los que salen"*). **La emisión** es lo que tiene importe, fecha y
-  estado. **El libro mayor** es lo que convierte el saldo en algo auditable: con solo
-  `remainingAmountCents`, si un saldo aparece mal no hay forma de saber qué pasó. Y el saldo
-  denormalizado se mantiene porque consultarlo en el mostrador debe costar **una lectura**,
-  no sumar el historial entero. No es sobreingeniería: es el mínimo con el que se puede
-  responder *"¿por qué esta tarjeta tiene Bs 40?"* — y en algo que es **dinero al portador**,
-  esa pregunta se hace tarde o temprano.
-- **Descartadas:** *un solo documento por tarjeta con el saldo dentro* — hace imposible
-  reutilizar el plástico sin borrar historia o arrastrar la del cliente anterior.
-  *Solo el libro mayor, calculando el saldo al sumar* — consultar un saldo cuesta N lecturas
-  y crece con el uso: mala propiedad justo en el mostrador. *Dos colecciones, sin
-  movimientos* — ahorra una escritura por operación y renuncia a la auditoría; es el recorte
-  que se lamenta el día del primer descuadre.
+- **Recomendación (vigente):** las tres colecciones — `giftCards` (el plástico),
+  `giftCardIssues` (un CICLO de uso — antes "emisión") y `giftCardMovements` (el libro
+  mayor) — con el estado corriente denormalizado en `giftCards` **y** un movimiento por cada
+  operación.
+- **Por qué:** cada una responde una pregunta que las otras no pueden. **El plástico**
+  permite reutilizar la tarjeta: cuando vuelve a la tienda se activa otra vez sobre el mismo
+  `cardCode` y el historial anterior no acompaña al nuevo dueño (E5: *"la idea es reusar los
+  que salen"*). **El ciclo** es lo que tiene comprador, fecha y estado operativo. **El libro
+  mayor** es lo que convierte el historial en algo auditable: sin él, si un estado aparece
+  mal no hay forma de saber qué pasó. Y el estado denormalizado se mantiene porque
+  consultarlo en el mostrador debe costar **una lectura**, no sumar el historial entero.
+- **Cambio de la Fase 6 respecto al diseño original:** el estado corriente completo
+  (denominación, estado, comprador, ciclo) vive ahora en `giftCards` — ya no hace falta el
+  segundo salto a `giftCardIssues` que preveía el §16.5 original (`activeIssueId` →
+  `getDoc`); el mostrador resuelve todo en **1 lectura**. `giftCardIssues` pasa a ser
+  información de auditoría que solo admin necesita leer directo (mismo criterio que
+  `giftCardMovements`), no algo que el mostrador consulte en el camino caliente.
+- **Descartadas:** *un solo documento por tarjeta con el estado dentro* — hace imposible
+  reutilizar el plástico sin borrar historia o arrastrar la del cliente anterior. *Solo el
+  libro mayor, reconstruyendo el estado al sumar* — consultar el estado costaría N lecturas
+  y crecería con el uso: mala propiedad justo en el mostrador. *Dos colecciones, sin
+  movimientos* — ahorra una escritura por operación y renuncia a la auditoría.
 
 ### 16.2 Políticas aprobadas por el cliente
 
 | Política | Decisión | Respuesta |
 |---|---|---|
-| Importes | **Libres, con decimales** (Bs 10,50 es válido) | E2 |
-| Consumo | **Total, en una sola venta**. Sin saldo remanente | E3 |
+| Importes | **⟳ Fase 6 — denominación FIJA**, decidida una sola vez al registrar la tarjeta física (la imprenta ya trae el monto impreso). Reemplaza "libres, con decimales" (E2 original) | E2 revisada en Fase 6 |
+| Consumo | **Total, en una sola venta**. Sin saldo remanente — confirmado sin cambios en la Fase 6 | E3 |
 | Vuelto en efectivo | **No** | E4 |
-| Sobrante si la compra es menor | Se extingue como movimiento `forfeit` (§2.1 C-2) | derivado de E3+E4 |
-| Caducidad | **No caducan**. `expiresAt` queda reservado sin lógica | E5 |
+| Sobrante si la compra es menor | Se extingue como movimiento `FORFEITED` (§2.1 C-2) | derivado de E3+E4 |
+| Compra mayor al valor de la tarjeta | Único pago mixto permitido: gift card + la diferencia en cash o QR | E3+E4, §16.8 |
+| Caducidad | **No caducan** | E5 |
 | Recarga | **No** | E6 |
-| Quién emite | **Admin y vendedor** (*"ambos, en caso no esté el administrador"*) | E7 |
+| Pérdida o robo | **⟳ Fase 6 — nuevo estado `SUSPENDED`**: bloquea la tarjeta sin cerrar el ciclo; `reactivateGiftCard` la recupera sin crear un ciclo nuevo. E8 quedó sin responder en el cuestionario original — esta es la respuesta, dada en vivo en la Fase 6 | E8 resuelta en Fase 6 |
+| Baja definitiva del plástico | **⟳ Fase 6 — nuevo estado `CANCELLED`**, terminal: la tarjeta física sale de circulación para siempre. Política conservadora (sin decisión previa distinta): **solo admin** | decisión Fase 6 |
+| Quién activa/vende | **Admin y vendedor** (*"ambos, en caso no esté el administrador"*) | E7 |
 | Quién registra plástico nuevo | **Solo admin** — es inventario, no una operación de mostrador | decisión técnica |
-| Cuántas tarjetas habrá | Aún no se sabe; se registran a medida que llegan | E1 |
+| Cuántas tarjetas habrá | **20–40 tarjetas iniciales**, en denominaciones de 100/500/1000 Bs (ejemplo dado por el cliente) | E1 revisada en Fase 6 |
+| Cómo se paga la venta de la tarjeta | Se registra en `GiftCardIssue.payments` (cash o qr) — igual que preveía el diseño original — y alimenta `dailySummaries.giftCardsIssuedCents` + el desglose `giftCardIssuesCashCents`/`giftCardIssuesQrCents` (§8.7, nuevo en Fase 6) | §16.9 |
 
-### 16.3 Ciclo de vida completo
+### 16.3 Código único, agnóstico de formato
 
-| # | Hecho en la tienda | Qué cambia en los datos |
-|---:|---|---|
-| 1 | Llegan tarjetas de plástico vírgenes | El admin crea `giftCards/GC0001` con `status: 'in_stock'`, `activeIssueId: null` |
-| 2 | El cliente A compra una gift card de Bs 1 000 en efectivo | `issueGiftCard`: crea `giftCardIssues/{i1}` (inicial 1000, restante 1000, `active`, `payments: [cash 1000]`), un movimiento `load`, y pone la tarjeta en `active` con `activeIssueId: i1`. **No se crea ninguna venta** |
-| 3 | A regala la tarjeta a B | Nada. La tienda no registra a los portadores |
-| 4 | B compra juguetes por Bs 1 000 con la tarjeta | `createSale` con `payments: [{ giftcard, 1000, issueId: i1 }]`. En la transacción: stock, venta, `remaining: 0`, `status: 'depleted'`, movimiento `redeem` |
-| 4' | B compra por **Bs 800** | El pago de la venta es 800; movimiento `redeem` de 800 **y** movimiento `forfeit` de 200; la emisión queda `depleted` |
-| 4'' | B compra por **Bs 1 200** | `payments: [{ giftcard, 1000 }, { cash, 200 }]` — el único pago mixto permitido |
-| 5 | B devuelve el plástico | `activeIssueId: null`, tarjeta a `in_stock`. La emisión `i1` queda cerrada e intacta como historia |
-| 6 | El mismo plástico se vende a otro cliente con Bs 500 | Nueva `giftCardIssues/{i2}` sobre `GC0001`. `i1` sigue consultable y no interfiere |
+Todavía no se sabe si la imprenta imprimirá código de barras, alfanumérico o ambos — el
+sistema trata el código **siempre como string opaco**, nunca como número (perdería ceros a
+la izquierda). `normalizeGiftCardCode()` (espejo cliente/servidor, igual que
+`normalizeCode()` de productos §14): `trim()` + mayúsculas, sin eliminar ningún carácter
+significativo. El código normalizado **es el ID** de `giftCards/{cardCode}` — la unicidad la
+garantiza la propia clave primaria de Firestore, verificada dentro de una transacción antes
+de crear (individual o por lote), igual que `barcodes/{code}` en Productos.
 
-### 16.4 Invariantes que la Function garantiza
-
-1. **Una sola emisión activa por tarjeta física.** `issueGiftCard` lee la tarjeta dentro de
-   la transacción y rechaza si `activeIssueId !== null`. Sin esto, dos emisiones sobre el
-   mismo plástico **duplicarían dinero**.
-2. `remainingAmountCents` **nunca es negativo** y nunca supera `initialAmountCents`.
-3. **Coherencia con el libro mayor:** `remaining = initial − Σ redeem − Σ forfeit + Σ load`.
-   Es la comprobación que ejecuta el reporte de auditoría de la Fase 7.
-4. **Sin canje sobre emisiones cerradas:** solo `status: 'active'` admite `redeem`.
-5. **Todo movimiento nace en la misma transacción** que el cambio de saldo que describe. Un
-   saldo sin movimiento es un descuadre invisible.
-
-### 16.5 Consulta de saldo en el mostrador
+### 16.4 Máquina de estados — el plástico es reutilizable
 
 ```
-Escaneo  código GC… → getDoc(giftCards/{code})            1 lectura
-Puntero  activeIssueId → getDoc(giftCardIssues/{id})      1 lectura
-Pantalla saldo · importe inicial · fecha de emisión · estado
+REGISTER               (nueva) → AVAILABLE
+SALE / ACTIVATE        AVAILABLE → ACTIVE            (abre un ciclo nuevo)
+LOSS                   ACTIVE → SUSPENDED             (mismo ciclo)
+RECOVERY                SUSPENDED → ACTIVE             (mismo ciclo, nunca uno nuevo)
+REDEEM                 ACTIVE → evento REDEEMED → AVAILABLE   (dentro de createSale)
+DECOMMISSION            AVAILABLE|ACTIVE|SUSPENDED → CANCELLED   (terminal, solo admin)
 ```
 
-Dos lecturas, sin consultas ni índices, gracias al puntero `activeIssueId`. Sin él habría
-que consultar `giftCardIssues where cardCode == X and status == 'active'`, lo que añade un
-índice y la posibilidad de que devuelva dos resultados — un estado que no debería existir y
-que el puntero hace imposible por construcción.
+Transiciones **no** permitidas (rechazadas server-side, verificado en vivo): `AVAILABLE →
+SUSPENDED`, `AVAILABLE → REDEEM` (sin ciclo abierto no hay nada que redimir), `SUSPENDED →
+REDEEM` (hay que reactivar primero), `CANCELLED → *` (terminal, sin excepción).
 
-### 16.6 Anulación de una emisión
+`REDEEMED` no es un estado permanente de la tarjeta: es un **evento** del libro mayor. El
+flujo normal es `AVAILABLE → ACTIVE → (evento REDEEMED) → AVAILABLE`, y ese ciclo se puede
+repetir indefinidamente sobre el mismo plástico.
 
-Caso real: se emite una tarjeta por el importe equivocado. `cancelGiftCardIssue` (Function,
-**solo admin**) pone la emisión en `cancelled`, registra un movimiento `cancel` por el saldo
-restante, libera la tarjeta física y deja constancia del motivo en `note`. No se borra nada,
-y el reporte descuenta esa emisión del total de tarjetas vendidas del día — razón de más
-para tener el libro mayor.
+### 16.5 `cycleNumber` / `activeCycleId` — el mecanismo anti-carrera entre ciclos
+
+Como la misma tarjeta puede venderse muchas veces, cada activación necesita un identificador
+inequívoco — así una operación atrasada del ciclo de Juan nunca puede afectar el ciclo
+posterior de María (caso real que motivó el diseño).
+
+- `cycleNumber`: contador legible en `giftCards`, empieza en 0 y se incrementa **+1** en
+  cada `activateGiftCard` exitoso. Es el "va en el ciclo 3" que ve la pantalla.
+- `activeCycleId`: el id real (auto-ID de Firestore, único por construcción) del documento
+  `giftCardIssues` vigente. `null` cuando la tarjeta está `AVAILABLE` o `CANCELLED`.
+
+**Toda operación que redime o modifica un ciclo debe citar el `activeCycleId` exacto** que
+observó, y el servidor lo compara, **dentro de la misma transacción**, contra
+`giftCards/{code}.activeCycleId` real. Si no coincide — la tarjeta ya se redimió y se volvió
+a activar mientras tanto —, la operación se rechaza (`"Esta gift card ya fue reutilizada"`),
+sin tocar el ciclo nuevo. Verificado en vivo con dos pruebas críticas:
+
+1. **Reintento con ciclo viejo:** ciclo 1 se redime y vuelve a `AVAILABLE`; se activa como
+   ciclo 2; un intento posterior que todavía cita el `activeCycleId` del ciclo 1 se rechaza,
+   y el ciclo 2 queda intacto.
+2. **Doble redención simultánea:** dos `createSale` concurrentes citando el mismo
+   `activeCycleId` — exactamente uno tiene éxito (gana la transacción de Firestore), el otro
+   se rechaza limpio (`"Esta gift card no está activa"`, porque para cuando su transacción
+   se reintenta con una lectura fresca, la primera ya puso la tarjeta en `AVAILABLE`). Nunca
+   dos ventas exitosas para el mismo ciclo.
+
+### 16.6 Redención — dentro de `createSale`, nunca aparte
+
+`createSale` (plan §15) es quien redime la gift card, **en la misma transacción** que crea
+la venta y descuenta stock (plan §22 del prompt de la Fase 6) — nunca `createSale` primero y
+después una actualización de la gift card por separado, porque eso reabriría exactamente la
+ventana de doble gasto que la transacción existe para cerrar.
+
+Secuencia, dentro de la transacción de `createSale`:
+
+1. Leer `giftCards/{code}` y validar `status === 'ACTIVE'` **y**
+   `activeCycleId === el citado por el cliente` (§16.5).
+2. Leer `giftCardIssues/{activeCycleId}` y validar `status === 'active'` y que su
+   `cycleNumber` coincide con el de la tarjeta (doble verificación).
+3. Recalcular el monto aplicado — **el cliente nunca decide cuánto se aplica**, solo el
+   `amountCents` real de la tarjeta importa (mismo principio que `unitPriceCents` en
+   productos, plan §15.3):
+   - compra ≥ denominación → se aplica el valor completo; el resto (si sobra compra) se
+     cobra con el segundo pago (cash/qr) — único mixto permitido;
+   - compra < denominación → se aplica solo lo que cubre la compra; el resto se pierde como
+     `FORFEITED`.
+4. Escrituras: `sales/{saleId}` con el snapshot del pago (§16.8) · `giftCardIssues/{id}` →
+   `status: 'redeemed'`, `saleId`, montos · `giftCards/{code}` → `status: 'AVAILABLE'`,
+   `activeCycleId: null`, `currentBuyerName: null`, `activatedAt/By/ByName: null`
+   (`cycleNumber` **se conserva** como historial) · movimiento `REDEEMED` (y `FORFEITED` si
+   aplica) · `dailySummaries.giftCardCents` (+ `giftCardForfeitedCents` si aplica).
+
+### 16.7 `cancelSale` + gift card reutilizable — decisión tomada en vivo en la Fase 6
+
+El diseño original de este documento (§15.4, antes de la Fase 6) revertía una gift card al
+anular una venta así: *"la emisión vuelve a `'active'` con su saldo, la tarjeta física vuelve
+a `'active'` con `activeIssueId`"*. Esa regla se escribió **antes** de que el cliente
+confirmara la reutilización real de las tarjetas, y con reutilización resulta insegura: si la
+tarjeta ya se redimió y se volvió a vender a otra persona (nuevo ciclo), reabrir a ciegas el
+ciclo viejo pisaría el ciclo de ese comprador nuevo — dinero fantasma.
+
+**Decisión confirmada por el cliente en vivo:**
+
+- Si el ciclo que la venta redimió **sigue exactamente como la redención lo dejó** — la
+  tarjeta `AVAILABLE`, con el mismo `cycleNumber`, sin ninguna activación posterior — la
+  anulación **sí revierte con seguridad**: la tarjeta vuelve a `ACTIVE` con el mismo ciclo,
+  el mismo comprador, el mismo `activeCycleId`; el ciclo vuelve a `'active'`
+  (`redeemedAt`/`saleId` se limpian); se registra un movimiento `ADJUSTMENT` con el motivo de
+  la anulación; y `dailySummaries.giftCardCents`/`giftCardForfeitedCents` del día de la
+  redención se revierten.
+- Si la tarjeta **ya se reutilizó** (nuevo ciclo, incluso si hoy está de nuevo `AVAILABLE`
+  tras un tercer ciclo), la anulación completa se **RECHAZA** — ni el stock, ni el resto de
+  la venta se revierte — y hay que resolverlo manualmente (contactar al administrador del
+  sistema). Verificado en vivo: activar → redimir → reactivar el mismo ciclo con seguridad
+  (revierte OK); activar → redimir → activar de nuevo (ciclo 2) → intentar anular la venta
+  del ciclo 1 (rechazado, ciclo 2 intacto).
+
+### 16.8 Snapshot del pago en `sales` — nunca depende del estado actual de la gift card
+
+```ts
+// Payment, cuando method === 'giftcard' (plan §8.6)
+{
+  method: 'giftcard';
+  amountCents: number;             // lo efectivamente aplicado (nunca la denominación completa si hubo forfeit)
+  giftCardId: string;               // = cardCode
+  giftCardCode: string;             // hoy siempre igual a giftCardId — ver nota
+  giftCardCycleNumber: number;
+  giftCardCycleId: string;
+  giftCardForfeitedCents?: number;  // > 0 si la compra fue menor a la denominación
+}
+```
+
+La venta **nunca** relee `giftCards` para mostrarse — ni en el recibo, ni en el historial, ni
+al reimprimir: la misma tarjeta física puede estar en un ciclo completamente distinto para
+cuando alguien vuelve a mirar esa venta. Todo sale del snapshot. `giftCardId` y
+`giftCardCode` son hoy el mismo valor (el código normalizado es el ID del documento); se
+guardan como dos campos separados solo por si el esquema de ID cambiara alguna vez — no
+porque hoy difieran.
+
+### 16.9 Emisión ≠ redención — dos eventos financieros distintos
+
+Sin cambios respecto al diseño original: vender/activar una gift card es dinero **nuevo**
+que entra (pasivo, ingreso diferido) y **no** crea una venta; redimirla es un pago que ya se
+cobró antes y **no** es dinero nuevo. `dailySummaries` mantiene ambos lados separados
+(`giftCardsIssuedCents` vs. `giftCardCents`) — ver §18.1, §18.2, y §8.7 para el desglose
+nuevo por forma de pago de la emisión (`giftCardIssuesCashCents`/`giftCardIssuesQrCents`,
+Fase 6).
+
+### 16.10 Registro de tarjetas — individual y por lote, atómico
+
+`registerGiftCard` (individual) y `registerGiftCardBatch` (hasta 50 códigos, una sola
+denominación) son ambas admin-only. El lote es **todo o nada**: si un código está repetido
+dentro del mismo lote o ya existe una tarjeta con ese código, no se crea **ninguna** tarjeta
+del lote — verificado en vivo con ambos casos. Cada tarjeta nace individual (nunca
+"denominación=100, cantidad=6" como un solo documento): seis códigos registrados son seis
+documentos `giftCards`, cada uno con su propio movimiento `REGISTERED`.
+
+### 16.11 Baja definitiva (`cancelGiftCard`) con dinero ya cobrado
+
+Cancelar una tarjeta que está `ACTIVE`/`SUSPENDED` (ya vendida, con dinero cobrado) cierra
+también su ciclo abierto como `'cancelled'` — mismo patrón que ya usaba el diseño original
+para "anular una emisión" (§16.6 original) — y **corrige** `dailySummaries` del día en que
+esa tarjeta se activó (no el de hoy, que puede ser cualquier día anterior):
+`giftCardsIssuedCents` y el desglose cash/qr bajan por el monto de esa tarjeta, porque la
+obligación de entregar mercancía por ese valor ya no existe. Verificado en vivo: activar una
+tarjeta de Bs 500 pagada en efectivo (`dailySummaries.giftCardsIssuedCents` +500,
+`giftCardIssuesCashCents` +500), cancelarla, y confirmar que ambos vuelven a 0.
 
 ---
 
@@ -2481,16 +2699,23 @@ diseño, en lugar de depender de que cada consulta recuerde aplicar un filtro.
 
 ### 18.2 Las magnitudes y de dónde sale cada una
 
+> **Nota de la Fase 6:** esta tabla es del diseño original de la Fase 4/pre-Fase 6 y
+> referenciaba campos de `giftCardIssues` (`initialAmountCents`, `remainingAmountCents`,
+> `status != 'cancelled'`) que **ya no existen** con el modelo vigente (§8.8, §16): la
+> denominación fija vive en `giftCards.amountCents`/`GiftCardIssue.amountCents` (snapshot),
+> y no hay saldo parcial que "quedar pendiente" (consumo total, §16.2). La fila corregida:
+
 | Magnitud | Fuente | Cálculo |
 |---|---|---|
 | **Mercancía vendida** | `sales` | `Σ totalCents` donde `status == 'completed'` |
 | Efectivo recibido en ventas | `sales` | `Σ cashCents` |
 | QR recibido en ventas | `sales` | `Σ qrCents` |
 | Saldo de gift card consumido | `sales` | `Σ giftCardCents` — **no es dinero nuevo** |
-| **Nuevas gift cards vendidas** | `giftCardIssues` | `Σ initialAmountCents` donde `status != 'cancelled'` |
-| Saldo no reclamado (*breakage*) | `giftCardMovements` | `Σ amountCents` de `type == 'forfeit'` |
-| **Dinero que entró hoy a la caja** | ambas | (cash + qr de ventas) + (cash + qr de emisiones) |
-| Pasivo pendiente | `giftCardIssues` | `Σ remainingAmountCents` donde `status == 'active'` — acumulado, no del día |
+| **Nuevas gift cards vendidas** | `dailySummaries` (§8.7) | `Σ giftCardsIssuedCents` del rango — ya acumulado por `activateGiftCard`, sin leer `giftCardIssues` |
+| Efectivo/QR recibido por emisiones | `dailySummaries` | `Σ giftCardIssuesCashCents` / `Σ giftCardIssuesQrCents` (nuevos en Fase 6, §8.7) |
+| Saldo no reclamado (*breakage*) | `dailySummaries` | `Σ giftCardForfeitedCents` del rango |
+| **Dinero que entró hoy a la caja** | `dailySummaries` | (cashCents + qrCents) + (giftCardIssuesCashCents + giftCardIssuesQrCents) |
+| Pasivo pendiente (tarjetas activas con dinero cobrado, sin canjear) | `giftCards` | `count()`/lectura de `where('status','in',['ACTIVE','SUSPENDED'])` × su `amountCents` — **queda pendiente de diseñar en la Fase 7**: no es un acumulado diario, exige recorrer `giftCards` completo (≤ unas decenas de documentos, tramo aceptable a esta escala) |
 
 **Ejemplo resuelto.** Un día con Bs 500 de mercancía vendida (Bs 300 efectivo, Bs 100 QR,
 Bs 100 de gift card) en el que además se vendió una tarjeta nueva de Bs 1 000 en efectivo:
@@ -2803,7 +3028,7 @@ respuesta del cliente, y el motivo está en §2.1.
 | 20 | **Comprobante PDF** | `pdfmake` en el cliente, hoja **carta**, en la Fase 4 | A3/B4: imprimir el comprobante es la finalidad declarada del sistema, no un extra | 4 | Medio — el sistema no cubre lo que el cliente pidió primero |
 | 21 ⟳ | **Voucher de pago QR** | `voucherStatus: 'pending' \| 'uploaded'`; se adjunta después vía `attachVoucher`, desde el celular; inmutable | La foto está en un celular y el POS es una laptop: exigirla bloquearía el mostrador | 5 | Medio — ventas QR sin evidencia, o vendedor bloqueado con el cliente delante |
 | 22 ⟳ | **Gift card: consumo** | **Total**, sin saldo remanente (`giftCardAllowsPartial: false`); el sobrante se extingue como movimiento `forfeit` | E3/E4. El `forfeit` es lo que mantiene `Σ payments == totalCents` sin perder el rastro del dinero | 6 | **Alto** — o el invariante de caja se rompe, o el sobrante desaparece sin registro |
-| 23 | **Modelo de gift card** | Tres colecciones: `giftCards` (plástico) · `giftCardIssues` (saldo) · `giftCardMovements` (libro mayor), con `activeIssueId` | Separa el plástico del saldo, permite reutilizar la tarjeta sin arrastrar historial, y hace el saldo auditable | 6 | **Alto** — saldo no explicable, o imposibilidad de reutilizar el plástico |
+| 23 ⟳ | **Modelo de gift card** | Tres colecciones: `giftCards` (plástico, denominación fija) · `giftCardIssues` (un ciclo de uso) · `giftCardMovements` (libro mayor), con `cycleNumber`/`activeCycleId` como mecanismo anti-carrera (reemplaza `activeIssueId` + importe libre del diseño original — ver §16 reescrito en la Fase 6) | Separa el plástico del ciclo, permite reutilizar la tarjeta sin arrastrar historial, hace el historial auditable, y cierra la carrera entre ciclos que el diseño original no contemplaba | 6 | **Alto** — estado no explicable, imposibilidad de reutilizar el plástico, o doble gasto entre ciclos |
 | 24 | **Estrategia de reportes** | Emisión de gift card fuera de `sales`; dos identidades verificadas en pantalla | La separación estructural hace imposible la doble contabilización, en lugar de depender de recordar un filtro | 7 | **Alto** — decisiones de negocio sobre cifras infladas |
 | 25 ⟳ | **Colecciones de resumen** | **Sí**: `dailySummaries/{dateKey}` escrito por la Function. Mensual y anual siguen postergados | F1 pide detalle por producto hasta el año, y los `items[]` no son agregables. C1 confirma ~8 000 ventas/año | 4 escribe · 7 lee | Medio — reportes anuales que paginan miles de documentos |
 | 26 ⟳ | **Lectura de ventas por rol** | El vendedor ve **solo sus ventas del día**; el admin ve todas | A5/C5. Se aplica en la Rule, no solo en la consulta | 4 | Medio — un token comprometido lee toda la facturación |
@@ -2845,7 +3070,7 @@ antes porque hoy no hay información que los haga urgentes:
 | # | Asunto | Estado | Se decide en |
 |---:|---|---|---|
 | 1 | **Descuentos manuales en la venta** (B7 quedó sin responder) | No se implementan. Si aparecen, el lugar es `discountCents` por línea y por venta, con `totalCents` siempre autoritativo | Fase 4, si el cliente lo pide |
-| 2 | **Tarjeta física perdida con saldo** (E8 quedó sin responder) | Recomendación: el admin anula la emisión con `cancelGiftCardIssue` y deja el motivo en `note`; no se reemplaza salvo decisión del dueño. El modelo ya lo soporta | Fase 6 |
+| 2 ✅ | **Tarjeta física perdida con saldo** (E8 quedó sin responder) | **Resuelta en la Fase 6, en vivo:** nuevo estado `SUSPENDED` (`suspendGiftCard`, staff) bloquea la tarjeta sin cerrar el ciclo — `reactivateGiftCard` la recupera con el mismo ciclo si aparece; `cancelGiftCard` (solo admin) la da de baja definitiva si la pérdida es total. Ver §16.4, §16.11 | Fase 6 — implementada |
 | 3 | **Activar App Check** | Recomendado, pero se activa primero en DEV y se verifica antes de PROD | Fase 8 |
 
 ### 22.1 Un bloqueo externo, real, que ya no bloquea el build de producción
@@ -3547,44 +3772,70 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
 
 ---
 
-### FASE 6 — Gift Cards
+### FASE 6 — Gift Cards ✅ IMPLEMENTADA Y PROBADA EN VIVO
 
-- **Objetivo.** Vender, consumir, devolver y reutilizar tarjetas físicas, con el saldo
-  auditable y sin doble contabilización.
+> El alcance real difiere del boceto original de este roadmap — ver §16 (reescrito) para el
+> porqué: denominación fija en vez de importe libre, estados `AVAILABLE`/`ACTIVE`/
+> `SUSPENDED`/`CANCELLED` en vez de `in_stock`/`active`/`retired`, `cycleNumber`/
+> `activeCycleId` en vez de `activeIssueId`, y seis Functions en vez de dos.
+
+- **Objetivo.** Vender, consumir, devolver y reutilizar tarjetas físicas, con el historial
+  auditable y sin doble contabilización. **Cumplido.**
 - **Dependencias.** 5 (el canje ocurre dentro de `createSale`).
-- **Alcance.**
-  1. `functions/src/giftcards.ts`: **`issueGiftCard`** (staff, E7) y
-     **`cancelGiftCardIssue`** (solo admin), con los invariantes de §16.4.
-  2. Ampliar `createSale` para el pago `giftcard`: `redeem` + `forfeit` del sobrante,
-     cierre de la emisión y liberación del plástico (§15.3, §16.3).
-  3. Ampliar `cancelSale` para revertir el consumo.
-  4. `features/giftcards`: registro de plástico nuevo (admin), emisión, consulta de saldo por
-     escaneo, listado e historial de movimientos.
-  5. Reconocimiento del prefijo `GC` en el POS (§14.3).
-  6. Rules de `giftCards`, `giftCardIssues`, `giftCardMovements` + índices.
-- **Cambios esperados.** `functions/src/giftcards.ts`, `functions/src/sales.ts`,
-  `features/giftcards/*`, `firestore.rules`, `firestore.indexes.json`.
-- **Seguridad.** Solo la Function escribe emisiones y movimientos. `giftCardMovements` solo
-  legible por admin. Registrar plástico nuevo solo admin. Una sola emisión activa por tarjeta,
-  verificada **dentro** de la transacción.
-- **Pruebas — el ciclo completo de §16.3 de principio a fin.**
-  - Emitir Bs 1 000 y comprobar que **no se creó ninguna venta**.
-  - Intentar emitir dos veces sobre la misma tarjeta → **rechazado**.
-  - Consumir con una compra de Bs 1 000 (exacta), de Bs 800 (con `forfeit` de Bs 200) y de
-    Bs 1 200 (mixto con Bs 200 en efectivo).
-  - Verificar `remaining = initial − Σ redeem − Σ forfeit + Σ load` en los tres casos.
-  - Devolver el plástico y **reemitir** sobre él: la emisión anterior sigue consultable.
-  - Anular una emisión y comprobar que el total de tarjetas vendidas del día la descuenta.
-  - Intentar canjear sobre una emisión `depleted` → rechazado.
-  - Escanear una tarjeta en el POS: abre el panel de saldo, **no** intenta añadirla al carrito.
+- **Alcance (implementado).**
+  1. `functions/src/giftcards.ts`: `registerGiftCard`, `registerGiftCardBatch` (admin),
+     `activateGiftCard`, `suspendGiftCard`, `reactivateGiftCard` (staff), `cancelGiftCard`
+     (solo admin) — invariantes en §16.4, §16.5.
+  2. `createSale` ampliado para el pago `giftcard`: redención + `FORFEITED` del sobrante,
+     cierre del ciclo y liberación del plástico, todo en la misma transacción (§16.6).
+  3. `cancelSale` ampliado: revierte la gift card SOLO si el ciclo sigue intacto; si ya se
+     reutilizó, la anulación completa se rechaza (§16.7 — decisión tomada en vivo con el
+     cliente, diverge del boceto original que revertía sin esa comprobación).
+  4. `features/gift-cards`: registro individual y por lote (admin), listado con filtros por
+     estado/denominación y búsqueda por código, detalle con acciones de ciclo de vida y
+     movimientos (admin).
+  5. Búsqueda de gift card en el POS: mismo pipeline manual/HID de un solo input que
+     productos, en un campo propio activado al elegir "Gift Card" como forma de pago.
+  6. Rules de `giftCards`/`giftCardIssues`/`giftCardMovements` (solo lectura, `allow write:
+     if false` sin excepción) + 2 índices compuestos.
+- **Cambios reales.** `functions/src/giftcards.ts` (nuevo), `functions/src/sales.ts`,
+  `functions/src/index.ts`, `functions/src/normalize.ts`, `firestore.rules`,
+  `firestore.indexes.json`, `src/app/features/gift-cards/*` (nuevo),
+  `src/app/features/sales/{sale.model,sales.service}.ts` y sus componentes de POS/detalle,
+  `src/app/layout/menu/menu.config.ts`, `src/app/app.routes.ts`, `es.json`.
+- **Seguridad.** Las tres colecciones de gift cards son `allow write: if false` sin
+  excepción — verificado con intentos directos por REST incluso como admin (403 en los
+  tres). Cada Function empieza por `assertActive`/`assertAdmin`. Anti-carrera entre ciclos
+  verificado con dos pruebas críticas en vivo (§16.5): reintento de ciclo viejo rechazado, y
+  doble redención concurrente del mismo ciclo — exactamente una tiene éxito.
+- **Pruebas ejecutadas en vivo** (admin y vendedor, sesiones reales, `mi-pimpollito-dev`):
+  registro individual (código numérico con ceros iniciales, alfanumérico, con guiones) y por
+  lote (atómico: duplicado interno y duplicado contra existente, ambos rechazan el lote
+  entero sin crear nada); filtros y búsqueda del listado; F5 en `/giftcards` sin bote a
+  login; activar con y sin `buyerName`, pagando en cash y en QR; suspender con motivo,
+  confirmar rechazo como pago mientras `SUSPENDED` (cliente y servidor), reactivar con el
+  mismo ciclo; redención exacta, con `forfeit`, y con diferencia mixta (gift card + cash);
+  recibo/detalle de venta mostrando el snapshot correcto; tarjeta vuelve a `AVAILABLE` tras
+  canjearse, limpia comprador/ciclo operativo, conserva `cycleNumber` histórico; reactivación
+  para un segundo ciclo con `cycleNumber`/`activeCycleId` nuevos; **doble redención
+  concurrente → exactamente un éxito**; **request con ciclo viejo contra un ciclo nuevo →
+  rechazado**; cancelación definitiva desde `AVAILABLE` y desde `ACTIVE` con dinero ya
+  cobrado (con reversión correcta de `dailySummaries`); todas las transiciones inválidas
+  (suspender/reactivar/activar fuera de su estado válido) rechazadas server-side; permisos
+  admin-only (`registerGiftCard`, `registerGiftCardBatch`, `cancelGiftCard`) confirmados
+  rechazados para vendedor tanto en la UI como directo contra la Function.
 - **Criterios de aceptación.**
-  - [ ] Todas las pruebas anteriores pasan.
-  - [ ] Emitir una gift card **nunca** crea un documento en `sales`.
-  - [ ] Todo cambio de saldo tiene su movimiento en la misma transacción.
-  - [ ] `Σ payments == totalCents` se mantiene en las ventas con gift card.
-  - [ ] Consultar un saldo cuesta 2 lecturas.
-- **Condición para avanzar.** El saldo de cualquier tarjeta se puede explicar movimiento a
-  movimiento.
+  - [x] Todas las pruebas anteriores pasan.
+  - [x] Registrar una gift card **nunca** crea un documento en `sales`.
+  - [x] Todo cambio de estado tiene su movimiento en la misma transacción.
+  - [x] `Σ payments == totalCents` se mantiene en las ventas con gift card (exacta, forfeit y mixta).
+  - [x] Consultar el estado de una tarjeta cuesta **1 lectura** (mejora sobre las 2 previstas
+        originalmente — ver §16.1).
+- **Condición para avanzar.** El estado de cualquier tarjeta se puede explicar movimiento a
+  movimiento. **Cumplida** — verificado en vivo con el historial completo de varias tarjetas
+  (`REGISTERED → ACTIVATED → REDEEMED(evento) → ACTIVATED(ciclo 2) → ...`,
+  `REGISTERED → ACTIVATED → SUSPENDED → REACTIVATED → REDEEMED`,
+  `REGISTERED → ACTIVATED → CANCELLED` con reversión de `dailySummaries`).
 
 ---
 

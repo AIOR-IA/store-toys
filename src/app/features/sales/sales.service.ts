@@ -22,8 +22,13 @@ export interface CreateSaleItemInput {
 }
 
 export interface CreateSalePaymentInput {
-    method: Extract<PaymentMethod, 'cash' | 'qr'>;
+    method: PaymentMethod;
     amountCents: number;
+    // Solo si method === 'giftcard' (Fase 6): lo que el POS observó al
+    // buscar la tarjeta — `createSale` recalcula el monto real server-side
+    // (plan §21) y solo usa estos dos como el ciclo exacto a citar.
+    giftCardId?: string;
+    giftCardCycleId?: string;
 }
 
 export interface CreateSaleInput {

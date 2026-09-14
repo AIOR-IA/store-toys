@@ -67,17 +67,27 @@
             <span>{{ sale.totalCents | money }}</span>
         </div>
 
-        <div class="flex items-center justify-between text-sm text-gray-600">
-            <span>{{ "app.sales.receipt.payment" | translate }}</span>
-            <span>
-                @for (method of sale.paymentMethods; track method) {
+        <div class="flex flex-col gap-1">
+            <span class="text-sm text-gray-600">{{ "app.sales.receipt.payment" | translate }}</span>
+            @for (payment of paymentRows(); track payment.index) {
+            <div class="flex items-center justify-between text-sm">
+                <span>{{ ("app.sales.payment." + payment.method) | translate }}</span>
+                <span class="font-medium">{{ payment.amountCents | money }}</span>
+            </div>
+            @if (payment.method === 'giftcard') {
+            <div class="flex items-center justify-between text-xs text-gray-500 -mt-1 pl-2">
+                <span class="font-mono">
+                    {{ payment.giftCardCode }} · {{ "app.giftCards.cycle" | translate }} #{{ payment.giftCardCycleNumber }}
+                </span>
+                @if (payment.giftCardForfeitedCents; as forfeit) { @if (forfeit > 0) {
                 <p-tag
-                    [value]="('app.sales.payment.' + method) | translate"
-                    severity="secondary"
-                    class="mr-1"
+                    [value]="'app.sales.giftCard.forfeitedLabel' | translate: { amount: (forfeit | money) }"
+                    severity="warning"
                 ></p-tag>
-                }
-            </span>
+                } }
+            </div>
+            }
+            }
         </div>
 
         @if (qrPayments().length) {

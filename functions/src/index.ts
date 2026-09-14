@@ -21,6 +21,19 @@ export { syncMyRoleClaim } from './users';
 
 // FASE 4 — Ventas: createSale, cancelSale
 // FASE 5 — Voucher QR: attachVoucher (voucher OPCIONAL — ver comentario en sales.ts)
+// FASE 6 — createSale ahora acepta el pago 'giftcard'; cancelSale bloquea la
+// reversión si la tarjeta ya se reutilizó (ver comentario largo en sales.ts)
 export { createSale, cancelSale, attachVoucher } from './sales';
 
-// FASE 6 — Gift Cards: issueGiftCard, cancelGiftCardIssue
+// FASE 6 — Gift Cards: registro, activación/venta, pérdida-recuperación y
+// baja definitiva de tarjetas físicas reutilizables (ver comentario largo en
+// giftcards.ts). El canje como forma de pago vive en `createSale` (arriba),
+// no aquí: es una sola transacción que coordina venta + gift card (plan §22).
+export {
+    registerGiftCard,
+    registerGiftCardBatch,
+    activateGiftCard,
+    suspendGiftCard,
+    reactivateGiftCard,
+    cancelGiftCard,
+} from './giftcards';

@@ -17,6 +17,20 @@ export function normalizeCode(code: string): string {
 }
 
 /**
+ * Normaliza un código de gift card para usarlo como ID de `giftCards/{code}`
+ * (plan §16, prompt Fase 6 §3): trim + mayúsculas, sin eliminar ningún
+ * carácter significativo — el código se trata SIEMPRE como string opaco
+ * (puede traer ceros a la izquierda, guiones o letras; todavía no se sabe
+ * qué imprimirá la imprenta). Misma implementación que `normalizeCode`, pero
+ * con nombre propio: son dominios distintos (producto vs. gift card) aunque
+ * hoy compartan el criterio, y esta es la que espeja
+ * `functions/src/normalize.ts` del lado servidor.
+ */
+export function normalizeGiftCardCode(code: string): string {
+    return code.trim().toUpperCase();
+}
+
+/**
  * Formato de renderizado según la forma del código (plan §14.3): el largo de
  * un código numérico de fábrica indica su simbología estándar. Cualquier otra
  * forma —incluidos todos los códigos internos `MP…`— se trata como CODE 128,

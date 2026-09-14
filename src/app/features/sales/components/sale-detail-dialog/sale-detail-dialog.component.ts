@@ -14,7 +14,7 @@ import { SaleReceiptService } from '../../sale-receipt.service';
 import { SalesService } from '../../sales.service';
 import { Payment, Sale } from '../../sale.model';
 
-interface QrPaymentRow extends Payment {
+interface IndexedPayment extends Payment {
     index: number;
 }
 
@@ -64,12 +64,27 @@ export class SaleDetailDialogComponent {
      * ventas anuladas — una anulada solo permite VER el voucher histórico.
      */
     readonly canAttachVoucher = computed(() => this.sale()?.status === 'completed');
-    readonly qrPayments = computed<QrPaymentRow[]>(() => {
+    readonly qrPayments = computed<IndexedPayment[]>(() => {
         const sale = this.sale();
         if (!sale) return [];
         return sale.payments
             .map((payment, index) => ({ ...payment, index }))
             .filter((payment) => payment.method === 'qr');
+    });
+
+    /**
+     * TODOS los pagos de la venta, genérico (corrección de presentación,
+     * Fase 6): antes solo se mostraba un resumen de métodos como tags
+     * (`[Gift Card] [Efectivo]`) sin sus montos — un pago mixto no dejaba
+     * claro cuánto entró por cada forma de pago. Nunca relee el estado ACTUAL
+     * de `giftCards` (plan §25, prompt §24): la misma tarjeta puede estar en
+     * un ciclo completamente distinto para cuando se reimprime — todo sale
+     * del snapshot que ya guardó `createSale` en el propio pago.
+     */
+    readonly paymentRows = computed<IndexedPayment[]>(() => {
+        const sale = this.sale();
+        if (!sale) return [];
+        return sale.payments.map((payment, index) => ({ ...payment, index }));
     });
 
     showCancelForm = signal(false);

@@ -1,10 +1,12 @@
 import { Timestamp } from '@angular/fire/firestore';
 
 /**
- * Modelo de `sales/{saleId}` (plan §8.6), acotado a lo que la Fase 4
- * implementa: `cash` y `qr` sin voucher todavía (llega en la Fase 5);
- * `giftcard` no se ofrece hasta la Fase 6 — el tipo ya lo reserva para no
- * migrar el modelo otra vez, pero nada de este feature lo produce ni lo lee.
+ * Modelo de `sales/{saleId}` (plan §8.6). `giftcard` (Fase 6, plan §16, §22,
+ * §24): consumo TOTAL de una tarjeta reutilizable — el pago guarda un
+ * snapshot completo (`giftCardId`/`giftCardCycleNumber`/`giftCardCycleId`),
+ * porque la MISMA tarjeta física puede estar en un ciclo completamente
+ * distinto para cuando alguien reimprime este recibo: la venta nunca
+ * depende de leer el estado actual de `giftCards` (prompt §24, §25).
  *
  * Todo el documento lo escribe `createSale`/`cancelSale` (Cloud Functions,
  * Admin SDK): las Rules cierran `allow write: if false` (plan §10.2). El
@@ -39,9 +41,13 @@ export interface Payment {
     voucherUploadedAt?: Timestamp;
     voucherUploadedBy?: string;
 
-    // solo si method === 'giftcard' (Fase 6)
-    giftCardIssueId?: string;
+    // solo si method === 'giftcard' (Fase 6, plan §24)
+    giftCardId?: string;
     giftCardCode?: string;
+    giftCardCycleNumber?: number;
+    giftCardCycleId?: string;
+    /** Sobrante perdido de la tarjeta si la compra fue menor a su denominación (plan §16.3, fila 4'). */
+    giftCardForfeitedCents?: number;
 }
 
 export interface SaleItem {

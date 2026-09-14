@@ -65,6 +65,22 @@
         { "fieldPath": "dateKey", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "giftCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "cardCode", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "giftCardMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "giftCardId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

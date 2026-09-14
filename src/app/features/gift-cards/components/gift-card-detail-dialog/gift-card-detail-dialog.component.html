@@ -1,0 +1,224 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="visibleChange.emit($event)"
+    [modal]="true"
+    [style]="{ width: '36rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="card()?.cardCode || ''"
+    (onHide)="close()"
+>
+    @if (card(); as card) {
+    <div class="flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+            @switch (card.status) { @case ('AVAILABLE') {
+            <p-tag severity="success" [value]="'app.giftCards.status.available' | translate"></p-tag>
+            } @case ('ACTIVE') {
+            <p-tag severity="info" [value]="'app.giftCards.status.active' | translate"></p-tag>
+            } @case ('SUSPENDED') {
+            <p-tag severity="warning" [value]="'app.giftCards.status.suspended' | translate"></p-tag>
+            } @case ('CANCELLED') {
+            <p-tag severity="secondary" [value]="'app.giftCards.status.cancelled' | translate"></p-tag>
+            } }
+            <div class="text-xl font-semibold">{{ card.amountCents | money }}</div>
+        </div>
+
+        @if (mode() === 'view') {
+        <div class="grid grid-cols-2 gap-3 text-sm">
+            <div>
+                <div class="text-gray-500">{{ "app.giftCards.cycle" | translate }}</div>
+                <div>{{ card.cycleNumber }}</div>
+            </div>
+            <div>
+                <div class="text-gray-500">{{ "app.giftCards.buyer" | translate }}</div>
+                <div>{{ card.currentBuyerName || "—" }}</div>
+            </div>
+            @if (card.activatedAt) {
+            <div>
+                <div class="text-gray-500">{{ "app.giftCards.activatedAt" | translate }}</div>
+                <div>{{ card.activatedAt.toDate() | date: "dd/MM/yyyy HH:mm" }}</div>
+            </div>
+            <div>
+                <div class="text-gray-500">{{ "app.giftCards.activatedBy" | translate }}</div>
+                <div>{{ card.activatedByName || "—" }}</div>
+            </div>
+            } @if (card.status === 'SUSPENDED') {
+            <div class="col-span-2">
+                <div class="text-gray-500">{{ "app.giftCards.suspensionReason" | translate }}</div>
+                <div>{{ card.suspensionReason }}</div>
+            </div>
+            } @if (card.status === 'CANCELLED') {
+            <div class="col-span-2">
+                <div class="text-gray-500">{{ "app.giftCards.cancelReason" | translate }}</div>
+                <div>{{ card.cancelReason }}</div>
+            </div>
+            }
+            <div>
+                <div class="text-gray-500">{{ "app.giftCards.createdAt" | translate }}</div>
+                <div>{{ card.createdAt.toDate() | date: "dd/MM/yyyy" }}</div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+            @if (card.status === 'AVAILABLE') {
+            <button
+                pButton
+                type="button"
+                icon="fas fa-cart-shopping"
+                [label]="'app.giftCards.actions.activate' | translate"
+                (click)="openActivate()"
+            ></button>
+            } @if (card.status === 'ACTIVE') {
+            <button
+                pButton
+                type="button"
+                class="p-button-warning"
+                icon="fas fa-triangle-exclamation"
+                [label]="'app.giftCards.actions.suspend' | translate"
+                (click)="openSuspend()"
+            ></button>
+            } @if (card.status === 'SUSPENDED') {
+            <button
+                pButton
+                type="button"
+                class="p-button-success"
+                icon="fas fa-circle-check"
+                [label]="'app.giftCards.actions.reactivate' | translate"
+                (click)="confirmReactivate()"
+            ></button>
+            } @if (isAdmin() && card.status !== 'CANCELLED') {
+            <button
+                pButton
+                type="button"
+                class="p-button-danger p-button-outlined"
+                icon="fas fa-ban"
+                [label]="'app.giftCards.actions.cancel' | translate"
+                (click)="openCancel()"
+            ></button>
+            }
+        </div>
+
+        @if (isAdmin()) {
+        <div class="border-t pt-3">
+            <div class="text-sm font-medium mb-2">{{ "app.giftCards.movements.title" | translate }}</div>
+            @if (loadingMovements()) {
+            <div class="text-sm text-gray-500">{{ "app.common.loading" | translate }}</div>
+            } @else if (!movements().length) {
+            <div class="text-sm text-gray-500">{{ "app.giftCards.movements.empty" | translate }}</div>
+            } @else {
+            <ul class="flex flex-col gap-1 max-h-48 overflow-y-auto text-sm">
+                @for (m of movements(); track m.id) {
+                <li class="flex justify-between border-b border-gray-100 py-1">
+                    <span>
+                        @if (m.cycleNumber !== null) {
+                        <span class="text-gray-400">#{{ m.cycleNumber }}</span>
+                        }
+                        <span class="font-medium">{{ "app.giftCards.movements.type." + m.type | translate }}</span>
+                        @if (m.buyerNameSnapshot) {
+                        <span class="text-gray-500"> · {{ m.buyerNameSnapshot }}</span>
+                        }
+                    </span>
+                    <span class="text-gray-400">{{ m.createdAt.toDate() | date: "dd/MM/yy HH:mm" }}</span>
+                </li>
+                }
+            </ul>
+            }
+        </div>
+        }
+        } @else if (mode() === 'activate') {
+        <form (ngSubmit)="confirmActivate()" class="flex flex-col gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="buyerName">{{
+                    "app.giftCards.buyerNameOptional" | translate
+                }}</label>
+                <input
+                    pInputText
+                    id="buyerName"
+                    [ngModel]="buyerName()"
+                    (ngModelChange)="buyerName.set($event)"
+                    [name]="'buyerName'"
+                    class="w-full"
+                />
+            </div>
+            <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium">{{ "app.giftCards.activate.paymentMethod" | translate }}</label>
+                <div class="flex gap-4">
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            [name]="'payMethod'"
+                            value="cash"
+                            [ngModel]="activatePaymentMethod()"
+                            (ngModelChange)="activatePaymentMethod.set($event)"
+                            inputId="payCash"
+                        ></p-radioButton>
+                        <label for="payCash">{{ "app.sales.payment.cash" | translate }}</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            [name]="'payMethod'"
+                            value="qr"
+                            [ngModel]="activatePaymentMethod()"
+                            (ngModelChange)="activatePaymentMethod.set($event)"
+                            inputId="payQr"
+                        ></p-radioButton>
+                        <label for="payQr">{{ "app.sales.payment.qr" | translate }}</label>
+                    </div>
+                </div>
+                <div class="text-xs text-gray-500">
+                    {{ "app.giftCards.activate.amountHelp" | translate: { amount: (card.amountCents | money) } }}
+                </div>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
+                <button pButton type="submit" [label]="'app.giftCards.actions.activate' | translate" [loading]="saving()" [disabled]="saving()"></button>
+            </div>
+        </form>
+        } @else if (mode() === 'suspend') {
+        <form (ngSubmit)="confirmSuspend()" class="flex flex-col gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="suspendReason">{{
+                    "app.giftCards.suspend.reasonLabel" | translate
+                }}</label>
+                <textarea
+                    pInputTextarea
+                    id="suspendReason"
+                    [ngModel]="suspendReason()"
+                    (ngModelChange)="suspendReason.set($event)"
+                    [name]="'suspendReason'"
+                    rows="3"
+                    class="w-full"
+                ></textarea>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
+                <button pButton type="submit" class="p-button-warning" [label]="'app.giftCards.actions.suspend' | translate" [loading]="saving()" [disabled]="saving()"></button>
+            </div>
+        </form>
+        } @else if (mode() === 'cancel') {
+        <form (ngSubmit)="confirmCancel()" class="flex flex-col gap-4">
+            <div class="text-sm text-danger">{{ "app.giftCards.cancel.warning" | translate }}</div>
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="cancelReason">{{
+                    "app.giftCards.cancel.reasonLabel" | translate
+                }}</label>
+                <textarea
+                    pInputTextarea
+                    id="cancelReason"
+                    [ngModel]="cancelReason()"
+                    (ngModelChange)="cancelReason.set($event)"
+                    [name]="'cancelReason'"
+                    rows="3"
+                    class="w-full"
+                ></textarea>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
+                <button pButton type="submit" class="p-button-danger" [label]="'app.giftCards.actions.cancel' | translate" [loading]="saving()" [disabled]="saving()"></button>
+            </div>
+        </form>
+        }
+    </div>
+    }
+</p-dialog>
+
+<p-confirmDialog></p-confirmDialog>

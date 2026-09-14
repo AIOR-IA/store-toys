@@ -27,8 +27,8 @@ const VOUCHER_EXTENSION_BY_MIME: Record<string, string> = {
     'image/webp': 'webp',
 };
 
-type PaymentMethod = 'cash' | 'qr';
-const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'qr'];
+type PaymentMethod = 'cash' | 'qr' | 'giftcard';
+const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'qr', 'giftcard'];
 
 interface CreateSaleItemInput {
     productId: string;
@@ -38,6 +38,16 @@ interface CreateSaleItemInput {
 interface CreateSalePaymentInput {
     method: PaymentMethod;
     amountCents: number;
+    // Solo si method === 'giftcard' (Fase 6): lo que el cliente OBSERVÓ al
+    // escanear/teclear la tarjeta. El servidor nunca confía en esto para el
+    // monto — lo recalcula desde `giftCards`/`giftCardIssues` reales dentro
+    // de la transacción (§21 del prompt de Fase 6) — pero SÍ lo usa como el
+    // identificador exacto del ciclo que el cliente cree estar cobrando: si
+    // `giftCardCycleId` ya no coincide con `giftCards/{id}.activeCycleId`,
+    // la venta se rechaza (protección contra reintentos de un ciclo viejo,
+    // prompt §23, §44).
+    giftCardId?: string;
+    giftCardCycleId?: string;
 }
 
 interface CreateSaleData {
@@ -130,7 +140,7 @@ function validatePaymentsShape(value: unknown): CreateSalePaymentInput[] {
         throw new HttpsError('invalid-argument', 'La venta debe tener al menos una forma de pago.');
     }
 
-    return value.map((raw) => {
+    const payments = value.map((raw) => {
         const method = (raw as { method?: unknown })?.method;
         if (typeof method !== 'string' || !PAYMENT_METHODS.includes(method as PaymentMethod)) {
             throw new HttpsError(
@@ -146,8 +156,26 @@ function validatePaymentsShape(value: unknown): CreateSalePaymentInput[] {
         ) {
             throw new HttpsError('invalid-argument', 'El monto pagado es inválido.');
         }
+
+        if (method === 'giftcard') {
+            const giftCardId = requireDocId((raw as { giftCardId?: unknown })?.giftCardId, 'giftCardId');
+            const giftCardCycleId = requireDocId(
+                (raw as { giftCardCycleId?: unknown })?.giftCardCycleId,
+                'giftCardCycleId',
+            );
+            return { method: method as PaymentMethod, amountCents, giftCardId, giftCardCycleId };
+        }
         return { method: method as PaymentMethod, amountCents };
     });
+
+    // ≤ 1 pago 'giftcard' y ≤ 1 pago de "diferencia" (plan §15.1, §15.3): el
+    // único pago mixto permitido es gift card + la diferencia en cash o qr.
+    const giftcardCount = payments.filter((p) => p.method === 'giftcard').length;
+    if (giftcardCount > 1) {
+        throw new HttpsError('invalid-argument', 'Solo se admite una gift card por venta.');
+    }
+
+    return payments;
 }
 
 /**
@@ -184,8 +212,54 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
     const productRefs = items.map((item) => db.doc(`products/${item.productId}`));
 
     try {
+        const giftcardPayment = payments.find((p) => p.method === 'giftcard');
+        const giftCardRef = giftcardPayment
+            ? db.doc(`giftCards/${giftcardPayment.giftCardId}`)
+            : null;
+
         await db.runTransaction(async (tx) => {
             const productSnaps = await Promise.all(productRefs.map((ref) => tx.get(ref)));
+
+            // Lectura de la gift card ANTES de cualquier escritura (Firestore
+            // exige que todas las lecturas de la transacción precedan a las
+            // escrituras) — se resuelve aquí mismo, junto a los productos,
+            // aunque las escrituras que dependen de ella ocurran más abajo.
+            const giftCardSnap = giftCardRef ? await tx.get(giftCardRef) : null;
+            let giftCardIssueSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+            if (giftcardPayment && giftCardSnap) {
+                if (!giftCardSnap.exists) {
+                    throw new HttpsError('not-found', 'Gift card no encontrada.');
+                }
+                if (giftCardSnap.get('status') !== 'ACTIVE') {
+                    throw new HttpsError(
+                        'failed-precondition',
+                        'Esta gift card no está activa: no se puede usar como pago.',
+                    );
+                }
+                // Protección anti-carrera de ciclo (prompt §23, §44): si el
+                // ciclo que el cliente observó ya no es el vigente —la
+                // tarjeta se redimió y se volvió a vender mientras tanto—,
+                // esta venta se rechaza en vez de afectar el ciclo nuevo.
+                if (giftCardSnap.get('activeCycleId') !== giftcardPayment.giftCardCycleId) {
+                    throw new HttpsError(
+                        'failed-precondition',
+                        'Esta gift card ya fue reutilizada: vuelve a escanearla.',
+                    );
+                }
+                giftCardIssueSnap = await tx.get(
+                    db.doc(`giftCardIssues/${giftcardPayment.giftCardCycleId}`),
+                );
+                if (
+                    !giftCardIssueSnap.exists ||
+                    giftCardIssueSnap.get('status') !== 'active' ||
+                    giftCardIssueSnap.get('cycleNumber') !== giftCardSnap.get('cycleNumber')
+                ) {
+                    throw new HttpsError(
+                        'failed-precondition',
+                        'Esta gift card ya fue reutilizada: vuelve a escanearla.',
+                    );
+                }
+            }
 
             const saleItems: {
                 productId: string;
@@ -241,6 +315,28 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 saleItems.reduce((sum, item) => sum + item.subtotalCents, 0),
                 'sale.totalCents',
             );
+
+            // Consumo TOTAL, sin saldo remanente (plan §16.2, E3/E4): el
+            // monto aplicado nunca lo decide el cliente — se recalcula desde
+            // el `amountCents` real de la tarjeta. Si la compra alcanza o
+            // supera el valor de la tarjeta, se aplica el valor completo (el
+            // resto, si sobra compra, se cubre con el segundo pago cash/qr);
+            // si la compra es menor, se aplica solo lo que cubre la compra y
+            // el resto se pierde como `forfeit` (plan §16.3, filas 4'/4'').
+            let giftCardAppliedCents = 0;
+            let giftCardForfeitCents = 0;
+            if (giftcardPayment && giftCardSnap) {
+                const cardAmountCents = giftCardSnap.get('amountCents') as number;
+                giftCardAppliedCents = Math.min(cardAmountCents, totalCents);
+                giftCardForfeitCents = cardAmountCents - giftCardAppliedCents;
+                if (giftcardPayment.amountCents !== giftCardAppliedCents) {
+                    throw new HttpsError(
+                        'failed-precondition',
+                        'El monto de la gift card no coincide con el total de la venta. Vuelve a intentar.',
+                    );
+                }
+            }
+
             const paidCents = payments.reduce((sum, p) => sum + p.amountCents, 0);
             if (paidCents !== totalCents) {
                 throw new HttpsError(
@@ -275,15 +371,27 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 sellerName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
                 items: saleItems,
                 totalCents,
-                payments: payments.map((p) =>
-                    p.method === 'qr'
-                        ? { method: p.method, amountCents: p.amountCents, voucherStatus: 'pending' }
-                        : { method: p.method, amountCents: p.amountCents },
-                ),
+                payments: payments.map((p) => {
+                    if (p.method === 'qr') {
+                        return { method: p.method, amountCents: p.amountCents, voucherStatus: 'pending' };
+                    }
+                    if (p.method === 'giftcard') {
+                        return {
+                            method: p.method,
+                            amountCents: p.amountCents,
+                            giftCardId: p.giftCardId,
+                            giftCardCode: p.giftCardId,
+                            giftCardCycleNumber: giftCardSnap!.get('cycleNumber') as number,
+                            giftCardCycleId: p.giftCardCycleId,
+                            giftCardForfeitedCents: giftCardForfeitCents,
+                        };
+                    }
+                    return { method: p.method, amountCents: p.amountCents };
+                }),
                 paymentMethods,
                 cashCents,
                 qrCents,
-                giftCardCents: 0,
+                giftCardCents: giftCardAppliedCents,
                 ...(customerName ? { customerName } : {}),
                 status: 'completed',
                 createdAt: FieldValue.serverTimestamp(),
@@ -298,6 +406,68 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     stock: FieldValue.increment(-items[i].quantity),
                     updatedAt: FieldValue.serverTimestamp(),
                 });
+            }
+
+            // Redención de la gift card (plan §22, prompt §22): TODO en esta
+            // misma transacción — la venta, el descuento de stock, el cierre
+            // del ciclo y la devolución del plástico a AVAILABLE nacen o
+            // fallan juntos. Dos cajas que intenten usar el mismo ciclo a la
+            // vez nunca pueden tener éxito las dos: la segunda pierde la
+            // carrera de la transacción (Firestore reintenta con una lectura
+            // fresca de `activeCycleId`, que ya no coincide) o, si llega a
+            // ejecutarse igual, la comprobación de arriba la rechaza.
+            if (giftcardPayment && giftCardRef && giftCardSnap && giftCardIssueSnap) {
+                const cycleId = giftcardPayment.giftCardCycleId!;
+                const cycleNumber = giftCardSnap.get('cycleNumber') as number;
+                const issueRef = db.doc(`giftCardIssues/${cycleId}`);
+
+                tx.update(giftCardRef, {
+                    status: 'AVAILABLE',
+                    activeCycleId: null,
+                    currentBuyerName: null,
+                    activatedAt: null,
+                    activatedBy: null,
+                    activatedByName: null,
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+                tx.update(issueRef, {
+                    status: 'redeemed',
+                    redeemedAt: FieldValue.serverTimestamp(),
+                    saleId,
+                    redeemedAmountCents: giftCardAppliedCents,
+                    forfeitedAmountCents: giftCardForfeitCents,
+                    closedAt: FieldValue.serverTimestamp(),
+                });
+                tx.create(db.collection('giftCardMovements').doc(), {
+                    giftCardId: giftcardPayment.giftCardId,
+                    codeSnapshot: giftcardPayment.giftCardId,
+                    amountCents: giftCardAppliedCents,
+                    cycleNumber,
+                    cycleId,
+                    type: 'REDEEMED' as const,
+                    createdAt: FieldValue.serverTimestamp(),
+                    performedBy: request.auth!.uid,
+                    performedByName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
+                    buyerNameSnapshot: giftCardIssueSnap.get('buyerName') ?? null,
+                    saleId,
+                    reason: null,
+                });
+                if (giftCardForfeitCents > 0) {
+                    tx.create(db.collection('giftCardMovements').doc(), {
+                        giftCardId: giftcardPayment.giftCardId,
+                        codeSnapshot: giftcardPayment.giftCardId,
+                        amountCents: giftCardForfeitCents,
+                        cycleNumber,
+                        cycleId,
+                        type: 'FORFEITED' as const,
+                        createdAt: FieldValue.serverTimestamp(),
+                        performedBy: request.auth!.uid,
+                        performedByName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
+                        buyerNameSnapshot: giftCardIssueSnap.get('buyerName') ?? null,
+                        saleId,
+                        reason: null,
+                    });
+                }
             }
 
             if (!summarySnap.exists) {
@@ -319,9 +489,11 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     totalCents,
                     cashCents,
                     qrCents,
-                    giftCardCents: 0,
+                    giftCardCents: giftCardAppliedCents,
                     giftCardsIssuedCents: 0,
-                    giftCardForfeitedCents: 0,
+                    giftCardForfeitedCents: giftCardForfeitCents,
+                    giftCardIssuesCashCents: 0,
+                    giftCardIssuesQrCents: 0,
                     products,
                     updatedAt: FieldValue.serverTimestamp(),
                 });
@@ -342,6 +514,15 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     ((summarySnap.get('qrCents') as number) ?? 0) + qrCents,
                     'dailySummaries.qrCents',
                 );
+                const newGiftCardCents = assertSafeIntegerCents(
+                    ((summarySnap.get('giftCardCents') as number) ?? 0) + giftCardAppliedCents,
+                    'dailySummaries.giftCardCents',
+                );
+                const newGiftCardForfeitedCents = assertSafeIntegerCents(
+                    ((summarySnap.get('giftCardForfeitedCents') as number) ?? 0) +
+                        giftCardForfeitCents,
+                    'dailySummaries.giftCardForfeitedCents',
+                );
 
                 const update: Record<string, unknown> = {
                     salesCount: FieldValue.increment(1),
@@ -349,6 +530,8 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     totalCents: newTotalCents,
                     cashCents: newCashCents,
                     qrCents: newQrCents,
+                    giftCardCents: newGiftCardCents,
+                    giftCardForfeitedCents: newGiftCardForfeitedCents,
                     updatedAt: FieldValue.serverTimestamp(),
                 };
                 for (const item of saleItems) {
@@ -383,9 +566,18 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
  * Anula una venta (plan §15.4, solo admin): devuelve el stock, revierte los
  * totales del resumen diario y marca `status: 'cancelled'` — nunca borra ni
  * edita los datos originales de la venta.
+ *
+ * Gift card (Fase 6, prompt §31): si la venta se pagó (total o parcialmente)
+ * con una gift card, la anulación solo se revierte cuando el ciclo que esa
+ * venta redimió sigue EXACTAMENTE como la redención lo dejó — la tarjeta
+ * AVAILABLE, sin ninguna activación posterior. Si la tarjeta ya se volvió a
+ * vender (nuevo ciclo, `cycleNumber` avanzado), la anulación completa se
+ * RECHAZA — nada se anula, ni el stock — para no arriesgarse a pisar el
+ * ciclo de otro comprador. Ver el comentario largo dentro de la función.
  */
 export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (request) => {
-    await assertAdmin(request.auth);
+    const adminSnap = await assertAdmin(request.auth);
+    const adminName = `${adminSnap.get('firstName')} ${adminSnap.get('lastName')}`.trim();
 
     const saleId = requireDocId(request.data.saleId, 'saleId');
     const reason = request.data.reason;
@@ -416,6 +608,68 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
         const summaryRef = db.doc(`dailySummaries/${dateKey}`);
         const summarySnap = await tx.get(summaryRef);
 
+        // Gift card involucrada (Fase 6, prompt §31): el plan original
+        // (§15.4) revertía siempre "la emisión vuelve a 'active'", una regla
+        // escrita ANTES de que el cliente confirmara que las tarjetas son
+        // reutilizables. Con reutilización real, reabrir a ciegas el ciclo
+        // que esta venta redimió podría pisar un ciclo POSTERIOR de otro
+        // comprador (dinero fantasma). Decisión tomada con el cliente en
+        // vivo: si el ciclo sigue exactamente como esta venta lo dejó —la
+        // tarjeta AVAILABLE, sin reactivar desde entonces— se revierte con
+        // seguridad; si no, la anulación completa se RECHAZA (no se anula
+        // nada, ni siquiera el stock) y hay que resolverlo manualmente.
+        const giftcardPaymentEntry = (
+            (saleSnap.get('payments') as
+                | {
+                      method: string;
+                      amountCents: number;
+                      giftCardId?: string;
+                      giftCardCycleId?: string;
+                      giftCardCycleNumber?: number;
+                      giftCardForfeitedCents?: number;
+                  }[]
+                | undefined) ?? []
+        ).find((p) => p.method === 'giftcard');
+
+        let giftCardRevert: {
+            cardRef: FirebaseFirestore.DocumentReference;
+            issueRef: FirebaseFirestore.DocumentReference;
+            issueSnap: FirebaseFirestore.DocumentSnapshot;
+            appliedCents: number;
+            forfeitedCents: number;
+        } | null = null;
+
+        if (giftcardPaymentEntry?.giftCardId && giftcardPaymentEntry.giftCardCycleId) {
+            const cardRef = db.doc(`giftCards/${giftcardPaymentEntry.giftCardId}`);
+            const issueRef = db.doc(`giftCardIssues/${giftcardPaymentEntry.giftCardCycleId}`);
+            const [cardSnap, issueSnap] = await Promise.all([tx.get(cardRef), tx.get(issueRef)]);
+
+            const safeToRevert =
+                cardSnap.exists &&
+                cardSnap.get('status') === 'AVAILABLE' &&
+                cardSnap.get('activeCycleId') === null &&
+                cardSnap.get('cycleNumber') === giftcardPaymentEntry.giftCardCycleNumber &&
+                issueSnap.exists &&
+                issueSnap.get('status') === 'redeemed' &&
+                issueSnap.get('saleId') === saleId;
+
+            if (!safeToRevert) {
+                throw new HttpsError(
+                    'failed-precondition',
+                    'No se puede anular: la gift card usada en esta venta ya se reutilizó en otro ' +
+                        'ciclo. Resuélvelo manualmente (contacta al administrador del sistema).',
+                );
+            }
+
+            giftCardRevert = {
+                cardRef,
+                issueRef,
+                issueSnap,
+                appliedCents: giftcardPaymentEntry.amountCents,
+                forfeitedCents: giftcardPaymentEntry.giftCardForfeitedCents ?? 0,
+            };
+        }
+
         // Solo escrituras de aquí en adelante.
         tx.update(saleRef, {
             status: 'cancelled',
@@ -430,6 +684,44 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
             tx.update(productRefs[i], {
                 stock: FieldValue.increment(items[i].quantity),
                 updatedAt: FieldValue.serverTimestamp(),
+            });
+        }
+
+        if (giftCardRevert) {
+            const cycleNumber = giftCardRevert.issueSnap.get('cycleNumber') as number;
+            const cycleId = giftCardRevert.issueRef.id;
+            const buyerName = (giftCardRevert.issueSnap.get('buyerName') as string | null) ?? null;
+
+            tx.update(giftCardRevert.cardRef, {
+                status: 'ACTIVE',
+                activeCycleId: cycleId,
+                currentBuyerName: buyerName,
+                activatedAt: giftCardRevert.issueSnap.get('activatedAt'),
+                activatedBy: giftCardRevert.issueSnap.get('activatedBy'),
+                activatedByName: giftCardRevert.issueSnap.get('activatedByName'),
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+            tx.update(giftCardRevert.issueRef, {
+                status: 'active',
+                redeemedAt: null,
+                saleId: null,
+                redeemedAmountCents: null,
+                forfeitedAmountCents: null,
+                closedAt: null,
+            });
+            tx.create(db.collection('giftCardMovements').doc(), {
+                giftCardId: giftcardPaymentEntry!.giftCardId,
+                codeSnapshot: giftcardPaymentEntry!.giftCardId,
+                amountCents: giftCardRevert.appliedCents,
+                cycleNumber,
+                cycleId,
+                type: 'ADJUSTMENT' as const,
+                createdAt: FieldValue.serverTimestamp(),
+                performedBy: request.auth!.uid,
+                performedByName: adminName,
+                buyerNameSnapshot: buyerName,
+                saleId,
+                reason: `Reversión por anulación de venta: ${cancelReason}`,
             });
         }
 
@@ -475,6 +767,20 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 qrCents: newQrCents,
                 updatedAt: FieldValue.serverTimestamp(),
             };
+
+            if (giftCardRevert) {
+                const newGiftCardCents = assertSafeIntegerCents(
+                    ((summarySnap.get('giftCardCents') as number) ?? 0) - giftCardRevert.appliedCents,
+                    'dailySummaries.giftCardCents',
+                );
+                const newGiftCardForfeitedCents = assertSafeIntegerCents(
+                    ((summarySnap.get('giftCardForfeitedCents') as number) ?? 0) -
+                        giftCardRevert.forfeitedCents,
+                    'dailySummaries.giftCardForfeitedCents',
+                );
+                update['giftCardCents'] = newGiftCardCents;
+                update['giftCardForfeitedCents'] = newGiftCardForfeitedCents;
+            }
             for (const item of saleSnap.get('items') as {
                 productId: string;
                 quantity: number;

@@ -1,0 +1,142 @@
+<app-title-bar
+    [title]="'app.giftCards.title' | translate"
+    [description]="'app.giftCards.list' | translate"
+    [newLabel]="isAdmin() ? ('app.giftCards.register.action' | translate) : undefined"
+    (onClickNew)="openRegister()"
+></app-title-bar>
+
+@if (summary().length || hasLoadedOnce()) {
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+    <div class="bg-white rounded-lg shadow-sm p-3 text-center border-l-4 border-green-500">
+        <div class="text-2xl font-semibold">{{ statusCounts().AVAILABLE }}</div>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.giftCards.status.available" | translate }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm p-3 text-center border-l-4 border-primary">
+        <div class="text-2xl font-semibold">{{ statusCounts().ACTIVE }}</div>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.giftCards.status.active" | translate }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm p-3 text-center border-l-4 border-orange-500">
+        <div class="text-2xl font-semibold">{{ statusCounts().SUSPENDED }}</div>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.giftCards.status.suspended" | translate }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm p-3 text-center border-l-4 border-gray-400">
+        <div class="text-2xl font-semibold">{{ statusCounts().CANCELLED }}</div>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.giftCards.status.cancelled" | translate }}</div>
+    </div>
+</div>
+
+@if (availableByDenomination().length) {
+<div class="flex flex-wrap gap-2 mb-4">
+    @for (d of availableByDenomination(); track d.amountCents) {
+    <div class="bg-green-50 text-green-800 rounded-full px-3 py-1 text-sm">
+        {{ d.amountCents | money }} · {{ "app.giftCards.availableCount" | translate: { count: d.count } }}
+    </div>
+    }
+</div>
+}
+}
+
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+    <app-filter-tab
+        [options]="filterOptions"
+        [selectedOption]="filter()"
+        (onChange)="onFilterChange($event)"
+    ></app-filter-tab>
+
+    <div class="flex items-center gap-2">
+        @if (denominations().length > 1) {
+        <p-dropdown
+            [options]="denominations()"
+            [ngModel]="denominationFilter()"
+            (ngModelChange)="onDenominationChange($event)"
+            [showClear]="true"
+            [placeholder]="'app.giftCards.filters.denomination' | translate"
+            styleClass="w-40"
+        >
+            <ng-template let-amount pTemplate="item">{{ amount | money }}</ng-template>
+            <ng-template let-amount pTemplate="selectedItem">{{ amount | money }}</ng-template>
+        </p-dropdown>
+        }
+        <app-search-bar
+            [placeholder]="'app.giftCards.searchPlaceholder'"
+            [compact]="true"
+            (onSearch)="onSearch($event)"
+        ></app-search-bar>
+    </div>
+</div>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!visibleRows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p-table [value]="visibleRows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+    <ng-template pTemplate="header">
+        <tr>
+            <th>{{ "app.giftCards.code" | translate }}</th>
+            <th>{{ "app.giftCards.amount" | translate }}</th>
+            <th>{{ "app.giftCards.statusColumn" | translate }}</th>
+            <th>{{ "app.giftCards.cycle" | translate }}</th>
+            <th>{{ "app.giftCards.buyer" | translate }}</th>
+            <th class="text-right">{{ "app.common.actions" | translate }}</th>
+        </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-card>
+        <tr>
+            <td class="font-mono">{{ card.cardCode }}</td>
+            <td>{{ card.amountCents | money }}</td>
+            <td>
+                @switch (card.status) { @case ('AVAILABLE') {
+                <p-tag severity="success" [value]="'app.giftCards.status.available' | translate"></p-tag>
+                } @case ('ACTIVE') {
+                <p-tag severity="info" [value]="'app.giftCards.status.active' | translate"></p-tag>
+                } @case ('SUSPENDED') {
+                <p-tag severity="warning" [value]="'app.giftCards.status.suspended' | translate"></p-tag>
+                } @case ('CANCELLED') {
+                <p-tag severity="secondary" [value]="'app.giftCards.status.cancelled' | translate"></p-tag>
+                } }
+            </td>
+            <td>{{ card.cycleNumber }}</td>
+            <td>{{ card.currentBuyerName || "—" }}</td>
+            <td class="text-right">
+                <button
+                    pButton
+                    type="button"
+                    class="p-button-text p-button-sm"
+                    icon="fas fa-eye"
+                    [label]="'app.giftCards.viewDetail' | translate"
+                    (click)="openDetail(card)"
+                ></button>
+            </td>
+        </tr>
+    </ng-template>
+</p-table>
+
+@if (!singleResultMode()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+}
+}
+
+<app-gift-card-register-dialog
+    [visible]="registerVisible()"
+    (visibleChange)="registerVisible.set($event)"
+    (registered)="onRegistered()"
+></app-gift-card-register-dialog>
+
+<app-gift-card-detail-dialog
+    [visible]="detailCard() !== null"
+    (visibleChange)="!$event && detailCard.set(null)"
+    [card]="detailCard()"
+    (changed)="onDetailChanged()"
+></app-gift-card-detail-dialog>

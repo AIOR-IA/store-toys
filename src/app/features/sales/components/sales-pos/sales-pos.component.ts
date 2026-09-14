@@ -22,13 +22,17 @@ import { TooltipModule } from 'primeng/tooltip';
 import { MoneyPipe } from '@shared/pipes';
 import { ImageCompressorService, ToastService } from '@core/services';
 import { toCents } from '@core/utils';
+import { GiftCard, GiftCardIssuePaymentMethod } from '../../../gift-cards/gift-card.model';
+import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { Product } from '../../../products/product.model';
 import { ProductsService } from '../../../products/products.service';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { CreateSalePaymentInput, SalesService } from '../../sales.service';
 import { PaymentMethod, Sale, SaleCartLine } from '../../sale.model';
 
-type PosPaymentMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
+type PosPaymentMethod = PaymentMethod;
+/** Segundo pago para cubrir la diferencia cuando la compra supera el valor de la gift card. */
+type GiftCardDifferenceMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
 
 /**
  * Punto de venta (plan §15.5, prompt §16): un solo puesto, pensado para
@@ -61,6 +65,7 @@ type PosPaymentMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
 })
 export class SalesPosComponent implements AfterViewInit {
     private readonly productsService = inject(ProductsService);
+    private readonly giftCardsService = inject(GiftCardsService);
     private readonly salesService = inject(SalesService);
     private readonly receiptService = inject(SaleReceiptService);
     private readonly imageCompressor = inject(ImageCompressorService);
@@ -91,9 +96,42 @@ export class SalesPosComponent implements AfterViewInit {
     compressingVoucher = signal(false);
     attachingVoucher = signal(false);
 
+    /**
+     * Pago con gift card (Fase 6, prompt §20): el código se busca con el
+     * MISMO pipeline de lector HID + manual que el escaneo de productos — un
+     * `<form (ngSubmit)>` de un solo input — pero en un input SEPARADO
+     * (prompt §4 pide una sola función de lookup, no dos lógicas distintas;
+     * aun así conviene un campo propio porque activar el modo "gift card" no
+     * debe interpretar el siguiente Enter como un producto más del carrito).
+     * `createSale` es quien de verdad valida todo server-side (plan §21):
+     * esta búsqueda es solo UX, para mostrar el monto y el estado antes de
+     * confirmar.
+     */
+    giftCardCodeValue = signal('');
+    giftCardLookingUp = signal(false);
+    foundGiftCard = signal<GiftCard | null>(null);
+    /** Solo se usa si la compra supera el valor de la tarjeta (plan §16.3, fila 4''). */
+    giftCardDifferenceMethod = signal<GiftCardDifferenceMethod>('cash');
+
     readonly totalCents = computed(() =>
         this.cart().reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0),
     );
+
+    /** Monto que realmente se aplica de la tarjeta a esta compra (consumo total, plan §16.2). */
+    readonly giftCardAppliedCents = computed(() => {
+        const card = this.foundGiftCard();
+        return card ? Math.min(card.amountCents, this.totalCents()) : 0;
+    });
+    /** Sobrante que se pierde si la compra es menor a la denominación de la tarjeta. */
+    readonly giftCardForfeitCents = computed(() => {
+        const card = this.foundGiftCard();
+        return card ? Math.max(0, card.amountCents - this.totalCents()) : 0;
+    });
+    /** Diferencia a cobrar con el segundo método si la compra supera la denominación. */
+    readonly giftCardDifferenceCents = computed(() => {
+        const card = this.foundGiftCard();
+        return card ? Math.max(0, this.totalCents() - card.amountCents) : 0;
+    });
 
     readonly changeCents = computed(() => {
         if (this.paymentMethod() !== 'cash') return null;
@@ -113,6 +151,10 @@ export class SalesPosComponent implements AfterViewInit {
         if (this.paymentMethod() === 'cash') {
             const change = this.changeCents();
             return change !== null && change >= 0;
+        }
+        if (this.paymentMethod() === 'giftcard') {
+            const card = this.foundGiftCard();
+            return card !== null && card.status === 'ACTIVE' && !this.giftCardLookingUp();
         }
         return true;
     });
@@ -222,12 +264,51 @@ export class SalesPosComponent implements AfterViewInit {
         this.cart.update((lines) => lines.filter((l) => l.productId !== line.productId));
     }
 
-    /** Cambiar a `cash` descarta cualquier foto de voucher ya seleccionada. */
+    /** Cambiar de método limpia lo que no le pertenece (voucher QR / búsqueda de gift card). */
     setPaymentMethod(method: PosPaymentMethod): void {
         this.paymentMethod.set(method);
         if (method !== 'qr') {
             this.clearVoucherSelection();
         }
+        if (method !== 'giftcard') {
+            this.clearGiftCardSelection();
+        }
+    }
+
+    onGiftCardCodeSubmit(): void {
+        const code = this.giftCardCodeValue().trim();
+        if (!code || this.giftCardLookingUp()) return;
+
+        this.giftCardLookingUp.set(true);
+        this.giftCardsService.lookupByCode(code).subscribe({
+            next: (card) => this.onGiftCardLookupResult(card),
+            error: () => {
+                this.giftCardLookingUp.set(false);
+                this.giftCardCodeValue.set('');
+                this.toast.error('app.common.errors.general');
+            },
+        });
+    }
+
+    private onGiftCardLookupResult(card: GiftCard | null): void {
+        this.giftCardLookingUp.set(false);
+        this.giftCardCodeValue.set('');
+
+        if (!card) {
+            this.toast.error('app.sales.giftCard.codeNotFound');
+            return;
+        }
+        if (card.status !== 'ACTIVE') {
+            this.toast.error('app.sales.giftCard.notActive');
+            return;
+        }
+        this.foundGiftCard.set(card);
+    }
+
+    clearGiftCardSelection(): void {
+        this.foundGiftCard.set(null);
+        this.giftCardCodeValue.set('');
+        this.giftCardDifferenceMethod.set('cash');
     }
 
     async onVoucherSelected(event: Event): Promise<void> {
@@ -275,7 +356,38 @@ export class SalesPosComponent implements AfterViewInit {
         this.paymentMethod.set('cash');
         this.cashReceivedBs.set(null);
         this.clearVoucherSelection();
+        this.clearGiftCardSelection();
         this.focusScan();
+    }
+
+    /**
+     * Arma `payments[]` para `createSale` (plan §15.1, §16.3, prompt §20).
+     * El monto de la gift card que se manda es SOLO lo que el POS calculó
+     * para la UX — `createSale` lo recalcula desde la tarjeta real y
+     * rechaza si no coincide (plan §21): esta función nunca es la fuente de
+     * verdad del dinero, solo arma la intención.
+     */
+    private buildPayments(): CreateSalePaymentInput[] {
+        if (this.paymentMethod() !== 'giftcard') {
+            return [{ method: this.paymentMethod(), amountCents: this.totalCents() }];
+        }
+
+        const card = this.foundGiftCard();
+        if (!card) return [];
+
+        const payments: CreateSalePaymentInput[] = [
+            {
+                method: 'giftcard',
+                amountCents: this.giftCardAppliedCents(),
+                giftCardId: card.cardCode,
+                giftCardCycleId: card.activeCycleId!,
+            },
+        ];
+        const difference = this.giftCardDifferenceCents();
+        if (difference > 0) {
+            payments.push({ method: this.giftCardDifferenceMethod(), amountCents: difference });
+        }
+        return payments;
     }
 
     confirmSale(): void {
@@ -284,7 +396,11 @@ export class SalesPosComponent implements AfterViewInit {
             return;
         }
         if (!this.canConfirm()) {
-            this.toast.error('app.sales.messages.insufficientCash');
+            const message =
+                this.paymentMethod() === 'giftcard'
+                    ? 'app.sales.giftCard.searchFirst'
+                    : 'app.sales.messages.insufficientCash';
+            this.toast.error(message);
             return;
         }
 
@@ -294,9 +410,7 @@ export class SalesPosComponent implements AfterViewInit {
             productId: line.productId,
             quantity: line.quantity,
         }));
-        const payments: CreateSalePaymentInput[] = [
-            { method: this.paymentMethod(), amountCents: this.totalCents() },
-        ];
+        const payments: CreateSalePaymentInput[] = this.buildPayments();
         const customerName = this.customerName().trim() || undefined;
 
         this.salesService.createSale({ saleId, items, payments, customerName }).subscribe({

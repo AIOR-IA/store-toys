@@ -185,7 +185,91 @@
                     ></p-radioButton>
                     <label for="pm-qr">{{ "app.sales.payment.qr" | translate }}</label>
                 </div>
+                <div class="flex items-center gap-2">
+                    <p-radioButton
+                        name="paymentMethod"
+                        value="giftcard"
+                        inputId="pm-giftcard"
+                        [ngModel]="paymentMethod()"
+                        (ngModelChange)="setPaymentMethod($event)"
+                    ></p-radioButton>
+                    <label for="pm-giftcard">{{ "app.sales.payment.giftcard" | translate }}</label>
+                </div>
             </div>
+
+            @if (paymentMethod() === 'giftcard') {
+            <div class="flex flex-col gap-2 mt-2">
+                @if (!foundGiftCard()) {
+                <form (ngSubmit)="onGiftCardCodeSubmit()" class="flex gap-2">
+                    <input
+                        pInputText
+                        [ngModel]="giftCardCodeValue()"
+                        (ngModelChange)="giftCardCodeValue.set($event)"
+                        name="giftCardCodeValue"
+                        autocomplete="off"
+                        [placeholder]="'app.sales.giftCard.placeholder' | translate"
+                        class="flex-1"
+                    />
+                    <button
+                        pButton
+                        type="submit"
+                        icon="fas fa-magnifying-glass"
+                        [label]="'app.sales.giftCard.search' | translate"
+                        [loading]="giftCardLookingUp()"
+                    ></button>
+                </form>
+                } @else {
+                <div class="p-3 bg-primary-clear-soft rounded-md flex items-center justify-between">
+                    <div>
+                        <div class="font-mono font-semibold">{{ foundGiftCard()!.cardCode }}</div>
+                        <div class="text-sm text-gray-600">{{ foundGiftCard()!.amountCents | money }}</div>
+                    </div>
+                    <button
+                        pButton
+                        type="button"
+                        class="p-button-text p-button-sm"
+                        icon="fas fa-times"
+                        [label]="'app.sales.giftCard.change' | translate"
+                        (click)="clearGiftCardSelection()"
+                    ></button>
+                </div>
+
+                @if (giftCardForfeitCents() > 0) {
+                <div class="text-xs text-warning">
+                    {{ "app.sales.giftCard.forfeitWarning" | translate: { amount: (giftCardForfeitCents() | money) } }}
+                </div>
+                } @if (giftCardDifferenceCents() > 0) {
+                <div class="flex flex-col gap-2">
+                    <div class="text-xs text-gray-600">
+                        {{ "app.sales.giftCard.differenceLabel" | translate: { amount: (giftCardDifferenceCents() | money) } }}
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="flex items-center gap-2">
+                            <p-radioButton
+                                name="giftCardDifferenceMethod"
+                                value="cash"
+                                inputId="gcd-cash"
+                                [ngModel]="giftCardDifferenceMethod()"
+                                (ngModelChange)="giftCardDifferenceMethod.set($event)"
+                            ></p-radioButton>
+                            <label for="gcd-cash">{{ "app.sales.payment.cash" | translate }}</label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <p-radioButton
+                                name="giftCardDifferenceMethod"
+                                value="qr"
+                                inputId="gcd-qr"
+                                [ngModel]="giftCardDifferenceMethod()"
+                                (ngModelChange)="giftCardDifferenceMethod.set($event)"
+                            ></p-radioButton>
+                            <label for="gcd-qr">{{ "app.sales.payment.qr" | translate }}</label>
+                        </div>
+                    </div>
+                </div>
+                }
+                }
+            </div>
+            }
 
             @if (paymentMethod() === 'qr') {
             <div class="flex flex-col gap-2 mt-2">

@@ -14,7 +14,12 @@ import { adminGuard, authGuard } from '@core/session';
  * FASE 4: `/ventas` tampoco lleva `adminGuard` por la misma razón — admin y
  * vendedor comparten el POS. El historial de ventas restringe lo que cada
  * quien ve DENTRO del componente (plan §15.5, `sellerId` forzado para el
- * vendedor), no con un guard de ruta. Gift Cards todavía no existe (plan §11.2).
+ * vendedor), no con un guard de ruta.
+ *
+ * FASE 6: `/giftcards` tampoco lleva `adminGuard` — admin y vendedor
+ * comparten el mostrador de Gift Cards (CLAUDE.md, tabla de roles); lo que
+ * cada rol puede hacer se decide dentro del componente y, sobre todo, en las
+ * Functions/Rules (nunca solo escondiendo un botón).
  */
 export const routes: Routes = [
     {
@@ -40,6 +45,10 @@ export const routes: Routes = [
             {
                 path: 'productos',
                 loadChildren: () => import('./features/products/products.routes'),
+            },
+            {
+                path: 'giftcards',
+                loadChildren: () => import('./features/gift-cards/gift-cards.routes'),
             },
             {
                 path: 'usuarios',

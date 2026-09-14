@@ -22,6 +22,19 @@ export function buildSearchName(firstName: string, lastName: string): string {
 }
 
 /**
+ * Normaliza un código de gift card para usarlo como ID de `giftCards/{code}`
+ * (plan §16, prompt Fase 6 §3): el código se trata SIEMPRE como string
+ * opaco — puede ser numérico con ceros a la izquierda, alfanumérico o llevar
+ * guiones, según lo que finalmente imprima la imprenta. Espejo intencional
+ * de `normalizeGiftCardCode` en `core/utils/code.util.ts` del frontend
+ * (mismo criterio que `normalize()` arriba): trim + mayúsculas, sin eliminar
+ * ningún carácter significativo.
+ */
+export function normalizeGiftCardCode(code: string): string {
+    return code.trim().toUpperCase();
+}
+
+/**
  * Tokens de búsqueda por palabra completa (plan §12.2, `searchTokens`).
  * Espejo exacto de `buildSearchTokens` en `core/utils/normalize.util.ts` del
  * frontend — createUser los escribe aquí, el buscador los consulta desde el

@@ -231,19 +231,34 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 
 ### Gift Cards
 
-- Tres colecciones: `giftCards` (el plástico, ID = código impreso) ·
-  `giftCardIssues` (el saldo, con `remainingAmountCents`) ·
-  `giftCardMovements` (el libro mayor). Puntero `activeIssueId` para consultar saldo en 2 lecturas.
-- **Emitir una gift card NO es una venta.** No crea documento en `sales`. Es un pasivo.
-  Es lo que hace imposible la doble contabilización.
-- **Consumo total, sin saldo remanente** (`giftCardAllowsPartial: false`). Si la compra es
-  menor, el sobrante se extingue con un movimiento **`forfeit`** — así se mantiene
-  `Σ payments == totalCents` sin perder el rastro del dinero.
+- Tres colecciones: `giftCards` (el plástico, ID = código impreso normalizado) ·
+  `giftCardIssues` (un CICLO de uso) · `giftCardMovements` (el libro mayor, admin-only).
+  El estado completo (denominación, estado, comprador, ciclo) vive denormalizado en
+  `giftCards`: consultar una tarjeta cuesta **1 lectura**, no 2.
+- **Denominación fija**, decidida una sola vez al registrar la tarjeta física (la imprenta
+  la trae impresa) — nunca se elige un importe libre en cada venta.
+- Estados del plástico: `AVAILABLE` → `ACTIVE` → (`SUSPENDED` ⇄ `ACTIVE` por pérdida/robo) →
+  evento `REDEEMED` → `AVAILABLE` de nuevo. `CANCELLED` es terminal (solo admin, baja
+  definitiva del plástico). El plástico es reutilizable: cada activación abre un **ciclo**
+  nuevo (`cycleNumber`/`activeCycleId`) sin arrastrar el historial del dueño anterior.
+- `cycleNumber`/`activeCycleId` es el mecanismo anti-carrera: toda redención cita el ciclo
+  exacto que observó, y el servidor lo compara contra el vigente **dentro** de la
+  transacción — una operación sobre un ciclo viejo, o dos redenciones simultáneas del mismo
+  ciclo, se rechazan limpio (nunca doble gasto).
+- **Emitir/activar una gift card NO es una venta.** No crea documento en `sales`. Es un
+  pasivo. Es lo que hace imposible la doble contabilización.
+- **Consumo total, sin saldo remanente.** Si la compra es menor, el sobrante se extingue con
+  un movimiento **`FORFEITED`** — así se mantiene `Σ payments == totalCents` sin perder el
+  rastro del dinero.
 - Si la compra supera el valor de la tarjeta, la diferencia va en efectivo o QR: es el
   **único** pago mixto que la UI ofrece.
-- No caducan, no se recargan, el plástico se reutiliza. Emiten admin y vendedor; registrar
-  plástico nuevo es solo del admin.
-- Todo cambio de saldo nace con su movimiento **en la misma transacción**.
+- No caducan, no se recargan, el plástico se reutiliza. Activan admin y vendedor; registrar
+  plástico nuevo y cancelar definitivamente es solo del admin.
+- Todo cambio de estado nace con su movimiento **en la misma transacción**.
+- `cancelSale` revierte una gift card **solo si el ciclo sigue intacto** desde la redención
+  (nadie lo reactivó desde entonces); si ya se reutilizó, la anulación completa se rechaza
+  — decisión tomada en vivo con el cliente en la Fase 6 (plan §16.7), porque revertir a
+  ciegas podría pisar el ciclo de un comprador posterior.
 
 ### Reportes
 

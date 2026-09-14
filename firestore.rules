@@ -4,8 +4,16 @@ rules_version = '2';
 // (docs/architecture/mi-pimpollito-plan.md §10.2, §15), sin tocar nada de lo
 // que ya protegía la Fase 3 sobre `settings`/`counters`/`products`/`barcodes`.
 //
-// Deliberadamente SIGUE cerrado en esta fase — se abre en Fase 6:
-//   - `giftCards*`  → su fase.
+// FASE 6 — añade `giftCards`/`giftCardIssues`/`giftCardMovements` (plan §16,
+// §10.2, prompt Fase 6 §17, §35). Las tres son SOLO LECTURA desde el
+// cliente: `allow write: if false` sin excepción, ni para admin — registrar
+// una tarjeta, venderla/activarla, suspenderla, reactivarla, cancelarla
+// definitivamente y canjearla como pago son todas operaciones que exigen
+// leer y validar contra el estado real dentro de una transacción (ciclo
+// vigente, denominación, rol) — exactamente lo que ya justifica que `sales`
+// sea `allow write: if false` (arriba). Todo pasa por
+// `functions/src/giftcards.ts` y por el pago `giftcard` de `createSale`
+// (`functions/src/sales.ts`), nunca por un `updateDoc` libre desde Angular.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -126,6 +134,36 @@ service cloud.firestore {
     // `cancelSale` dentro de la misma transacción que la venta. El cierre de
     // caja es del admin.
     match /dailySummaries/{dateKey} {
+      allow get, list: if isAdmin();
+      allow write: if false;
+    }
+
+    // El PLÁSTICO (plan §16.1, §8.8): estado visible en 1 lectura
+    // (`status`, `amountCents`, `activeCycleId`, `currentBuyerName`…) — ya no
+    // hacen falta 2 lecturas (plástico + emisión) como preveía el plan
+    // original (§16.5): todo lo que el mostrador necesita para vender,
+    // suspender o reactivar está denormalizado aquí mismo. Admin y vendedor
+    // leen por igual (prompt §16: ambos operan el mostrador); nadie escribe
+    // directo — ver el comentario de arriba.
+    match /giftCards/{cardCode} {
+      allow get, list: if isStaff();
+      allow write: if false;
+    }
+
+    // Un CICLO de uso de una tarjeta (antes "emisión", plan §16.1). Con el
+    // estado corriente ya denormalizado en `giftCards` (arriba), el
+    // mostrador no necesita leer esto — el historial de ciclos es
+    // información de auditoría, igual que `giftCardMovements`: solo admin
+    // (mismo criterio que el plan ya aplicaba a `giftCardMovements`, §10.2).
+    match /giftCardIssues/{issueId} {
+      allow get, list: if isAdmin();
+      allow write: if false;
+    }
+
+    // El libro mayor, append-only (plan §16.1, §10.2): solo admin lee, nadie
+    // escribe desde el cliente — ni una Function bien intencionada podría
+    // crear un movimiento falso desde DevTools (prompt §35).
+    match /giftCardMovements/{moveId} {
       allow get, list: if isAdmin();
       allow write: if false;
     }

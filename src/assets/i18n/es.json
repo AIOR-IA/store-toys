@@ -261,6 +261,7 @@
         "title": "Forma de pago",
         "cash": "Efectivo",
         "qr": "QR",
+        "giftcard": "Gift Card",
         "received": "Efectivo recibido",
         "change": "Cambio"
       },
@@ -340,6 +341,100 @@
         "uploading": "Subiendo comprobante…",
         "attachSuccess": "Comprobante adjuntado correctamente.",
         "attachFailedDuringSale": "La venta se registró correctamente, pero el comprobante no se pudo adjuntar. Puedes intentarlo después desde el historial."
+      },
+      "giftCard": {
+        "placeholder": "Escanea o escribe el código de la gift card y presiona Enter",
+        "search": "Buscar",
+        "change": "Cambiar",
+        "codeNotFound": "No se encontró ninguna gift card con ese código.",
+        "notActive": "Esta gift card no está activa: no se puede usar como pago.",
+        "searchFirst": "Busca una gift card activa antes de confirmar.",
+        "forfeitWarning": "La compra es menor al valor de la tarjeta: se pierde el sobrante de {{amount}}.",
+        "forfeitedLabel": "Sobrante perdido: {{amount}}",
+        "differenceLabel": "Diferencia a cobrar: {{amount}}"
+      }
+    },
+    "giftCards": {
+      "title": "Gift Cards",
+      "list": "Tarjetas registradas",
+      "code": "Código",
+      "amount": "Monto",
+      "statusColumn": "Estado",
+      "cycle": "Ciclo",
+      "buyer": "Comprador",
+      "buyerNameOptional": "Nombre del comprador (opcional)",
+      "activatedAt": "Fecha de venta",
+      "activatedBy": "Vendido por",
+      "createdAt": "Registrada",
+      "suspensionReason": "Motivo de suspensión",
+      "cancelReason": "Motivo de baja",
+      "viewDetail": "Ver detalle",
+      "searchPlaceholder": "Buscar por código",
+      "availableCount": "Disponibles: {{count}}",
+      "status": {
+        "available": "Disponible",
+        "active": "Activa",
+        "suspended": "Suspendida",
+        "cancelled": "Cancelada"
+      },
+      "filters": {
+        "all": "Todas",
+        "denomination": "Denominación"
+      },
+      "actions": {
+        "activate": "Vender / Activar",
+        "suspend": "Reportar pérdida/robo",
+        "reactivate": "Reactivar",
+        "cancel": "Cancelar definitivamente"
+      },
+      "activate": {
+        "paymentMethod": "¿Cómo pagó el comprador la tarjeta?",
+        "amountHelp": "Se registra el pago completo de {{amount}}: las gift cards no admiten compra parcial."
+      },
+      "suspend": {
+        "reasonLabel": "Motivo (pérdida, robo…)"
+      },
+      "cancel": {
+        "warning": "Esta acción es definitiva: la tarjeta física nunca vuelve a estar disponible.",
+        "reasonLabel": "Motivo de la baja definitiva"
+      },
+      "register": {
+        "action": "Registrar tarjeta",
+        "title": "Registrar tarjetas nuevas",
+        "single": "Una tarjeta",
+        "batch": "Lote (una denominación)",
+        "amountHelp": "El monto queda fijo: es el valor impreso en el plástico.",
+        "codePlaceholder": "Código impreso en la tarjeta",
+        "codesLabel": "Códigos (uno por línea)",
+        "codesPlaceholder": "GC100-001\nGC100-002\nGC100-003",
+        "codesCount": "{{count}} código(s)"
+      },
+      "movements": {
+        "title": "Historial de movimientos",
+        "empty": "Sin movimientos todavía.",
+        "type": {
+          "REGISTERED": "Registrada",
+          "ACTIVATED": "Vendida/activada",
+          "SUSPENDED": "Suspendida",
+          "REACTIVATED": "Reactivada",
+          "REDEEMED": "Canjeada",
+          "FORFEITED": "Sobrante perdido",
+          "CANCELLED": "Baja definitiva",
+          "ADJUSTMENT": "Ajuste (anulación de venta)"
+        }
+      },
+      "messages": {
+        "registered": "Tarjeta(s) registrada(s) correctamente.",
+        "activated": "Tarjeta vendida/activada correctamente.",
+        "suspended": "Tarjeta suspendida correctamente.",
+        "reactivated": "Tarjeta reactivada correctamente.",
+        "cancelled": "Tarjeta dada de baja correctamente.",
+        "amountRequired": "Indica el monto de la tarjeta.",
+        "codeRequired": "Escribe el código de la tarjeta.",
+        "codesRequired": "Escribe al menos un código.",
+        "reasonRequired": "Escribe un motivo.",
+        "confirmReactivate": "¿Reactivar esta tarjeta? Vuelve a estar habilitada para canjearse.",
+        "confirmCancel": "¿Dar de baja esta tarjeta de forma definitiva? No se puede deshacer."
       }
     },
     "profile": {

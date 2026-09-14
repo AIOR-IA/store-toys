@@ -50,12 +50,41 @@ export class SaleReceiptService {
         return this.translate.instant(`app.sales.receipt.${key}`, params);
     }
 
+    /**
+     * Desglose real de `payments[]` (Fase 6, prompt de corrección de
+     * presentación): un pago mixto (gift card + la diferencia) mostraba antes
+     * `Pago: Gift Card + Efectivo    <totalCents>` — el total completo junto a
+     * los DOS métodos combinados, como si cada uno hubiera cubierto el total
+     * entero. Ahora cada método imprime su propio `amountCents` (el mismo
+     * snapshot que ya guardó `createSale`, nunca un recálculo) para que el
+     * dueño pueda ver de un vistazo cuánto entró por cada forma de pago.
+     */
+    private buildPaymentRows(sale: Sale): unknown[] {
+        return sale.payments.flatMap((payment) => {
+            const label = this.translate.instant(`app.sales.payment.${payment.method}`);
+            const rows: unknown[] = [
+                {
+                    columns: [
+                        { text: label, width: '*' },
+                        { text: this.money(payment.amountCents), width: 'auto', alignment: 'right' },
+                    ],
+                },
+            ];
+            if (payment.method === 'giftcard' && payment.giftCardCode) {
+                rows.push({
+                    text: `${this.t('columns.code')}: ${payment.giftCardCode}`,
+                    fontSize: 8,
+                    color: 'gray',
+                    margin: [0, 0, 0, 2] as [number, number, number, number],
+                });
+            }
+            return rows;
+        });
+    }
+
     private buildDocDefinition(sale: Sale, settings: AppSettings): unknown {
         const shortId = sale.id.slice(-8).toUpperCase();
         const dateStr = formatInStoreTimezone(sale.createdAt, settings.timezone);
-        const paymentLabel = sale.paymentMethods
-            .map((method) => this.translate.instant(`app.sales.payment.${method}`))
-            .join(' + ');
         const line = { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1 }] };
 
         return {
@@ -145,11 +174,15 @@ export class SaleReceiptService {
                     ],
                 },
                 {
+                    margin: [0, 4, 0, 0],
                     columns: [
                         { text: '', width: '*' },
                         {
-                            width: 'auto',
-                            text: `${this.t('payment')}: ${paymentLabel}    ${this.money(sale.totalCents)}`,
+                            width: 200,
+                            stack: [
+                                { text: this.translate.instant('app.sales.payment.title'), bold: true },
+                                ...this.buildPaymentRows(sale),
+                            ],
                         },
                     ],
                 },
