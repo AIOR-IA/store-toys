@@ -1,0 +1,41 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="!$event && close()"
+    [modal]="true"
+    [style]="{ width: '24rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="'app.products.labels.print' | translate"
+>
+    @if (product()) {
+    <div class="flex flex-col items-center gap-2">
+        <div class="bg-white p-3 rounded border border-gray-200">
+            <app-barcode-svg
+                [code]="product()!.code"
+                [format]="product()!.barcodeFormat"
+            ></app-barcode-svg>
+        </div>
+        <p class="text-sm font-medium text-center">{{ product()!.name }}</p>
+        <p class="text-xs text-gray-500">
+            {{ labelSize.width }}×{{ labelSize.height }} mm
+        </p>
+    </div>
+    }
+
+    <ng-template pTemplate="footer">
+        <button
+            pButton
+            type="button"
+            class="p-button-secondary"
+            [label]="'app.products.labels.close' | translate"
+            (click)="close()"
+        ></button>
+        <button
+            pButton
+            type="button"
+            icon="fas fa-print"
+            [label]="'app.products.labels.print' | translate"
+            (click)="print()"
+        ></button>
+    </ng-template>
+</p-dialog>

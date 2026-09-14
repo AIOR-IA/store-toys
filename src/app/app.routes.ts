@@ -6,8 +6,11 @@ import { adminGuard, authGuard } from '@core/session';
 /**
  * FASE 2: `/usuarios` cuelga del layout como cualquier otra ruta privada,
  * pero además exige `adminGuard` — un `user` autenticado y activo entra al
- * layout (pasa `authGuard`) pero no a este módulo. Todavía no existen las
- * rutas definitivas de Productos, Ventas, Gift Cards y Reportes (plan §11.2).
+ * layout (pasa `authGuard`) pero no a este módulo.
+ *
+ * FASE 3: `/productos` NO lleva `adminGuard` — admin y vendedor comparten el
+ * catálogo (CLAUDE.md, tabla de roles); `authGuard` ya basta. Ventas y Gift
+ * Cards todavía no existen (plan §11.2).
  */
 export const routes: Routes = [
     {
@@ -25,6 +28,10 @@ export const routes: Routes = [
                     import('./features/home/home.component').then(
                         (m) => m.HomeComponent,
                     ),
+            },
+            {
+                path: 'productos',
+                loadChildren: () => import('./features/products/products.routes'),
             },
             {
                 path: 'usuarios',

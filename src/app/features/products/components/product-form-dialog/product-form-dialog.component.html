@@ -1,0 +1,162 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="visibleChange.emit($event)"
+    [modal]="true"
+    [style]="{ width: '36rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="(isEdit() ? 'app.products.edit' : 'app.products.new') | translate"
+>
+    <form [formGroup]="form" (ngSubmit)="submit()" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="name">{{
+                "app.products.name" | translate
+            }}</label>
+            <input
+                #nameInput
+                pInputText
+                id="name"
+                formControlName="name"
+                class="w-full"
+            />
+            <div class="text-danger text-xs">
+                @if (form.get('name')?.touched &&
+                form.get('name')?.errors?.['required']) {
+                <p>*{{ "app.common.errors.required" | translate }}</p>
+                }
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="description">{{
+                "app.products.description" | translate
+            }}</label>
+            <textarea
+                pInputTextarea
+                id="description"
+                formControlName="description"
+                rows="2"
+                class="w-full"
+            ></textarea>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="priceBs">{{
+                    "app.products.price" | translate
+                }}</label>
+                <p-inputNumber
+                    inputId="priceBs"
+                    formControlName="priceBs"
+                    mode="currency"
+                    currency="BOB"
+                    locale="es-BO"
+                    [minFractionDigits]="2"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
+                <div class="text-danger text-xs">
+                    @if (form.get('priceBs')?.touched &&
+                    form.get('priceBs')?.errors?.['required']) {
+                    <p>*{{ "app.common.errors.required" | translate }}</p>
+                    } @if (form.get('priceBs')?.errors?.['min']) {
+                    <p>
+                        *{{
+                            "app.common.errors.min" | translate : { value: 0.01 }
+                        }}
+                    </p>
+                    }
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="stock">{{
+                    "app.products.stock" | translate
+                }}</label>
+                <p-inputNumber
+                    inputId="stock"
+                    formControlName="stock"
+                    [showButtons]="true"
+                    [min]="0"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
+                <div class="text-danger text-xs">
+                    @if (form.get('stock')?.touched &&
+                    form.get('stock')?.errors?.['required']) {
+                    <p>*{{ "app.common.errors.required" | translate }}</p>
+                    } @if (form.get('stock')?.errors?.['min']) {
+                    <p>*{{ "app.common.errors.min" | translate : { value: 0 } }}</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium">{{
+                "app.products.form.imageInfo" | translate
+            }}</label>
+            <div class="flex items-center gap-3">
+                @if (imagePreviewUrl()) {
+                <img
+                    [src]="imagePreviewUrl()"
+                    alt=""
+                    class="w-20 h-20 object-cover rounded border border-gray-200"
+                />
+                }
+                <label
+                    class="p-button p-button-outlined cursor-pointer text-sm inline-flex items-center gap-2"
+                >
+                    <i class="fas fa-camera"></i>
+                    {{
+                        (imagePreviewUrl()
+                            ? "app.products.form.changePicture"
+                            : "app.products.form.takePicture"
+                        ) | translate
+                    }}
+                    <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        class="hidden"
+                        (change)="onImageSelected($event)"
+                    />
+                </label>
+                @if (compressingImage()) {
+                <i class="fas fa-spinner fa-spin"></i>
+                }
+            </div>
+        </div>
+
+        @if (!isEdit()) {
+        <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium">{{
+                "app.products.form.codeInfo" | translate
+            }}</label>
+            <app-product-code-picker
+                (resolvedChange)="resolvedCode.set($event)"
+            ></app-product-code-picker>
+        </div>
+        }
+    </form>
+
+    <ng-template pTemplate="footer">
+        <button
+            pButton
+            type="button"
+            class="p-button-secondary"
+            [label]="'app.common.cancel' | translate"
+            (click)="close()"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="
+                (!isEdit() ? 'app.products.form.createAndNext' : 'app.common.save')
+                    | translate
+            "
+            [loading]="saving()"
+            (click)="submit()"
+        ></button>
+    </ng-template>
+</p-dialog>

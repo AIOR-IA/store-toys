@@ -1,28 +1,11 @@
 rules_version = '2';
 
-// FASE 2 — amplía lo mínimo de la Fase 1 sin abrir nada que esta fase no use
-// todavía (docs/architecture/mi-pimpollito-plan.md §10.2).
+// FASE 3 — añade `settings`, `counters`, `products` y `barcodes`
+// (docs/architecture/mi-pimpollito-plan.md §10.2), sin tocar nada de lo que
+// ya protegía la Fase 2 sobre `users`.
 //
-// Se abre en esta fase:
-//   - `get`/`list` de `users` para admin  → listado administrativo.
-//   - `update` de `users` para admin, restringida a los campos de perfil no
-//     privilegiados (nombre, CI, teléfono, dirección, `searchName`).
-//
-// Deliberadamente SIGUE cerrado en esta fase — TODO lo privilegiado pasa por
-// Cloud Functions con Admin SDK, nunca por escritura directa del cliente:
-//   - `create`/`delete` de `users`      → solo `createUser` (Admin SDK).
-//   - `role`                            → solo `setUserRole`, para que el
-//     custom claim de Authentication nunca quede desincronizado del
-//     documento (y para que "un admin no puede cambiar su propio rol" se
-//     aplique en un único lugar, no en la Rule también).
-//   - `isActive`                        → solo `setUserActive`, para que
-//     Firestore y el `disabled` de Authentication no se desincronicen (y
-//     mismo motivo de self-protection que `role`).
-//   - `email`/`emailLower`              → solo `updateUserAuth` (§7.5).
-//   - `createdAt`                       → nunca se reescribe.
-//   - edición de campos propios (self-service) → no hay pantalla que la use
-//     todavía; se abre cuando exista.
-//   - `settings`, `counters`, `products`, `sales`, `giftCards*`  → sus fases.
+// Deliberadamente SIGUE cerrado en esta fase — se abre en Fase 4 en adelante:
+//   - `sales`, `dailySummaries`, `giftCards*`  → sus fases.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -33,6 +16,7 @@ service cloud.firestore {
     }
     function isActive() { return signedIn() && me().isActive == true; }
     function isAdmin()  { return isActive() && me().role == 'admin'; }
+    function isStaff()  { return isActive() && (me().role == 'admin' || me().role == 'user'); }
 
     // campos que el cliente no puede tocar nunca, ni siquiera un admin
     function untouched(fields) {
@@ -53,6 +37,74 @@ service cloud.firestore {
       // privilegiados: esos SIEMPRE pasan por una Function (arriba).
       allow update: if isAdmin()
                     && untouched(['email', 'emailLower', 'createdAt', 'isActive', 'role']);
+    }
+
+    // Documento único de configuración (plan §8.3). Solo el par de campos que
+    // Productos consume hoy (`internalCodePrefix`, `lowStockThreshold`); el
+    // resto del modelo del plan (§8.3) se añade cuando su fase lo necesite —
+    // la Rule ya lo admite sin cambios porque no restringe campos.
+    match /settings/{docId} {
+      allow get: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow get: if isStaff();
+      // el generador de códigos internos: solo se puede incrementar de uno
+      // en uno (plan §14.2). `create` deliberadamente en `false`: el
+      // documento `counters/internalCode` se siembra una sola vez a mano
+      // (Admin SDK/consola), igual que el primer admin en la Fase 1 (§7.1) —
+      // así ni un admin puede reiniciar o falsear la secuencia desde el
+      // cliente.
+      allow update: if isStaff()
+                    && request.resource.data.seq == resource.data.seq + 1;
+      allow create, delete: if false;
+    }
+
+    match /products/{productId} {
+      allow get, list: if isStaff();        // el vendedor necesita el catálogo
+
+      // el vendedor CREA productos (decisión confirmada por el cliente,
+      // plan §2.1 C-3)
+      allow create: if isStaff()
+        && request.resource.data.priceCents is int
+        && request.resource.data.priceCents > 0
+        && request.resource.data.stock is int
+        && request.resource.data.imagePath is string
+        && request.resource.data.imagePath.size() > 0   // imagen obligatoria
+        && request.resource.data.isActive == true
+        && request.resource.data.createdBySellerId == request.auth.uid;
+
+      // el admin edita todo, incluido el precio y el código
+      allow update: if isAdmin()
+        && request.resource.data.priceCents is int
+        && request.resource.data.priceCents > 0
+        && request.resource.data.stock is int
+        && request.resource.data.imagePath is string
+        && request.resource.data.imagePath.size() > 0
+        && untouched(['createdAt', 'createdBySellerId', 'createdBySellerName']);
+
+      // el vendedor edita lo no sensible: nunca el precio, el código ni el
+      // estado (activar/inactivar sigue siendo del admin)
+      allow update: if isStaff()
+        && untouched(['priceCents', 'code', 'codeSource', 'barcodeFormat',
+                      'isActive', 'createdAt',
+                      'createdBySellerId', 'createdBySellerName'])
+        && request.resource.data.stock is int
+        && request.resource.data.imagePath.size() > 0;
+
+      allow delete: if false;               // soft delete con isActive
+    }
+
+    // Índice técnico código → producto (plan §14.1). No es un módulo del
+    // menú: el catálogo, el escaneo y la unicidad del código lo resuelven a
+    // través de aquí, nunca consultando `products` por campo.
+    match /barcodes/{code} {
+      allow get: if isStaff();              // el escaneo lo resuelve el vendedor
+      allow list: if isAdmin();
+      allow create: if isStaff();           // se crea junto al producto, en la misma transacción
+      allow delete: if isAdmin();           // solo al cambiar el código (admin)
+      allow update: if false;               // un código no se reasigna: se borra y se crea
     }
 
     match /{document=**} { allow read, write: if false; }

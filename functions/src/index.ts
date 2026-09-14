@@ -13,6 +13,12 @@
 // FASE 2 — Users
 export { createUser, setUserActive, setUserRole, updateUserAuth } from './users';
 
+// FASE 3 — utilidad de bootstrap: resincroniza el custom claim propio con
+// Firestore (necesaria porque el primer admin se siembra a mano, sin pasar
+// por createUser/setUserRole — las únicas Functions que hoy escriben el
+// claim). Ver el comentario en functions/src/users.ts.
+export { syncMyRoleClaim } from './users';
+
 // FASE 4 — Ventas: createSale, cancelSale
 // FASE 5 — Voucher QR: attachVoucher
 // FASE 6 — Gift Cards: issueGiftCard, cancelGiftCardIssue

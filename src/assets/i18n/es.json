@@ -151,6 +151,80 @@
         "deactivated": "Usuario desactivado correctamente."
       }
     },
+    "products": {
+      "title": "Productos",
+      "list": "Catálogo de productos",
+      "new": "Nuevo producto",
+      "edit": "Editar producto",
+      "name": "Nombre",
+      "description": "Descripción",
+      "price": "Precio",
+      "stock": "Stock",
+      "code": "Código",
+      "codeSource": "Origen",
+      "image": "Imagen",
+      "searchPlaceholder": "Buscar por nombre o código",
+      "codeSourceValues": {
+        "manufacturer": "Fabricante",
+        "internal": "Interno"
+      },
+      "status": {
+        "active": "Activo",
+        "inactive": "Inactivo"
+      },
+      "filters": {
+        "all": "Todos",
+        "active": "Activos",
+        "inactive": "Inactivos",
+        "lowStock": "Stock bajo"
+      },
+      "form": {
+        "basicInfo": "Información básica",
+        "codeInfo": "Código de barras",
+        "imageInfo": "Imagen del producto",
+        "manufacturerCode": "Código de fabricante",
+        "manufacturerCodePlaceholder": "Escanea o escribe el código",
+        "generateInternalCode": "Generar código interno",
+        "codeGenerated": "Código interno generado: {{code}}",
+        "changePicture": "Cambiar imagen",
+        "takePicture": "Tomar foto",
+        "chooseFile": "Elegir archivo",
+        "createAndNext": "Guardar y cargar otro"
+      },
+      "changeCode": {
+        "title": "Cambiar código",
+        "action": "Cambiar código"
+      },
+      "labels": {
+        "title": "Etiquetas",
+        "print": "Imprimir etiqueta",
+        "selectProducts": "Selecciona los productos",
+        "quantity": "Cantidad",
+        "generatePdf": "Generar PDF",
+        "close": "Cerrar"
+      },
+      "chips": {
+        "lowStock": "Stock bajo",
+        "negativeStock": "Stock negativo"
+      },
+      "breadcrumbs": {
+        "main": "Catálogo",
+        "list": "Productos",
+        "new": "Nuevo producto",
+        "edit": "Editar producto"
+      },
+      "messages": {
+        "confirmActivate": "¿Activar \"{{name}}\"?",
+        "confirmDeactivate": "¿Inactivar \"{{name}}\"? Dejará de aparecer para la venta.",
+        "activated": "Producto activado correctamente.",
+        "deactivated": "Producto inactivado correctamente.",
+        "duplicateCode": "Ese código ya pertenece a otro producto.",
+        "counterNotSeeded": "El generador de códigos internos no está configurado todavía. Contacta al administrador.",
+        "imageRequired": "Debes subir una imagen del producto.",
+        "codeRequired": "Escribe el código de fabricante o genera uno interno.",
+        "codeChanged": "Código actualizado correctamente."
+      }
+    },
     "profile": {
       "title": "Perfil",
       "changePassword": "Cambiar contraseña",

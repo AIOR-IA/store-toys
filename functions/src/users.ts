@@ -1,7 +1,7 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { auth as adminAuth, db } from './admin';
-import { assertAdmin } from './guards';
+import { assertActive, assertAdmin } from './guards';
 import { buildSearchName, buildSearchTokens, normalize } from './normalize';
 
 /**
@@ -340,5 +340,32 @@ export const setUserRole = onCall<SetUserRoleData>(
         }
 
         return { uid, role };
+    },
+);
+
+/**
+ * Resincroniza el custom claim de rol del propio usuario autenticado con el
+ * valor que ya tiene en Firestore.
+ *
+ * Segura por construcción: solo puede actuar sobre `request.auth.uid` — el
+ * propio llamante —, nunca sobre otro uid, así que no abre ninguna vía para
+ * escalar privilegios; el rol que aplica es exactamente el que ya está
+ * guardado en su documento, no uno enviado por el cliente.
+ *
+ * Hace falta porque `createUser` y `setUserRole` son las dos únicas
+ * Functions que escriben el claim, y el primer administrador se siembra a
+ * mano directo en Firestore (plan §7.1) sin pasar por ninguna de las dos:
+ * nace sin custom claim. Las Storage Rules (Fase 3) solo pueden leer el
+ * claim —no Firestore (plan §10.4)— así que sin este claim, cualquier
+ * cuenta sembrada a mano no puede subir imágenes de producto aunque su
+ * documento diga `role: 'admin'`.
+ */
+export const syncMyRoleClaim = onCall(
+    { region: REGION },
+    async (request) => {
+        const snap = await assertActive(request.auth);
+        const role = snap.get('role');
+        await adminAuth.setCustomUserClaims(request.auth!.uid, { role });
+        return { role };
     },
 );

@@ -1,10 +1,28 @@
 rules_version = '2';
 
-// FASE 0B — deny-by-default. Ningún path se abre todavía.
-// products/, qr-vouchers/ y users/ se habilitan en sus fases
-// (docs/architecture/mi-pimpollito-plan.md §10.4). Nunca "if true" en producción.
+// FASE 3 — abre products/{productId}/{file} (plan §10.4). qr-vouchers/ y
+// users/ siguen cerrados: sus fases (§10.4).
+//
+// Storage Rules no pueden consultar Firestore, así que el rol llega en el
+// custom claim de Authentication (§7.6) — ya lo mantiene sincronizado
+// `setUserRole` desde la Fase 2. Nunca "if true" en producción.
 service firebase.storage {
   match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+    function isStaff()  { return signedIn() &&
+                          request.auth.token.role in ['admin', 'user']; }
+    function isImage(max) {
+      return request.resource.contentType.matches('image/(jpeg|png|webp)')
+          && request.resource.size < max;
+    }
+
+    match /products/{productId}/{file} {
+      allow read:   if signedIn();
+      allow write:  if isStaff() && isImage(2 * 1024 * 1024);
+      allow delete: if isStaff();
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

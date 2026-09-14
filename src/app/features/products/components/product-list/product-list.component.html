@@ -1,0 +1,168 @@
+<app-title-bar
+    [title]="'app.products.title' | translate"
+    [description]="'app.products.list' | translate"
+    [newLabel]="'app.products.new' | translate"
+    (onClickNew)="openCreate()"
+></app-title-bar>
+
+<div class="flex justify-end mb-2">
+    <button
+        pButton
+        type="button"
+        class="p-button-text"
+        icon="fas fa-tags"
+        [label]="'app.products.labels.title' | translate"
+        routerLink="etiquetas"
+    ></button>
+</div>
+
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+    <app-filter-tab
+        [options]="filterOptions"
+        [selectedOption]="filter()"
+        (onChange)="onFilterChange($event)"
+    ></app-filter-tab>
+
+    @if (!searchDisabled()) {
+    <app-search-bar
+        [placeholder]="'app.products.searchPlaceholder'"
+        [compact]="true"
+        (onSearch)="onSearch($event)"
+    ></app-search-bar>
+    }
+</div>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!rows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p-table [value]="rows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+    <ng-template pTemplate="header">
+        <tr>
+            <th></th>
+            <th>{{ "app.products.name" | translate }}</th>
+            <th>{{ "app.products.code" | translate }}</th>
+            <th>{{ "app.products.codeSource" | translate }}</th>
+            <th>{{ "app.products.price" | translate }}</th>
+            <th>{{ "app.products.stock" | translate }}</th>
+            <th>{{ "app.products.status.active" | translate }}</th>
+            <th class="text-right">{{ "app.common.actions" | translate }}</th>
+        </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-product>
+        <tr>
+            <td>
+                <img
+                    [src]="product.imageUrl"
+                    alt=""
+                    class="w-10 h-10 object-cover rounded"
+                />
+            </td>
+            <td>{{ product.name }}</td>
+            <td class="font-mono text-sm">{{ product.code }}</td>
+            <td>
+                <p-tag
+                    [value]="('app.products.codeSourceValues.' + product.codeSource) | translate"
+                    [severity]="product.codeSource === 'internal' ? 'info' : 'secondary'"
+                ></p-tag>
+            </td>
+            <td>{{ product.priceCents | money }}</td>
+            <td>
+                <span [class.text-danger]="product.stock < 0" [class.font-semibold]="product.stock <= lowStockThreshold()">
+                    {{ product.stock }}
+                </span>
+                @if (product.stock < 0) {
+                <p-tag [value]="'app.products.chips.negativeStock' | translate" severity="danger"></p-tag>
+                } @else if (product.stock <= lowStockThreshold()) {
+                <p-tag [value]="'app.products.chips.lowStock' | translate" severity="warning"></p-tag>
+                }
+            </td>
+            <td>
+                <p-tag
+                    [value]="(product.isActive ? 'app.products.status.active' : 'app.products.status.inactive') | translate"
+                    [severity]="product.isActive ? 'success' : 'danger'"
+                ></p-tag>
+            </td>
+            <td class="text-right whitespace-nowrap">
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-pencil-alt"
+                    class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.common.edit' | translate"
+                    (click)="openEdit(product)"
+                ></button>
+                @if (product.codeSource === 'internal') {
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-print"
+                    class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.products.labels.print' | translate"
+                    (click)="openLabel(product)"
+                ></button>
+                }
+                @if (isAdmin()) {
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-barcode"
+                    class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.products.changeCode.action' | translate"
+                    (click)="openChangeCode(product)"
+                ></button>
+                <button
+                    pButton
+                    type="button"
+                    [icon]="product.isActive ? 'fas fa-toggle-on' : 'fas fa-toggle-off'"
+                    class="p-button-text p-button-rounded"
+                    [class.text-danger]="product.isActive"
+                    [class.text-green-600]="!product.isActive"
+                    [pTooltip]="(product.isActive ? 'app.common.disable' : 'app.common.activate') | translate"
+                    (click)="confirmToggleActive(product)"
+                ></button>
+                }
+            </td>
+        </tr>
+    </ng-template>
+</p-table>
+}
+
+<!--
+  Fuera del bloque de arriba a propósito, igual que en Usuarios (Fase 2):
+  montar/desmontar el paginador en cada carga dispara un evento espurio del
+  `p-dropdown` de tamaño de página que reintroduce el loop de Firestore.
+-->
+@if (hasLoadedOnce() && !singleResultMode()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+}
+
+<app-product-form-dialog
+    [visible]="formVisible()"
+    [product]="editingProduct()"
+    (visibleChange)="formVisible.set($event)"
+    (saved)="onSaved()"
+></app-product-form-dialog>
+
+<app-product-label-dialog
+    [product]="labelProduct()"
+    (closed)="labelProduct.set(null)"
+></app-product-label-dialog>
+
+<app-product-change-code-dialog
+    [product]="changeCodeProduct()"
+    (closed)="changeCodeProduct.set(null)"
+    (saved)="onSaved()"
+></app-product-change-code-dialog>

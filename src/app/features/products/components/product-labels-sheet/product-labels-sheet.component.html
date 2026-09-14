@@ -1,0 +1,52 @@
+<app-title-bar
+    [title]="'app.products.labels.title' | translate"
+    backPath="/productos"
+></app-title-bar>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!rows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p class="text-sm text-gray-500 mb-3">
+    {{ "app.products.labels.selectProducts" | translate }}
+</p>
+
+<div class="flex flex-col gap-2 mb-4">
+    @for (row of rows(); track row.product.id) {
+    <div class="flex items-center gap-3 border-b border-gray-100 py-2">
+        <p-checkbox
+            [binary]="true"
+            [ngModel]="row.selected"
+            (ngModelChange)="toggleSelected(row, $event)"
+        ></p-checkbox>
+        <img
+            [src]="row.product.imageUrl"
+            alt=""
+            class="w-8 h-8 object-cover rounded"
+        />
+        <span class="flex-1 text-sm">{{ row.product.name }}</span>
+        <span class="text-xs text-gray-400 font-mono">{{ row.product.code }}</span>
+        <p-inputNumber
+            [ngModel]="row.quantity"
+            (ngModelChange)="setQuantity(row, $event)"
+            [min]="1"
+            [max]="999"
+            [showButtons]="true"
+            [disabled]="!row.selected"
+            styleClass="w-24"
+        ></p-inputNumber>
+    </div>
+    }
+</div>
+
+<button
+    pButton
+    type="button"
+    icon="fas fa-file-pdf"
+    [label]="'app.products.labels.generatePdf' | translate"
+    [loading]="generating()"
+    [disabled]="!hasSelection()"
+    (click)="generatePdf()"
+></button>
+}

@@ -15,7 +15,7 @@ import { provideHttpClient } from '@angular/common/http';
 //PrimeNg
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { provideAnimations } from '@angular/platform-browser/animations';
-import { registerLocaleData } from '@angular/common';
+import { CurrencyPipe, registerLocaleData } from '@angular/common';
 import localeEs from '@angular/common/locales/es';
 import { provideTranslation } from '@core/config';
 import { provideFirebase } from '@core/firebase/firebase.providers';
@@ -43,5 +43,10 @@ export const appConfig: ApplicationConfig = {
     provideAnimations(),
     { provide: LOCALE_ID, useValue: 'es' },
     { provide: DEFAULT_CURRENCY_CODE, useValue: 'BOB' },
+    // `MoneyPipe` (plan §17.1) lo inyecta con `inject(CurrencyPipe)` en vez
+    // de usarlo como pipe de plantilla — por eso necesita estar registrado
+    // como provider explícito; el pipe no se auto-provee solo por importar
+    // `CommonModule`.
+    CurrencyPipe,
   ],
 };

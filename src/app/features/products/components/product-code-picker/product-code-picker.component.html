@@ -1,0 +1,73 @@
+<div class="flex flex-col gap-3">
+    <div class="flex flex-wrap gap-2">
+        <button
+            pButton
+            type="button"
+            icon="fas fa-barcode"
+            [label]="'app.products.form.manufacturerCode' | translate"
+            [class.p-button-outlined]="mode() !== 'manufacturer'"
+            [disabled]="disabled()"
+            (click)="selectManufacturer()"
+        ></button>
+        <button
+            pButton
+            type="button"
+            icon="fas fa-wand-magic-sparkles"
+            [label]="'app.products.form.generateInternalCode' | translate"
+            [class.p-button-outlined]="mode() !== 'internal'"
+            [disabled]="disabled()"
+            (click)="selectInternal()"
+        ></button>
+    </div>
+
+    @if (mode() === 'manufacturer') {
+    <div class="flex flex-col gap-1">
+        <input
+            pInputText
+            autofocus
+            [ngModel]="manufacturerCode()"
+            (ngModelChange)="onManufacturerCodeInput($event)"
+            [placeholder]="'app.products.form.manufacturerCodePlaceholder' | translate"
+            [disabled]="disabled()"
+            class="w-full"
+        />
+        @if (!resolved()) {
+        <p class="text-danger text-xs">
+            *{{ "app.products.messages.codeRequired" | translate }}
+        </p>
+        }
+    </div>
+    }
+
+    @if (mode() === 'internal') {
+    <div class="flex flex-col gap-2">
+        @if (!generatedCode()) {
+        <button
+            pButton
+            type="button"
+            class="p-button-secondary"
+            [label]="'app.products.form.generateInternalCode' | translate"
+            [loading]="generating()"
+            [disabled]="disabled()"
+            (click)="generateCode()"
+        ></button>
+        } @else {
+        <p class="text-sm font-medium">
+            {{
+                "app.products.form.codeGenerated"
+                    | translate : { code: generatedCode() }
+            }}
+        </p>
+        }
+    </div>
+    }
+
+    @if (resolved()) {
+    <div class="bg-white p-2 rounded border border-gray-200 flex justify-center">
+        <app-barcode-svg
+            [code]="resolved()!.code"
+            [format]="previewFormat()"
+        ></app-barcode-svg>
+    </div>
+    }
+</div>
