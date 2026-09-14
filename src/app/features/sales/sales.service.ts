@@ -82,6 +82,57 @@ export class SalesService {
         return from(callable({ saleId, reason })).pipe(map((result) => result.data));
     }
 
+    /**
+     * Adjunta el voucher de un pago QR vía `attachVoucher` (Fase 5): la
+     * imagen (ya comprimida por `ImageCompressorService`) viaja en base64
+     * dentro del propio payload del callable — `attachVoucher` es quien sube
+     * el archivo a Storage con el Admin SDK, DESPUÉS de validar ownership
+     * sobre `sales/{saleId}` directamente. `qr-vouchers/` en Storage Rules es
+     * `allow write: if false` sin excepciones: el cliente nunca escribe ahí
+     * (decisión tomada en vivo al auditar ownership — ver el comentario de
+     * `attachVoucher` en `functions/src/sales.ts` y el de `storage.rules`).
+     *
+     * La venta ya existe y ya está completa cuando esto se llama: si falla,
+     * el error se informa, pero NUNCA revierte ni invalida la venta (prompt
+     * §5, §13).
+     */
+    attachVoucherWithUpload(
+        saleId: string,
+        paymentIndex: number,
+        image: Blob,
+    ): Observable<{ saleId: string }> {
+        return from(this.doAttachVoucherWithUpload(saleId, paymentIndex, image));
+    }
+
+    private async doAttachVoucherWithUpload(
+        saleId: string,
+        paymentIndex: number,
+        image: Blob,
+    ): Promise<{ saleId: string }> {
+        const fileBase64 = await this.blobToBase64(image);
+        const contentType = image.type || 'image/webp';
+
+        const callable = httpsCallable<
+            { saleId: string; paymentIndex: number; fileBase64: string; contentType: string },
+            { saleId: string }
+        >(this.functions, 'attachVoucher');
+        const result = await callable({ saleId, paymentIndex, fileBase64, contentType });
+        return result.data;
+    }
+
+    /** `data:...;base64,XXXX` → solo `XXXX`, lo que espera `attachVoucher`. */
+    private blobToBase64(blob: Blob): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const result = reader.result as string;
+                resolve(result.slice(result.indexOf(',') + 1));
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+        });
+    }
+
     getSale(saleId: string): Observable<Sale | null> {
         return from(getDoc(doc(this.salesCollection, saleId))).pipe(
             map((snap) => (snap.exists() ? snap.data() : null)),

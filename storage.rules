@@ -1,11 +1,37 @@
 rules_version = '2';
 
-// FASE 3 — abre products/{productId}/{file} (plan §10.4). qr-vouchers/ y
-// users/ siguen cerrados: sus fases (§10.4).
+// FASE 3 — abre products/{productId}/{file} (plan §10.4).
+// FASE 5 — abre qr-vouchers/{saleId}/{file} para LECTURA (plan §10.4, §21):
+// el voucher es EVIDENCIA OPCIONAL de un pago QR, nunca obligatoria
+// (decisión de negocio explícita de la Fase 5 — ver el comentario de
+// `attachVoucher` en functions/src/sales.ts).
 //
-// Storage Rules no pueden consultar Firestore, así que el rol llega en el
-// custom claim de Authentication (§7.6) — ya lo mantiene sincronizado
-// `setUserRole` desde la Fase 2. Nunca "if true" en producción.
+// `qr-vouchers/` es `allow write: if false` SIN EXCEPCIONES — el cliente
+// nunca escribe ahí, ni siquiera el propio dueño de la venta. Solo
+// `attachVoucher` (Cloud Function, Admin SDK) sube el archivo, después de
+// validar ownership/rol/estado leyendo `sales/{saleId}` directamente
+// (fuente de verdad real, plan §10.2).
+//
+// Decisión tomada en vivo durante la auditoría de seguridad de la Fase 5:
+// la primera versión de esta Rule intentaba validar ownership AQUÍ mismo,
+// con `firestore.get()`/`firestore.exists()` (cross-service Storage Rules)
+// sobre `sales/{saleId}.sellerId` — compiló y desplegó sin ningún error,
+// pero SIEMPRE denegó en este proyecto, incluso para el dueño legítimo de
+// la venta con la condición más simple posible. Investigado: Firebase
+// requiere un binding de IAM (`firebaserules.firestoreServiceAgent`) para
+// que Storage pueda leer Firestore, que normalmente se auto-aprovisiona al
+// usar la función por primera vez — no ocurrió para este proyecto (o
+// requiere un consentimiento manual desde la Consola que el CLI no dispara),
+// y no hay manera de diagnosticar/corregir ese IAM desde este entorno (sin
+// `gcloud`). En vez de dejar la funcionalidad bloqueada a la espera de una
+// pieza de infraestructura fuera de este código, la autorización se movió
+// ENTERA a `attachVoucher`: ninguna escritura de cliente a este path existe
+// ya, así que no hace falta ninguna condición de propiedad en la Rule — no
+// hay ninguna vía de escritura de cliente a la que aplicarla.
+//
+// `products/` sigue con el rol en el custom claim de Authentication (§7.6)
+// — ya lo mantiene sincronizado `setUserRole` desde la Fase 2. Nunca
+// "if true" en producción.
 service firebase.storage {
   match /b/{bucket}/o {
 
@@ -21,6 +47,11 @@ service firebase.storage {
       allow read:   if signedIn();
       allow write:  if isStaff() && isImage(2 * 1024 * 1024);
       allow delete: if isStaff();
+    }
+
+    match /qr-vouchers/{saleId}/{file} {
+      allow read:  if isStaff();
+      allow write: if false;
     }
 
     match /{allPaths=**} {

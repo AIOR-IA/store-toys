@@ -146,6 +146,21 @@ export class SalesHistoryComponent implements OnInit {
         this.loadFirstPage();
     }
 
+    /**
+     * Adjuntar un voucher (Fase 5) actualiza la venta SIN recargar la
+     * página completa (prompt §6): el diálogo ya volvió a leer el documento
+     * fresco, así que aquí solo se propaga esa copia al detalle y a la fila
+     * correspondiente del listado.
+     */
+    onSaleUpdated(sale: Sale): void {
+        this.detailSale.set(sale);
+        this.rows.update((rows) => rows.map((row) => (row.id === sale.id ? sale : row)));
+    }
+
+    hasVoucher(sale: Sale): boolean {
+        return sale.payments.some((p) => p.method === 'qr' && p.voucherStatus === 'uploaded');
+    }
+
     private loadFirstPage(): void {
         this.loading.set(true);
         this.pager = this.salesService.createPager(this.currentFilter(), this.pageSize());

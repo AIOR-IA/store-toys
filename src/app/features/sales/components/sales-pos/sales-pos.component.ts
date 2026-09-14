@@ -20,7 +20,7 @@ import { RadioButtonModule } from 'primeng/radiobutton';
 import { TableModule } from 'primeng/table';
 import { TooltipModule } from 'primeng/tooltip';
 import { MoneyPipe } from '@shared/pipes';
-import { ToastService } from '@core/services';
+import { ImageCompressorService, ToastService } from '@core/services';
 import { toCents } from '@core/utils';
 import { Product } from '../../../products/product.model';
 import { ProductsService } from '../../../products/products.service';
@@ -63,6 +63,7 @@ export class SalesPosComponent implements AfterViewInit {
     private readonly productsService = inject(ProductsService);
     private readonly salesService = inject(SalesService);
     private readonly receiptService = inject(SaleReceiptService);
+    private readonly imageCompressor = inject(ImageCompressorService);
     private readonly toast = inject(ToastService);
     private readonly confirmationService = inject(ConfirmationService);
     private readonly translate = inject(TranslateService);
@@ -77,6 +78,18 @@ export class SalesPosComponent implements AfterViewInit {
     cashReceivedBs = signal<number | null>(null);
     confirming = signal(false);
     lastSale = signal<Sale | null>(null);
+
+    /**
+     * Comprobante QR OPCIONAL (Fase 5, prompt §5): se elige y comprime ANTES
+     * de confirmar, pero se sube DESPUÉS de que `createSale` ya haya
+     * registrado la venta — nunca se acopla críticamente. Si la venta se
+     * confirma sin foto seleccionada, o si el adjunto posterior falla, la
+     * venta sigue completa igual.
+     */
+    voucherImage = signal<Blob | null>(null);
+    voucherPreviewUrl = signal<string | null>(null);
+    compressingVoucher = signal(false);
+    attachingVoucher = signal(false);
 
     readonly totalCents = computed(() =>
         this.cart().reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0),
@@ -209,6 +222,41 @@ export class SalesPosComponent implements AfterViewInit {
         this.cart.update((lines) => lines.filter((l) => l.productId !== line.productId));
     }
 
+    /** Cambiar a `cash` descarta cualquier foto de voucher ya seleccionada. */
+    setPaymentMethod(method: PosPaymentMethod): void {
+        this.paymentMethod.set(method);
+        if (method !== 'qr') {
+            this.clearVoucherSelection();
+        }
+    }
+
+    async onVoucherSelected(event: Event): Promise<void> {
+        const fileInput = event.target as HTMLInputElement;
+        const file = fileInput.files?.[0];
+        if (!file) return;
+
+        this.compressingVoucher.set(true);
+        try {
+            const blob = await this.imageCompressor.compressVoucherImage(file);
+            this.voucherImage.set(blob);
+            this.voucherPreviewUrl.set(URL.createObjectURL(blob));
+        } catch {
+            this.toast.error('app.common.errors.general');
+        } finally {
+            this.compressingVoucher.set(false);
+            fileInput.value = '';
+        }
+    }
+
+    clearVoucherSelection(): void {
+        this.voucherImage.set(null);
+        this.voucherPreviewUrl.set(null);
+    }
+
+    hasUploadedVoucher(sale: Sale): boolean {
+        return sale.payments.some((p) => p.method === 'qr' && p.voucherStatus === 'uploaded');
+    }
+
     onClearCart(): void {
         if (!this.cart().length) return;
 
@@ -226,6 +274,7 @@ export class SalesPosComponent implements AfterViewInit {
         this.customerName.set('');
         this.paymentMethod.set('cash');
         this.cashReceivedBs.set(null);
+        this.clearVoucherSelection();
         this.focusScan();
     }
 
@@ -257,12 +306,19 @@ export class SalesPosComponent implements AfterViewInit {
     }
 
     private onSaleCreated(saleId: string): void {
+        // Se capturan ANTES de `resetCart()`, que los vacía para la próxima
+        // venta — la foto ya comprimida sigue viva en esta variable local.
+        const pendingVoucher = this.paymentMethod() === 'qr' ? this.voucherImage() : null;
+
         this.salesService.getSale(saleId).subscribe({
             next: (sale) => {
                 this.confirming.set(false);
                 this.toast.success('app.sales.messages.saleCreated');
                 this.lastSale.set(sale);
                 this.resetCart();
+                if (pendingVoucher) {
+                    this.attachPendingVoucher(saleId, pendingVoucher);
+                }
             },
             error: () => {
                 // La venta ya se creó en servidor (esto solo recarga el snapshot
@@ -270,6 +326,39 @@ export class SalesPosComponent implements AfterViewInit {
                 this.confirming.set(false);
                 this.toast.success('app.sales.messages.saleCreated');
                 this.resetCart();
+                if (pendingVoucher) {
+                    this.attachPendingVoucher(saleId, pendingVoucher);
+                }
+            },
+        });
+    }
+
+    /**
+     * Sube y adjunta el voucher elegido durante la venta (prompt §5): si
+     * falla, la venta YA está completa y registrada — solo se informa que el
+     * comprobante no se pudo adjuntar y que se puede reintentar después
+     * desde el historial. Nunca revierte ni marca la venta como inválida.
+     */
+    private attachPendingVoucher(saleId: string, image: Blob): void {
+        this.attachingVoucher.set(true);
+        this.salesService.attachVoucherWithUpload(saleId, 0, image).subscribe({
+            next: () => {
+                this.salesService.getSale(saleId).subscribe({
+                    next: (sale) => {
+                        this.attachingVoucher.set(false);
+                        if (sale && this.lastSale()?.id === saleId) {
+                            this.lastSale.set(sale);
+                        }
+                        this.toast.success('app.sales.voucher.attachSuccess');
+                    },
+                    error: () => this.attachingVoucher.set(false),
+                });
+            },
+            error: () => {
+                this.attachingVoucher.set(false);
+                this.toast.errorMessage(
+                    this.translate.instant('app.sales.voucher.attachFailedDuringSale'),
+                );
             },
         });
     }

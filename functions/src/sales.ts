@@ -1,6 +1,7 @@
-import { FieldValue } from 'firebase-admin/firestore';
+import { randomUUID } from 'crypto';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { db } from './admin';
+import { db, storage } from './admin';
 import { assertActive, assertAdmin } from './guards';
 import { dateKeys } from './date-keys';
 
@@ -19,6 +20,12 @@ const REGION = 'southamerica-west1';
 const MAX_ITEMS = 50;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
 const MAX_CANCEL_REASON_LENGTH = 300;
+const MAX_VOUCHER_BYTES = 3 * 1024 * 1024;
+const VOUCHER_EXTENSION_BY_MIME: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+};
 
 type PaymentMethod = 'cash' | 'qr';
 const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'qr'];
@@ -43,6 +50,14 @@ interface CreateSaleData {
 interface CancelSaleData {
     saleId: string;
     reason: string;
+}
+
+interface AttachVoucherData {
+    saleId: string;
+    paymentIndex: number;
+    /** Imagen ya comprimida en el cliente (`compressVoucherImage`), codificada en base64. */
+    fileBase64: string;
+    contentType: string;
 }
 
 function requireDocId(value: unknown, field: string): string {
@@ -480,4 +495,172 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
     });
 
     return { saleId, status: 'cancelled' as const };
+});
+
+/**
+ * Verifica que `saleId`/`paymentIndex` admitan un voucher nuevo: la venta
+ * existe, quien llama es su dueño (o admin), sigue `completed`, el pago en
+ * ese índice es `qr`, y todavía no tiene `voucherStatus: 'uploaded'`.
+ * Se llama DOS veces desde `attachVoucher` — antes de subir el archivo (para
+ * no gastar una subida en algo que se va a rechazar) y otra vez dentro de la
+ * transacción que escribe la metadata (por si algo cambió entre medio) —
+ * así que vive en una sola función en vez de duplicar los cinco chequeos.
+ */
+function assertVoucherAttachable(
+    saleSnap: FirebaseFirestore.DocumentSnapshot,
+    paymentIndex: number,
+    role: string,
+    uid: string,
+): Record<string, unknown>[] {
+    if (!saleSnap.exists) {
+        throw new HttpsError('not-found', 'Venta no encontrada.');
+    }
+    if (role !== 'admin' && saleSnap.get('sellerId') !== uid) {
+        throw new HttpsError(
+            'permission-denied',
+            'Solo puedes adjuntar comprobantes de tus propias ventas.',
+        );
+    }
+    if (saleSnap.get('status') !== 'completed') {
+        throw new HttpsError(
+            'failed-precondition',
+            'No se puede adjuntar un comprobante a una venta anulada.',
+        );
+    }
+    const payments = (saleSnap.get('payments') as Record<string, unknown>[]) ?? [];
+    const payment = payments[paymentIndex];
+    if (!payment || payment.method !== 'qr') {
+        throw new HttpsError('failed-precondition', 'Ese pago no es un pago por QR.');
+    }
+    if (payment.voucherStatus === 'uploaded') {
+        throw new HttpsError(
+            'already-exists',
+            'Este pago ya tiene un comprobante adjunto: no se puede reemplazar.',
+        );
+    }
+    return payments;
+}
+
+/**
+ * Adjunta el comprobante de un pago QR (plan §21, Fase 5). El voucher es
+ * OPCIONAL: `createSale` nunca lo exige (decisión de negocio explícita que
+ * prevalece sobre cualquier lectura anterior del plan) — `attachVoucher` solo
+ * existe para asociar, cuando el vendedor lo tenga a mano, la evidencia de un
+ * pago que la venta ya registró como completo.
+ *
+ * SUBE el archivo a Storage ella misma, vía Admin SDK (`storage.bucket()`),
+ * en vez de que el cliente suba directo y esta Function solo valide la
+ * metadata después. Cambio de diseño hecho en vivo durante la auditoría de
+ * seguridad de la Fase 5: la versión anterior dependía de Storage Rules con
+ * `firestore.get()` para verificar que `sales/{saleId}.sellerId` fuera quien
+ * sube — esa función de Storage Rules (cross-service rules) compiló y
+ * desplegó sin error, pero SIEMPRE denegó en este proyecto (probablemente
+ * falta el binding de IAM `firebaserules.firestoreServiceAgent` que Firebase
+ * normalmente auto-aprovisiona). Subir vía Admin SDK evita depender de esa
+ * pieza de infraestructura por completo: la autorización real ocurre aquí,
+ * ANTES de tocar Storage, sobre el propio documento de la venta — ni
+ * siquiera existe una ventana en la que un archivo no autorizado pueda
+ * llegar a `qr-vouchers/`. `sales` sigue con `allow write: if false` en las
+ * Rules: esta Function solo toca el sub-objeto del voucher dentro de
+ * `payments[]`, nunca `totalCents`, `items`, `sellerId` ni ningún otro campo.
+ *
+ * Inmutable por diseño (plan §15, Fase 5): si `voucherStatus` ya es
+ * `'uploaded'`, se rechaza — un comprobante adjunto no se reemplaza ni se
+ * borra. `qr-vouchers/` en Storage Rules ahora es `allow write: if false`
+ * sin excepciones: el cliente NUNCA escribe ahí directo, solo esta Function
+ * (Admin SDK), así que no hace falta ninguna condición de propiedad en la
+ * Rule — ya no hay ninguna vía de escritura de cliente a la que aplicarla.
+ */
+export const attachVoucher = onCall<AttachVoucherData>({ region: REGION }, async (request) => {
+    const staffSnap = await assertActive(request.auth);
+    const role = staffSnap.get('role') as string;
+    if (role !== 'admin' && role !== 'user') {
+        throw new HttpsError('permission-denied', 'Rol no autorizado.');
+    }
+    const uid = request.auth!.uid;
+
+    const saleId = requireDocId(request.data.saleId, 'saleId');
+
+    const paymentIndex = request.data.paymentIndex;
+    if (typeof paymentIndex !== 'number' || !Number.isInteger(paymentIndex) || paymentIndex < 0) {
+        throw new HttpsError('invalid-argument', 'Índice de pago inválido.');
+    }
+
+    const contentType = request.data.contentType;
+    const extension = VOUCHER_EXTENSION_BY_MIME[contentType as string];
+    if (!extension) {
+        throw new HttpsError('invalid-argument', 'Formato de imagen no admitido.');
+    }
+
+    const fileBase64 = request.data.fileBase64;
+    if (typeof fileBase64 !== 'string' || !fileBase64) {
+        throw new HttpsError('invalid-argument', 'Falta el archivo del comprobante.');
+    }
+    const buffer = Buffer.from(fileBase64, 'base64');
+    if (buffer.length === 0 || buffer.length > MAX_VOUCHER_BYTES) {
+        throw new HttpsError('invalid-argument', 'El comprobante debe pesar menos de 3 MB.');
+    }
+
+    const saleRef = db.doc(`sales/${saleId}`);
+
+    // Autorización PRIMERO, sin tocar Storage todavía: evita gastar una
+    // subida en un archivo que de todas formas se va a rechazar.
+    const preCheckSnap = await saleRef.get();
+    assertVoucherAttachable(preCheckSnap, paymentIndex, role, uid);
+
+    // `firebaseStorageDownloadTokens` es el mecanismo que usa
+    // `getDownloadURL()` del SDK de cliente — el Admin SDK no lo genera
+    // solo, así que se agrega a mano para que "Ver comprobante" siga
+    // funcionando exactamente igual que con una subida de cliente.
+    const voucherPath = `qr-vouchers/${saleId}/${Date.now()}.${extension}`;
+    const downloadToken = randomUUID();
+    const bucket = storage.bucket();
+    const file = bucket.file(voucherPath);
+    await file.save(buffer, {
+        contentType,
+        metadata: { metadata: { firebaseStorageDownloadTokens: downloadToken } },
+    });
+    const voucherUrl =
+        `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
+        `${encodeURIComponent(voucherPath)}?alt=media&token=${downloadToken}`;
+
+    try {
+        await db.runTransaction(async (tx) => {
+            const saleSnap = await tx.get(saleRef);
+            const payments = assertVoucherAttachable(saleSnap, paymentIndex, role, uid);
+
+            // `FieldValue.serverTimestamp()` no se admite dentro de un
+            // elemento de arreglo (Firestore lo rechaza en tiempo de
+            // ejecución) — por eso `voucherUploadedAt` usa `Timestamp.now()`,
+            // un valor normal, en vez del sentinel que sí funciona en campos
+            // de nivel superior como `updatedAt`.
+            const updatedPayments = payments.map((p, index) =>
+                index === paymentIndex
+                    ? {
+                          ...p,
+                          voucherStatus: 'uploaded',
+                          voucherPath,
+                          voucherUrl,
+                          voucherUploadedAt: Timestamp.now(),
+                          voucherUploadedBy: uid,
+                      }
+                    : p,
+            );
+
+            tx.update(saleRef, {
+                payments: updatedPayments,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        });
+    } catch (error) {
+        // Carrera perdida entre el pre-check y este commit (rara a esta
+        // escala, pero posible): el archivo recién subido queda huérfano.
+        // A diferencia de una subida directa del cliente, el Admin SDK SÍ
+        // puede limpiarlo — Storage Rules no le aplica a estas llamadas.
+        await file.delete().catch(() => undefined);
+        if (error instanceof HttpsError) throw error;
+        throw new HttpsError('internal', 'No se pudo adjuntar el comprobante. Intenta nuevamente.');
+    }
+
+    return { saleId };
 });

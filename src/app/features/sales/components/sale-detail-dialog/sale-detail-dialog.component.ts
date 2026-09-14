@@ -7,12 +7,16 @@ import { DialogModule } from 'primeng/dialog';
 import { InputTextareaModule } from 'primeng/inputtextarea';
 import { TagModule } from 'primeng/tag';
 import { MoneyPipe } from '@shared/pipes';
-import { SettingsService, ToastService } from '@core/services';
+import { ImageCompressorService, SettingsService, ToastService } from '@core/services';
 import { formatInStoreTimezone } from '@core/utils/date.util';
 import { AppSettings } from '@core/models';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { SalesService } from '../../sales.service';
-import { Sale } from '../../sale.model';
+import { Payment, Sale } from '../../sale.model';
+
+interface QrPaymentRow extends Payment {
+    index: number;
+}
 
 /**
  * Detalle de una venta (plan §15.5, alcance Fase 4: "Detalle de venta").
@@ -38,6 +42,7 @@ export class SaleDetailDialogComponent {
     private readonly salesService = inject(SalesService);
     private readonly receiptService = inject(SaleReceiptService);
     private readonly settingsService = inject(SettingsService);
+    private readonly imageCompressor = inject(ImageCompressorService);
     private readonly toast = inject(ToastService);
 
     sale = input<Sale | null>(null);
@@ -45,16 +50,37 @@ export class SaleDetailDialogComponent {
 
     closed = output<void>();
     cancelled = output<void>();
+    /** Se emite cuando un voucher se adjunta (Fase 5): el padre reemplaza su copia de la venta. */
+    saleUpdated = output<Sale>();
 
     readonly visible = computed(() => this.sale() !== null);
     readonly canCancel = computed(
         () => this.isAdmin() && this.sale()?.status === 'completed',
     );
 
+    /**
+     * Un voucher solo se puede adjuntar sobre una venta `completed` (prompt
+     * §19): la opción conservadora, ya que el plan no define política para
+     * ventas anuladas — una anulada solo permite VER el voucher histórico.
+     */
+    readonly canAttachVoucher = computed(() => this.sale()?.status === 'completed');
+    readonly qrPayments = computed<QrPaymentRow[]>(() => {
+        const sale = this.sale();
+        if (!sale) return [];
+        return sale.payments
+            .map((payment, index) => ({ ...payment, index }))
+            .filter((payment) => payment.method === 'qr');
+    });
+
     showCancelForm = signal(false);
     cancelReason = signal('');
     cancelling = signal(false);
     printing = signal(false);
+
+    attachTargetIndex = signal<number | null>(null);
+    attachingIndex = signal<number | null>(null);
+    compressingVoucher = signal(false);
+    voucherViewerUrl = signal<string | null>(null);
 
     private settings: AppSettings | null = null;
 
@@ -65,7 +91,73 @@ export class SaleDetailDialogComponent {
     close(): void {
         this.showCancelForm.set(false);
         this.cancelReason.set('');
+        this.voucherViewerUrl.set(null);
         this.closed.emit();
+    }
+
+    openFilePicker(index: number, fileInput: HTMLInputElement): void {
+        this.attachTargetIndex.set(index);
+        fileInput.click();
+    }
+
+    async onVoucherFileSelected(event: Event): Promise<void> {
+        const fileInput = event.target as HTMLInputElement;
+        const file = fileInput.files?.[0];
+        const index = this.attachTargetIndex();
+        const sale = this.sale();
+        if (!file || index === null || !sale) return;
+
+        this.compressingVoucher.set(true);
+        let blob: Blob;
+        try {
+            blob = await this.imageCompressor.compressVoucherImage(file);
+        } catch {
+            this.compressingVoucher.set(false);
+            fileInput.value = '';
+            this.toast.error('app.common.errors.general');
+            return;
+        }
+        this.compressingVoucher.set(false);
+        fileInput.value = '';
+
+        this.attachingIndex.set(index);
+        this.salesService.attachVoucherWithUpload(sale.id, index, blob).subscribe({
+            next: () => this.refreshAfterAttach(sale.id),
+            error: (error) => {
+                this.attachingIndex.set(null);
+                const message = (error as { message?: string })?.message;
+                const code = (error as { code?: string })?.code;
+                if (code?.startsWith('functions/') && message) {
+                    this.toast.errorMessage(message);
+                    return;
+                }
+                this.toast.error('app.common.errors.general');
+            },
+        });
+    }
+
+    private refreshAfterAttach(saleId: string): void {
+        this.salesService.getSale(saleId).subscribe({
+            next: (sale) => {
+                this.attachingIndex.set(null);
+                if (sale) {
+                    this.toast.success('app.sales.voucher.attachSuccess');
+                    this.saleUpdated.emit(sale);
+                }
+            },
+            error: () => {
+                this.attachingIndex.set(null);
+                this.toast.error('app.common.errors.general');
+            },
+        });
+    }
+
+    viewVoucher(url: string): void {
+        this.voucherViewerUrl.set(url);
+    }
+
+    closeVoucherViewer(): void {
+        this.voucherViewerUrl.set(null);
     }
 
     formattedDate(sale: Sale): string {

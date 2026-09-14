@@ -16,10 +16,28 @@ export interface Payment {
     method: PaymentMethod;
     amountCents: number;
 
-    // solo si method === 'qr' (Fase 5)
+    /**
+     * Voucher del pago QR (Fase 5) — EVIDENCIA OPCIONAL, nunca una condición
+     * para que la venta esté completa (decisión de negocio explícita: cobrar
+     * y atender tiene prioridad sobre sacar la foto).
+     *
+     * `'pending'` NO significa "venta incompleta" ni genera ninguna alerta,
+     * bloqueo u obligación — es el estado inicial neutral de todo pago QR, y
+     * puede quedarse así para siempre. `createSale` lo escribe así; solo
+     * `attachVoucher` (Function) lo sella a `'uploaded'`, de forma
+     * INMUTABLE: un voucher `'uploaded'` no se reemplaza ni se borra.
+     *
+     * Invariante server-side: `voucherStatus === 'uploaded'` implica
+     * `voucherPath`/`voucherUrl` presentes; en cualquier otro caso (incluida
+     * la ausencia del campo, en pagos `cash` o en ventas previas a la Fase
+     * 5) no existen. Nunca se migran datos históricos: una venta QR sin
+     * imagen de Fase 4 sigue siendo una venta completa y válida.
+     */
     voucherStatus?: 'pending' | 'uploaded';
     voucherUrl?: string;
     voucherPath?: string;
+    voucherUploadedAt?: Timestamp;
+    voucherUploadedBy?: string;
 
     // solo si method === 'giftcard' (Fase 6)
     giftCardIssueId?: string;

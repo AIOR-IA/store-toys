@@ -65,6 +65,19 @@
                 @for (method of sale.paymentMethods; track method) {
                 <p-tag [value]="('app.sales.payment.' + method) | translate" severity="secondary" class="mr-1"></p-tag>
                 }
+                @if (sale.paymentMethods.includes('qr')) {
+                <i
+                    class="fas fa-image"
+                    [class.text-green-600]="hasVoucher(sale)"
+                    [class.text-gray-300]="!hasVoucher(sale)"
+                    [pTooltip]="
+                        (hasVoucher(sale)
+                            ? 'app.sales.voucher.attachedLabel'
+                            : 'app.sales.voucher.notAttached'
+                        ) | translate
+                    "
+                ></i>
+                }
             </td>
             <td>
                 <p-tag
@@ -107,4 +120,5 @@
     [isAdmin]="isAdmin()"
     (closed)="detailSale.set(null)"
     (cancelled)="onSaleCancelled()"
+    (saleUpdated)="onSaleUpdated($event)"
 ></app-sale-detail-dialog>

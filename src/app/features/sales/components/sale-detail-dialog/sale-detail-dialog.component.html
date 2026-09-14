@@ -80,6 +80,60 @@
             </span>
         </div>
 
+        @if (qrPayments().length) {
+        <div class="flex flex-col gap-2 border-t border-gray-200 pt-3">
+            <span class="text-sm font-medium">{{ "app.sales.voucher.sectionTitle" | translate }}</span>
+            @for (payment of qrPayments(); track payment.index) {
+            <div class="flex items-center justify-between text-sm bg-gray-50 rounded p-2">
+                <div class="flex items-center gap-2">
+                    <span>{{ payment.amountCents | money }}</span>
+                    @if (payment.voucherStatus === 'uploaded') {
+                    <p-tag
+                        [value]="'app.sales.voucher.attachedLabel' | translate"
+                        severity="success"
+                    ></p-tag>
+                    } @else {
+                    <p-tag
+                        [value]="'app.sales.voucher.notAttached' | translate"
+                        severity="secondary"
+                    ></p-tag>
+                    }
+                </div>
+                <div class="flex items-center gap-2">
+                    @if (payment.voucherStatus === 'uploaded' && payment.voucherUrl; as voucherUrl) {
+                    <button
+                        pButton
+                        type="button"
+                        class="p-button-text p-button-sm"
+                        icon="fas fa-image"
+                        [label]="'app.sales.voucher.viewAction' | translate"
+                        (click)="viewVoucher(voucherUrl)"
+                    ></button>
+                    } @else if (canAttachVoucher()) {
+                    <input
+                        #voucherFileInput
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        class="hidden"
+                        (change)="onVoucherFileSelected($event)"
+                    />
+                    <button
+                        pButton
+                        type="button"
+                        class="p-button-text p-button-sm"
+                        icon="fas fa-paperclip"
+                        [label]="'app.sales.voucher.attachAction' | translate"
+                        [loading]="attachingIndex() === payment.index || compressingVoucher()"
+                        (click)="openFilePicker(payment.index, voucherFileInput)"
+                    ></button>
+                    }
+                </div>
+            </div>
+            }
+        </div>
+        }
+
         @if (sale.status === 'cancelled') {
         <div class="text-sm text-danger bg-red-50 border border-red-200 rounded p-3">
             {{ sale.cancelReason }}
@@ -146,4 +200,18 @@
             (click)="close()"
         ></button>
     </ng-template>
+</p-dialog>
+
+<p-dialog
+    [visible]="voucherViewerUrl() !== null"
+    (visibleChange)="!$event && closeVoucherViewer()"
+    [modal]="true"
+    [dismissableMask]="true"
+    [draggable]="false"
+    [style]="{ width: '90vw', maxWidth: '640px' }"
+    [header]="'app.sales.voucher.dialogTitle' | translate"
+>
+    @if (voucherViewerUrl(); as url) {
+    <img [src]="url" class="w-full h-auto rounded" alt="" />
+    }
 </p-dialog>

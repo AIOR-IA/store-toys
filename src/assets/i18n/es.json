@@ -325,6 +325,21 @@
         "total": "TOTAL",
         "payment": "Pago",
         "footer": "Gracias por su compra · No se aceptan devoluciones"
+      },
+      "voucher": {
+        "sectionTitle": "Comprobante de pago QR",
+        "optional": "Comprobante QR (opcional)",
+        "helpText": "Puedes adjuntarlo ahora o hacerlo más tarde desde el historial.",
+        "selectPhoto": "Seleccionar foto",
+        "removeSelection": "Quitar",
+        "attachAction": "Adjuntar comprobante",
+        "viewAction": "Ver comprobante",
+        "attachedLabel": "Comprobante adjunto",
+        "notAttached": "Sin comprobante",
+        "dialogTitle": "Comprobante de pago QR",
+        "uploading": "Subiendo comprobante…",
+        "attachSuccess": "Comprobante adjuntado correctamente.",
+        "attachFailedDuringSale": "La venta se registró correctamente, pero el comprobante no se pudo adjuntar. Puedes intentarlo después desde el historial."
       }
     },
     "profile": {
