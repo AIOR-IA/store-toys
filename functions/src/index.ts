@@ -20,5 +20,7 @@ export { createUser, setUserActive, setUserRole, updateUserAuth } from './users'
 export { syncMyRoleClaim } from './users';
 
 // FASE 4 — Ventas: createSale, cancelSale
+export { createSale, cancelSale } from './sales';
+
 // FASE 5 — Voucher QR: attachVoucher
 // FASE 6 — Gift Cards: issueGiftCard, cancelGiftCardIssue

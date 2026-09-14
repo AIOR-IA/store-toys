@@ -48,6 +48,23 @@
         { "fieldPath": "isActive", "order": "ASCENDING" },
         { "fieldPath": "stock", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dateKey", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sellerId", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

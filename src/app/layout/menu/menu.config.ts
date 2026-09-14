@@ -16,15 +16,21 @@ export interface MenuEntry {
  * dentro de `translate.get('app').subscribe(...)` (una dependencia asíncrona
  * que dejaba el sidebar vacío en el arranque).
  *
- * Solo lleva las rutas que **ya existen**. Ventas y Gift Cards aparecen aquí
- * cuando sus fases construyan la pantalla real — antes sería un enlace que
- * cae en el "no encontrado" (plan §11.1).
+ * Solo lleva las rutas que **ya existen**. Gift Cards aparece aquí cuando su
+ * fase construya la pantalla real — antes sería un enlace que cae en el "no
+ * encontrado" (plan §11.1).
  */
 export const MENU: MenuEntry[] = [
     {
         label: 'app.menu.home',
         icon: 'fas fa-house',
         routerLink: ['/'],
+        roles: ['admin', 'user'],
+    },
+    {
+        label: 'app.menu.sales',
+        icon: 'fas fa-cash-register',
+        routerLink: ['/ventas'],
         roles: ['admin', 'user'],
     },
     {

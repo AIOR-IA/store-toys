@@ -1,0 +1,110 @@
+<app-title-bar
+    [title]="'app.sales.history' | translate"
+    backPath="/ventas"
+></app-title-bar>
+
+<div class="flex flex-col md:flex-row md:items-center gap-4 mb-4">
+    <div class="flex flex-col gap-1">
+        <label class="text-sm font-medium">{{ "app.sales.historyPage.date" | translate }}</label>
+        <p-calendar
+            [ngModel]="selectedDate()"
+            (ngModelChange)="onDateChange($event)"
+            dateFormat="dd/mm/yy"
+            [showIcon]="true"
+            [maxDate]="selectedDate()"
+        ></p-calendar>
+    </div>
+
+    @if (isAdmin()) {
+    <div class="flex flex-col gap-1">
+        <label class="text-sm font-medium">{{ "app.sales.historyPage.seller" | translate }}</label>
+        <p-dropdown
+            [options]="sellers()"
+            optionLabel="name"
+            optionValue="uid"
+            [showClear]="true"
+            [placeholder]="'app.sales.historyPage.allSellers' | translate"
+            [ngModel]="sellerId()"
+            (ngModelChange)="onSellerChange($event)"
+            styleClass="w-full md:w-64"
+        ></p-dropdown>
+    </div>
+    }
+</div>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!rows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p-table [value]="rows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+    <ng-template pTemplate="header">
+        <tr>
+            <th>{{ "app.sales.historyPage.columns.number" | translate }}</th>
+            <th>{{ "app.sales.historyPage.columns.time" | translate }}</th>
+            @if (isAdmin()) {
+            <th>{{ "app.sales.historyPage.columns.seller" | translate }}</th>
+            }
+            <th>{{ "app.sales.historyPage.columns.items" | translate }}</th>
+            <th>{{ "app.sales.historyPage.columns.total" | translate }}</th>
+            <th>{{ "app.sales.historyPage.columns.payment" | translate }}</th>
+            <th>{{ "app.sales.historyPage.columns.status" | translate }}</th>
+            <th class="text-right">{{ "app.common.actions" | translate }}</th>
+        </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-sale>
+        <tr>
+            <td class="font-mono text-sm">{{ sale.id.slice(-8).toUpperCase() }}</td>
+            <td>{{ sale.createdAt?.toDate() | date : "HH:mm" }}</td>
+            @if (isAdmin()) {
+            <td>{{ sale.sellerName }}</td>
+            }
+            <td>{{ sale.items.length }}</td>
+            <td>{{ sale.totalCents | money }}</td>
+            <td>
+                @for (method of sale.paymentMethods; track method) {
+                <p-tag [value]="('app.sales.payment.' + method) | translate" severity="secondary" class="mr-1"></p-tag>
+                }
+            </td>
+            <td>
+                <p-tag
+                    [value]="('app.sales.historyPage.status.' + sale.status) | translate"
+                    [severity]="sale.status === 'completed' ? 'success' : 'danger'"
+                ></p-tag>
+            </td>
+            <td class="text-right">
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-eye"
+                    class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.sales.historyPage.detail' | translate"
+                    (click)="openDetail(sale)"
+                ></button>
+            </td>
+        </tr>
+    </ng-template>
+</p-table>
+}
+
+@if (hasLoadedOnce()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+}
+
+<app-sale-detail-dialog
+    [sale]="detailSale()"
+    [isAdmin]="isAdmin()"
+    (closed)="detailSale.set(null)"
+    (cancelled)="onSaleCancelled()"
+></app-sale-detail-dialog>

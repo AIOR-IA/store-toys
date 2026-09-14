@@ -1,0 +1,149 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="!$event && close()"
+    [modal]="true"
+    [style]="{ width: '40rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="'app.sales.historyPage.detail' | translate"
+>
+    @if (sale(); as sale) {
+    <div class="flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="font-mono font-semibold">{{ sale.id.slice(-8).toUpperCase() }}</div>
+                <div class="text-sm text-gray-500">{{ formattedDate(sale) }} (La Paz)</div>
+            </div>
+            <p-tag
+                [value]="('app.sales.historyPage.status.' + sale.status) | translate"
+                [severity]="sale.status === 'completed' ? 'success' : 'danger'"
+            ></p-tag>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+                <div class="text-gray-500">{{ "app.sales.receipt.servedBy" | translate }}</div>
+                <div class="font-medium">{{ sale.sellerName }}</div>
+            </div>
+            <div>
+                <div class="text-gray-500">{{ "app.sales.receipt.client" | translate }}</div>
+                <div class="font-medium">
+                    {{ sale.customerName ?? ("app.sales.receipt.anonymous" | translate) }}
+                </div>
+            </div>
+        </div>
+
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-gray-500 border-b border-gray-200">
+                    <th class="py-1">{{ "app.sales.receipt.columns.code" | translate }}</th>
+                    <th>{{ "app.sales.receipt.columns.product" | translate }}</th>
+                    <th class="text-center">
+                        {{ "app.sales.receipt.columns.quantity" | translate }}
+                    </th>
+                    <th class="text-right">
+                        {{ "app.sales.receipt.columns.unitPrice" | translate }}
+                    </th>
+                    <th class="text-right">
+                        {{ "app.sales.receipt.columns.subtotal" | translate }}
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (item of sale.items; track item.productId) {
+                <tr class="border-b border-gray-100">
+                    <td class="py-1 font-mono">{{ item.code }}</td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-center">{{ item.quantity }}</td>
+                    <td class="text-right">{{ item.unitPriceCents | money }}</td>
+                    <td class="text-right">{{ item.subtotalCents | money }}</td>
+                </tr>
+                }
+            </tbody>
+        </table>
+
+        <div class="flex items-center justify-between font-semibold text-lg">
+            <span>{{ "app.sales.receipt.total" | translate }}</span>
+            <span>{{ sale.totalCents | money }}</span>
+        </div>
+
+        <div class="flex items-center justify-between text-sm text-gray-600">
+            <span>{{ "app.sales.receipt.payment" | translate }}</span>
+            <span>
+                @for (method of sale.paymentMethods; track method) {
+                <p-tag
+                    [value]="('app.sales.payment.' + method) | translate"
+                    severity="secondary"
+                    class="mr-1"
+                ></p-tag>
+                }
+            </span>
+        </div>
+
+        @if (sale.status === 'cancelled') {
+        <div class="text-sm text-danger bg-red-50 border border-red-200 rounded p-3">
+            {{ sale.cancelReason }}
+        </div>
+        }
+
+        @if (showCancelForm()) {
+        <div class="flex flex-col gap-2 border-t border-gray-200 pt-4">
+            <label class="text-sm font-medium">{{
+                "app.sales.messages.cancelReasonLabel" | translate
+            }}</label>
+            <textarea
+                pInputTextarea
+                rows="2"
+                class="w-full"
+                [ngModel]="cancelReason()"
+                (ngModelChange)="cancelReason.set($event)"
+            ></textarea>
+            <div class="flex justify-end gap-2">
+                <button
+                    pButton
+                    type="button"
+                    class="p-button-secondary"
+                    [label]="'app.common.cancel' | translate"
+                    (click)="cancelCancelForm()"
+                ></button>
+                <button
+                    pButton
+                    type="button"
+                    class="p-button-danger"
+                    [label]="'app.sales.historyPage.cancelAction' | translate"
+                    [loading]="cancelling()"
+                    (click)="confirmCancel()"
+                ></button>
+            </div>
+        </div>
+        }
+    </div>
+    }
+
+    <ng-template pTemplate="footer">
+        @if (canCancel() && !showCancelForm()) {
+        <button
+            pButton
+            type="button"
+            class="p-button-danger p-button-text"
+            [label]="'app.sales.historyPage.cancelAction' | translate"
+            (click)="openCancelForm()"
+        ></button>
+        }
+        <button
+            pButton
+            type="button"
+            class="p-button-secondary"
+            icon="fas fa-print"
+            [label]="'app.sales.historyPage.reprint' | translate"
+            [loading]="printing()"
+            (click)="print()"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="'app.common.close' | translate"
+            (click)="close()"
+        ></button>
+    </ng-template>
+</p-dialog>

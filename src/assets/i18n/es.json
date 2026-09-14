@@ -225,6 +225,108 @@
         "codeChanged": "Código actualizado correctamente."
       }
     },
+    "sales": {
+      "title": "Ventas",
+      "pos": "Punto de venta",
+      "history": "Historial de ventas",
+      "breadcrumbs": {
+        "main": "Ventas",
+        "pos": "Punto de venta",
+        "history": "Historial"
+      },
+      "scan": {
+        "label": "Código del producto",
+        "placeholder": "Escanea o escribe el código y presiona Enter",
+        "add": "Agregar"
+      },
+      "cart": {
+        "title": "Carrito",
+        "empty": "El carrito está vacío. Escanea o escribe un código para empezar.",
+        "code": "Código",
+        "product": "Producto",
+        "price": "Precio",
+        "quantity": "Cant.",
+        "subtotal": "Subtotal",
+        "stock": "Stock",
+        "remove": "Quitar",
+        "clear": "Vaciar carrito",
+        "confirmClear": "¿Vaciar el carrito? Se perderán los productos agregados.",
+        "willGoNegative": "Quedará en stock negativo"
+      },
+      "customer": {
+        "label": "Cliente (opcional)",
+        "placeholder": "Nombre del cliente"
+      },
+      "payment": {
+        "title": "Forma de pago",
+        "cash": "Efectivo",
+        "qr": "QR",
+        "received": "Efectivo recibido",
+        "change": "Cambio"
+      },
+      "total": "Total",
+      "confirm": "Confirmar venta",
+      "clear": "Cancelar venta",
+      "saleConfirmed": {
+        "title": "Venta registrada",
+        "number": "Venta Nº {{number}}",
+        "printReceipt": "Imprimir comprobante",
+        "newSale": "Nueva venta"
+      },
+      "messages": {
+        "productAdded": "\"{{name}}\" agregado al carrito.",
+        "codeNotFound": "No se encontró ningún producto con ese código.",
+        "productInactive": "\"{{name}}\" está inactivo y no se puede vender.",
+        "emptyCart": "Agrega al menos un producto para confirmar la venta.",
+        "insufficientCash": "El efectivo recibido es menor al total.",
+        "saleCreated": "Venta registrada correctamente.",
+        "saleAlreadyExists": "Esta venta ya fue registrada.",
+        "saleCancelled": "Venta anulada correctamente.",
+        "confirmCancel": "¿Anular esta venta? El stock se repondrá y quedará registrada como anulada.",
+        "cancelReasonLabel": "Motivo de anulación",
+        "cancelReasonRequired": "Escribe un motivo de anulación."
+      },
+      "historyPage": {
+        "date": "Fecha",
+        "seller": "Vendedor",
+        "allSellers": "Todos los vendedores",
+        "columns": {
+          "number": "Nº",
+          "time": "Hora",
+          "seller": "Vendedor",
+          "items": "Ítems",
+          "total": "Total",
+          "payment": "Pago",
+          "status": "Estado"
+        },
+        "status": {
+          "completed": "Completada",
+          "cancelled": "Anulada"
+        },
+        "detail": "Detalle de venta",
+        "cancelAction": "Anular venta",
+        "reprint": "Reimprimir comprobante",
+        "empty": "No hay ventas para los filtros seleccionados."
+      },
+      "receipt": {
+        "title": "Comprobante de venta",
+        "number": "Nº",
+        "date": "Fecha",
+        "client": "Cliente",
+        "anonymous": "Anónimo",
+        "servedBy": "Atendió",
+        "columns": {
+          "code": "Código",
+          "product": "Producto",
+          "quantity": "Cant.",
+          "unitPrice": "P. unit.",
+          "subtotal": "Subtotal"
+        },
+        "total": "TOTAL",
+        "payment": "Pago",
+        "footer": "Gracias por su compra · No se aceptan devoluciones"
+      }
+    },
     "profile": {
       "title": "Perfil",
       "changePassword": "Cambiar contraseña",

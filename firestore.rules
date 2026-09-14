@@ -1,11 +1,11 @@
 rules_version = '2';
 
-// FASE 3 — añade `settings`, `counters`, `products` y `barcodes`
-// (docs/architecture/mi-pimpollito-plan.md §10.2), sin tocar nada de lo que
-// ya protegía la Fase 2 sobre `users`.
+// FASE 4 — añade `sales` y `dailySummaries`
+// (docs/architecture/mi-pimpollito-plan.md §10.2, §15), sin tocar nada de lo
+// que ya protegía la Fase 3 sobre `settings`/`counters`/`products`/`barcodes`.
 //
-// Deliberadamente SIGUE cerrado en esta fase — se abre en Fase 4 en adelante:
-//   - `sales`, `dailySummaries`, `giftCards*`  → sus fases.
+// Deliberadamente SIGUE cerrado en esta fase — se abre en Fase 6:
+//   - `giftCards*`  → su fase.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -105,6 +105,29 @@ service cloud.firestore {
       allow create: if isStaff();           // se crea junto al producto, en la misma transacción
       allow delete: if isAdmin();           // solo al cambiar el código (admin)
       allow update: if false;               // un código no se reasigna: se borra y se crea
+    }
+
+    // `sales` (plan §15, §10.2): `allow write: if false` a propósito — solo
+    // `createSale`/`cancelSale` (Cloud Functions, Admin SDK) escriben. El
+    // total, el descuento de stock y el resumen diario nacen de una sola
+    // transacción que primero LEE el estado real; ni una Rule ni un
+    // `writeBatch` de cliente pueden hacer eso, y dejar una vía de escritura
+    // directa permitiría a un vendedor con la consola abierta inventar
+    // cualquier total. El vendedor solo ve SUS PROPIAS ventas — el admin ve
+    // todas (plan §10.2, nota sobre la consulta del vendedor: el `list` exige
+    // que la consulta del cliente ya venga filtrada por `sellerId`).
+    match /sales/{saleId} {
+      allow get, list: if isAdmin()
+                       || (isStaff() && resource.data.sellerId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // Resumen diario (plan §8.7, §19.2): mantenido por `createSale`/
+    // `cancelSale` dentro de la misma transacción que la venta. El cierre de
+    // caja es del admin.
+    match /dailySummaries/{dateKey} {
+      allow get, list: if isAdmin();
+      allow write: if false;
     }
 
     match /{document=**} { allow read, write: if false; }

@@ -9,8 +9,12 @@ import { adminGuard, authGuard } from '@core/session';
  * layout (pasa `authGuard`) pero no a este módulo.
  *
  * FASE 3: `/productos` NO lleva `adminGuard` — admin y vendedor comparten el
- * catálogo (CLAUDE.md, tabla de roles); `authGuard` ya basta. Ventas y Gift
- * Cards todavía no existen (plan §11.2).
+ * catálogo (CLAUDE.md, tabla de roles); `authGuard` ya basta.
+ *
+ * FASE 4: `/ventas` tampoco lleva `adminGuard` por la misma razón — admin y
+ * vendedor comparten el POS. El historial de ventas restringe lo que cada
+ * quien ve DENTRO del componente (plan §15.5, `sellerId` forzado para el
+ * vendedor), no con un guard de ruta. Gift Cards todavía no existe (plan §11.2).
  */
 export const routes: Routes = [
     {
@@ -28,6 +32,10 @@ export const routes: Routes = [
                     import('./features/home/home.component').then(
                         (m) => m.HomeComponent,
                     ),
+            },
+            {
+                path: 'ventas',
+                loadChildren: () => import('./features/sales/sales.routes'),
             },
             {
                 path: 'productos',
