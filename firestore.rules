@@ -14,6 +14,17 @@ rules_version = '2';
 // sea `allow write: if false` (arriba). Todo pasa por
 // `functions/src/giftcards.ts` y por el pago `giftcard` de `createSale`
 // (`functions/src/sales.ts`), nunca por un `updateDoc` libre desde Angular.
+//
+// FASE 7 — Reportes/cierre de caja NO añade ninguna Rule nueva: lee
+// exactamente las mismas cinco colecciones (`sales`, `dailySummaries`,
+// `giftCards`, `giftCardIssues`, `giftCardMovements`) con las reglas
+// `isAdmin()` que ya existían, incluidas las consultas de agregación
+// (`getAggregateFromServer`/`getCountFromServer`) que usa el cierre de caja
+// para verificar `dailySummaries` contra `sum()` en vivo (plan §18.3) — una
+// agregación se evalúa contra la misma Rule de `list` que una consulta
+// normal, y ninguna de las cinco depende de `resource.data`, así que ya
+// autorizan tanto una lectura de documento como una agregación por igual.
+// No hizo falta ninguna Cloud Function de reporting (CLAUDE.md, "Rules").
 service cloud.firestore {
   match /databases/{database}/documents {
 

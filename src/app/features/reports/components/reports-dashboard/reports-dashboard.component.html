@@ -1,0 +1,419 @@
+<app-title-bar [title]="'app.reports.title' | translate" [description]="'app.reports.subtitle' | translate"></app-title-bar>
+
+<!-- Filtros: presets + rango personalizado + vendedor (prompt §14, §16) -->
+<div class="flex flex-col xl:flex-row xl:items-end gap-4 mb-6">
+    <div class="flex flex-wrap gap-2">
+        <button
+            pButton
+            type="button"
+            [label]="'app.reports.filters.presets.today' | translate"
+            [class]="preset() === 'today' ? 'p-button-sm' : 'p-button-sm p-button-outlined'"
+            (click)="setPreset('today')"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="'app.reports.filters.presets.yesterday' | translate"
+            [class]="preset() === 'yesterday' ? 'p-button-sm' : 'p-button-sm p-button-outlined'"
+            (click)="setPreset('yesterday')"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="'app.reports.filters.presets.last7' | translate"
+            [class]="preset() === 'last7' ? 'p-button-sm' : 'p-button-sm p-button-outlined'"
+            (click)="setPreset('last7')"
+        ></button>
+        <button
+            pButton
+            type="button"
+            [label]="'app.reports.filters.presets.thisMonth' | translate"
+            [class]="preset() === 'thisMonth' ? 'p-button-sm' : 'p-button-sm p-button-outlined'"
+            (click)="setPreset('thisMonth')"
+        ></button>
+    </div>
+
+    <div class="flex flex-col gap-1">
+        <label class="text-sm font-medium">{{ "app.reports.filters.presets.custom" | translate }}</label>
+        <p-calendar
+            [ngModel]="rangeDates()"
+            (ngModelChange)="onCustomRangeChange($event)"
+            selectionMode="range"
+            [readonlyInput]="true"
+            dateFormat="dd/mm/yy"
+            [showIcon]="true"
+            [maxDate]="maxSelectableDate"
+        ></p-calendar>
+    </div>
+
+    <div class="flex flex-col gap-1">
+        <label class="text-sm font-medium">{{ "app.sales.historyPage.seller" | translate }}</label>
+        <p-dropdown
+            [options]="sellers()"
+            optionLabel="name"
+            optionValue="uid"
+            [showClear]="true"
+            [placeholder]="'app.sales.historyPage.allSellers' | translate"
+            [ngModel]="selectedSellerId()"
+            (ngModelChange)="onSellerFilterChange($event)"
+            styleClass="w-full md:w-64"
+        ></p-dropdown>
+    </div>
+
+    <button
+        pButton
+        type="button"
+        icon="fas fa-file-pdf"
+        class="p-button-outlined ml-auto"
+        [label]="'app.reports.export.action' | translate"
+        [loading]="exporting()"
+        (click)="exportPdf()"
+    ></button>
+</div>
+
+@if (loadingSummaries()) {
+<app-spinner></app-spinner>
+} @else {
+
+<!-- KPIs principales (prompt §7) -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.merchandiseSales" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().totalCents | money }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.cashReceived" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ cashReceivedCents() | money }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.qrReceived" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ qrReceivedCents() | money }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.giftCardRedeemed" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().giftCardCents | money }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.giftCardsIssued" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().giftCardsIssuedCents | money }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.salesCount" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().salesCount }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.itemsCount" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().itemsCount }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.breakdown.forfeited" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().giftCardForfeitedCents | money }}</div>
+    </p-card>
+</div>
+
+<!-- Identidades + integridad (prompt §3, §22, §39; plan §18.2, §18.3) -->
+<p-card styleClass="mb-6">
+    <div class="font-semibold mb-2">{{ "app.reports.identities.title" | translate }}</div>
+    <div class="flex flex-col gap-1 text-sm">
+        <div class="flex items-center gap-2">
+            <i class="fas" [class.fa-check-circle]="identityMerchandiseOk()" [class.text-green-600]="identityMerchandiseOk()"
+               [class.fa-times-circle]="!identityMerchandiseOk()" [class.text-red-600]="!identityMerchandiseOk()"></i>
+            <span>{{ "app.reports.identities.merchandise" | translate }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <i class="fas" [class.fa-check-circle]="identityReceivedOk()" [class.text-green-600]="identityReceivedOk()"
+               [class.fa-times-circle]="!identityReceivedOk()" [class.text-red-600]="!identityReceivedOk()"></i>
+            <span>{{ "app.reports.identities.received" | translate }}</span>
+        </div>
+        <p-divider></p-divider>
+        <div class="font-medium">{{ "app.reports.identities.integrity.title" | translate }}</div>
+        @if (loadingIntegrity()) {
+        <span class="text-gray-500">{{ "app.common.loading" | translate }}</span>
+        } @else {
+        @if (integrity(); as i) {
+        <div class="flex items-center gap-2">
+            <i class="fas" [class.fa-check-circle]="!integrityMismatch()" [class.text-green-600]="!integrityMismatch()"
+               [class.fa-exclamation-triangle]="integrityMismatch()" [class.text-red-600]="integrityMismatch()"></i>
+            <span>{{ (integrityMismatch() ? "app.reports.identities.integrity.mismatch" : "app.reports.identities.integrity.ok") | translate }}</span>
+        </div>
+        @if (integrityMismatch()) {
+        <table class="text-xs mt-2 w-full max-w-lg">
+            <thead>
+                <tr class="text-left text-gray-500">
+                    <th></th>
+                    <th>{{ "app.reports.identities.integrity.summarySource" | translate }}</th>
+                    <th>{{ "app.reports.identities.integrity.salesSource" | translate }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>{{ "app.reports.identities.integrity.field.salesCount" | translate }}</td><td>{{ rangeTotals().salesCount }}</td><td>{{ i.salesCount }}</td></tr>
+                <tr><td>{{ "app.reports.identities.integrity.field.totalCents" | translate }}</td><td>{{ rangeTotals().totalCents | money }}</td><td>{{ i.totalCents | money }}</td></tr>
+                <tr><td>{{ "app.reports.identities.integrity.field.cashCents" | translate }}</td><td>{{ rangeTotals().cashCents | money }}</td><td>{{ i.cashCents | money }}</td></tr>
+                <tr><td>{{ "app.reports.identities.integrity.field.qrCents" | translate }}</td><td>{{ rangeTotals().qrCents | money }}</td><td>{{ i.qrCents | money }}</td></tr>
+                <tr><td>{{ "app.reports.identities.integrity.field.giftCardCents" | translate }}</td><td>{{ rangeTotals().giftCardCents | money }}</td><td>{{ i.giftCardCents | money }}</td></tr>
+            </tbody>
+        </table>
+        }
+        }
+        }
+    </div>
+</p-card>
+
+<!-- Desglose por forma de pago (prompt §33) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <p-card [header]="'app.reports.breakdown.merchandiseTitle' | translate">
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.kpis.merchandiseSales" | translate }}</span><span class="font-semibold">{{ rangeTotals().totalCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.sales.payment.cash" | translate }}</span><span>{{ rangeTotals().cashCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.sales.payment.qr" | translate }}</span><span>{{ rangeTotals().qrCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.sales.payment.giftcard" | translate }}</span><span>{{ rangeTotals().giftCardCents | money }}</span></div>
+    </p-card>
+    <p-card [header]="'app.reports.breakdown.issuesTitle' | translate">
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.totalNominal" | translate }}</span><span class="font-semibold">{{ rangeTotals().giftCardsIssuedCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.collectedCash" | translate }}</span><span>{{ rangeTotals().giftCardIssuesCashCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.collectedQr" | translate }}</span><span>{{ rangeTotals().giftCardIssuesQrCents | money }}</span></div>
+    </p-card>
+</div>
+
+<!-- Gráficos (prompt §32, roadmap Fase 7 punto 7) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <p-card [header]="'app.reports.charts.byDayTitle' | translate">
+        <p-chart type="bar" [data]="chartByDay()" [options]="{ plugins: { legend: { display: false } } }" height="14rem"></p-chart>
+    </p-card>
+    <p-card [header]="'app.reports.charts.paymentDistributionTitle' | translate">
+        <p-chart type="doughnut" [data]="chartPaymentDistribution()" height="14rem"></p-chart>
+    </p-card>
+</div>
+
+<!-- Gift Cards (prompt §12, §30) -->
+<p-card styleClass="mb-6">
+    <ng-template pTemplate="header">
+        <div class="flex items-center justify-between px-4 pt-4">
+            <span class="font-semibold text-lg">{{ "app.reports.giftCards.title" | translate }}</span>
+            <button pButton type="button" icon="fas fa-rotate" class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.common.reload' | translate" (click)="reloadGiftCardsSnapshot()"></button>
+        </div>
+    </ng-template>
+    @if (loadingGiftCards()) {
+    <app-spinner></app-spinner>
+    } @else {
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+            <div class="font-medium mb-2">{{ "app.reports.giftCards.inventoryTitle" | translate }}</div>
+            <div class="flex flex-wrap gap-2 mb-4">
+                @for (status of giftCardStatuses; track status) {
+                <p-tag [value]="(('app.giftCards.status.' + status.toLowerCase()) | translate) + ': ' + giftCardInventory()[status]"
+                       [severity]="status === 'AVAILABLE' ? 'success' : status === 'ACTIVE' ? 'info' : status === 'SUSPENDED' ? 'warning' : 'danger'"></p-tag>
+                }
+            </div>
+            <div class="font-medium mb-2">{{ "app.reports.giftCards.denominationsTitle" | translate }}</div>
+            <div class="flex flex-wrap gap-2">
+                @for (d of giftCardDenominations(); track d.amountCents) {
+                <p-tag severity="secondary" [value]="(d.amountCents | money) + ' × ' + d.count"></p-tag>
+                } @empty {
+                <span class="text-sm text-gray-500">{{ "app.common.messages.notFound" | translate }}</span>
+                }
+            </div>
+        </div>
+        <div>
+            <div class="font-medium mb-2">{{ "app.reports.giftCards.activityTitle" | translate }}</div>
+            <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.giftCards.issuesCount" | translate }}</span><span class="font-semibold">{{ issuesCountInRange() }}</span></div>
+            <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.giftCards.redemptionsCount" | translate }}</span><span class="font-semibold">{{ redemptionsCountInRange() }}</span></div>
+            <p-divider></p-divider>
+            <div class="flex justify-between text-sm py-1">
+                <span>{{ "app.reports.giftCards.liabilityTitle" | translate }}</span>
+                <span class="font-semibold">{{ liabilityCents() | money }}</span>
+            </div>
+            <div class="text-xs text-gray-500">{{ "app.reports.giftCards.liabilityHelp" | translate }}</div>
+        </div>
+    </div>
+    }
+</p-card>
+
+<!-- Detalle de activaciones del período (prompt §12) -->
+<p-card styleClass="mb-6" [header]="'app.reports.giftCards.issuesTableTitle' | translate">
+    @if (loadingIssues()) {
+    <app-spinner></app-spinner>
+    } @else if (!issuesRows().length) {
+    <app-items-not-found></app-items-not-found>
+    } @else {
+    <p-table [value]="issuesRows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+        <ng-template pTemplate="header">
+            <tr>
+                <th>{{ "app.reports.giftCards.columns.date" | translate }}</th>
+                <th>{{ "app.reports.giftCards.columns.code" | translate }}</th>
+                <th>{{ "app.reports.giftCards.columns.cycle" | translate }}</th>
+                <th class="text-right">{{ "app.reports.giftCards.columns.amount" | translate }}</th>
+                <th class="text-right">{{ "app.reports.giftCards.columns.cash" | translate }}</th>
+                <th class="text-right">{{ "app.reports.giftCards.columns.qr" | translate }}</th>
+                <th>{{ "app.reports.giftCards.columns.buyer" | translate }}</th>
+                <th>{{ "app.reports.giftCards.columns.seller" | translate }}</th>
+                <th>{{ "app.reports.giftCards.columns.status" | translate }}</th>
+            </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-issue>
+            <tr>
+                <td>{{ issue.dateKey }}</td>
+                <td class="font-mono text-sm">{{ issue.cardCode }}</td>
+                <td>#{{ issue.cycleNumber }}</td>
+                <td class="text-right">{{ issue.amountCents | money }}</td>
+                <td class="text-right">{{ issueCashCents(issue) | money }}</td>
+                <td class="text-right">{{ issueQrCents(issue) | money }}</td>
+                <td>{{ issue.buyerName ?? "—" }}</td>
+                <td>{{ issue.activatedByName }}</td>
+                <td>
+                    <p-tag [value]="('app.reports.giftCards.cycleStatus.' + issue.status) | translate"
+                           [severity]="issue.status === 'redeemed' ? 'success' : issue.status === 'cancelled' ? 'danger' : issue.status === 'suspended' ? 'warning' : 'info'"></p-tag>
+                </td>
+            </tr>
+        </ng-template>
+    </p-table>
+    }
+    @if (issuesLoadedOnce()) {
+    <app-cards-paginator
+        [hasNextPage]="issuesHasNext()"
+        [hasPreviousPage]="issuesHasPrev()"
+        [total]="issuesTotal()"
+        [currentCount]="issuesRows().length"
+        [pageSizeOptions]="pageSizeOptions"
+        [pageSize]="issuesPageSize()"
+        (onFirst)="loadIssuesFirstPage()"
+        (onNext)="onIssuesNextPage()"
+        (onPrevious)="onIssuesPrevPage()"
+        (onPageSizeChange)="onIssuesPageSizeChange($event)"
+    ></app-cards-paginator>
+    }
+</p-card>
+
+<!-- Productos más vendidos (prompt §20) -->
+<p-card styleClass="mb-6" [header]="'app.reports.topProducts.title' | translate">
+    @if (!topProducts().length) {
+    <app-items-not-found></app-items-not-found>
+    } @else {
+    <p-table [value]="topProducts()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+        <ng-template pTemplate="header">
+            <tr>
+                <th>{{ "app.reports.topProducts.columns.code" | translate }}</th>
+                <th>{{ "app.reports.topProducts.columns.name" | translate }}</th>
+                <th class="text-center">{{ "app.reports.topProducts.columns.qty" | translate }}</th>
+                <th class="text-right">{{ "app.reports.topProducts.columns.total" | translate }}</th>
+            </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-product>
+            <tr>
+                <td class="font-mono text-sm">{{ product.code }}</td>
+                <td>{{ product.name }}</td>
+                <td class="text-center">{{ product.qty }}</td>
+                <td class="text-right">{{ product.totalCents | money }}</td>
+            </tr>
+        </ng-template>
+    </p-table>
+    }
+</p-card>
+
+<!-- Ventas por vendedor (prompt §29) -->
+<p-card styleClass="mb-6" [header]="'app.reports.bySeller.title' | translate">
+    @if (loadingSellerTotals()) {
+    <app-spinner></app-spinner>
+    } @else {
+    @if (!selectedSellerId()) {
+    <span class="text-sm text-gray-500">{{ "app.reports.bySeller.empty" | translate }}</span>
+    } @else {
+    @if (sellerTotals(); as st) {
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.salesCount" | translate }}</div><div class="font-semibold">{{ st.salesCount }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.merchandiseSales" | translate }}</div><div class="font-semibold">{{ st.totalCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.cash" | translate }}</div><div class="font-semibold">{{ st.cashCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.qr" | translate }}</div><div class="font-semibold">{{ st.qrCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.giftCard" | translate }}</div><div class="font-semibold">{{ st.giftCardCents | money }}</div></div>
+    </div>
+    }
+    }
+    }
+</p-card>
+
+<!-- Detalle de ventas del día (prompt §18, §19) -->
+<p-card [header]="'app.reports.dailyDetail.title' | translate">
+    @if (!isSingleDay()) {
+    <span class="text-sm text-gray-500">{{ "app.reports.dailyDetail.onlySingleDay" | translate }}</span>
+    } @else {
+    <div class="flex items-center gap-2 mb-3">
+        <label class="text-sm font-medium">{{ "app.reports.dailyDetail.paymentMethod" | translate }}</label>
+        <p-dropdown
+            [options]="dailyPaymentOptions"
+            optionValue="value"
+            [ngModel]="dailyPaymentFilter()"
+            (ngModelChange)="onDailyPaymentFilterChange($event)"
+            styleClass="w-48"
+        >
+            <ng-template let-item pTemplate="selectedItem">{{ item.label | translate }}</ng-template>
+            <ng-template let-item pTemplate="item">{{ item.label | translate }}</ng-template>
+        </p-dropdown>
+    </div>
+
+    @if (loadingDaily()) {
+    <app-spinner></app-spinner>
+    } @else if (!filteredDailyRows().length) {
+    <app-items-not-found></app-items-not-found>
+    } @else {
+    <p-table [value]="filteredDailyRows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+        <ng-template pTemplate="header">
+            <tr>
+                <th>{{ "app.sales.historyPage.columns.number" | translate }}</th>
+                <th>{{ "app.sales.historyPage.columns.time" | translate }}</th>
+                <th>{{ "app.sales.historyPage.columns.seller" | translate }}</th>
+                <th>{{ "app.sales.historyPage.columns.items" | translate }}</th>
+                <th>{{ "app.sales.historyPage.columns.total" | translate }}</th>
+                <th>{{ "app.sales.historyPage.columns.payment" | translate }}</th>
+                <th>{{ "app.sales.historyPage.columns.status" | translate }}</th>
+                <th class="text-right">{{ "app.common.actions" | translate }}</th>
+            </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-sale>
+            <tr>
+                <td class="font-mono text-sm">{{ sale.id.slice(-8).toUpperCase() }}</td>
+                <td>{{ sale.createdAt?.toDate() | date : "HH:mm" }}</td>
+                <td>{{ sale.sellerName }}</td>
+                <td>{{ sale.items.length }}</td>
+                <td>{{ sale.totalCents | money }}</td>
+                <td>
+                    @for (method of sale.paymentMethods; track method) {
+                    <p-tag [value]="('app.sales.payment.' + method) | translate" severity="secondary" class="mr-1"></p-tag>
+                    }
+                </td>
+                <td>
+                    <p-tag [value]="('app.sales.historyPage.status.' + sale.status) | translate"
+                           [severity]="sale.status === 'completed' ? 'success' : 'danger'"></p-tag>
+                </td>
+                <td class="text-right">
+                    <button pButton type="button" icon="fas fa-eye" class="p-button-text p-button-rounded"
+                            (click)="openDailyDetail(sale)"></button>
+                </td>
+            </tr>
+        </ng-template>
+    </p-table>
+    }
+    @if (dailyLoadedOnce()) {
+    <app-cards-paginator
+        [hasNextPage]="dailyHasNext()"
+        [hasPreviousPage]="dailyHasPrev()"
+        [total]="dailyTotal()"
+        [currentCount]="dailyRows().length"
+        [pageSizeOptions]="pageSizeOptions"
+        [pageSize]="dailyPageSize()"
+        (onFirst)="loadDailyFirstPage()"
+        (onNext)="onDailyNextPage()"
+        (onPrevious)="onDailyPrevPage()"
+        (onPageSizeChange)="onDailyPageSizeChange($event)"
+    ></app-cards-paginator>
+    }
+    }
+</p-card>
+}
+
+<app-sale-detail-dialog
+    [sale]="detailSale()"
+    [isAdmin]="true"
+    (closed)="detailSale.set(null)"
+    (cancelled)="onSaleCancelled()"
+    (saleUpdated)="onSaleUpdated($event)"
+></app-sale-detail-dialog>

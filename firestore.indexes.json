@@ -81,6 +81,47 @@
         { "fieldPath": "giftCardId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "ASCENDING" },
+        { "fieldPath": "cashCents", "order": "ASCENDING" },
+        { "fieldPath": "giftCardCents", "order": "ASCENDING" },
+        { "fieldPath": "qrCents", "order": "ASCENDING" },
+        { "fieldPath": "totalCents", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sellerId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "ASCENDING" },
+        { "fieldPath": "cashCents", "order": "ASCENDING" },
+        { "fieldPath": "giftCardCents", "order": "ASCENDING" },
+        { "fieldPath": "qrCents", "order": "ASCENDING" },
+        { "fieldPath": "totalCents", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "giftCardIssues",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dateKey", "order": "DESCENDING" },
+        { "fieldPath": "activatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "giftCardMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

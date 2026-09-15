@@ -42,3 +42,41 @@ export function dateToKey(date: Date): string {
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
 }
+
+/**
+ * `dateKey` ± N días — pura aritmética de calendario sobre el string, sin
+ * zona horaria (Fase 7, Reportes): sirve para los presets de rango
+ * ("últimos 7 días") y no debe confundirse con `dateKeyRangeToTimestampBounds`
+ * (abajo), que sí necesita la zona porque compara contra un `Timestamp` real.
+ */
+export function shiftDateKey(dateKey: string, days: number): string {
+    return dayjs(dateKey, 'YYYY-MM-DD').add(days, 'day').format('YYYY-MM-DD');
+}
+
+/** Primer día del mes de `dateKey` (Fase 7, preset "Este mes"). */
+export function monthStartKey(dateKey: string): string {
+    return dayjs(dateKey, 'YYYY-MM-DD').startOf('month').format('YYYY-MM-DD');
+}
+
+/** Primer día del año de `dateKey` (Fase 7, preset "Este año"). */
+export function yearStartKey(dateKey: string): string {
+    return dayjs(dateKey, 'YYYY-MM-DD').startOf('year').format('YYYY-MM-DD');
+}
+
+/**
+ * Convierte un rango `[fromKey, toKey]` (inclusive, en la zona del negocio) a
+ * los límites `Timestamp` que corresponden — `end` es EXCLUSIVO (el
+ * medianoche del día siguiente a `toKey`). Fase 7: solo lo necesita el conteo
+ * de redenciones en `giftCardMovements`, que guarda `createdAt` (Timestamp)
+ * y no un `dateKey` propio — todo lo demás en Reportes filtra por `dateKey`
+ * directo (plan §17.2, sin convertir zonas).
+ */
+export function dateKeyRangeToTimestampBounds(
+    fromKey: string,
+    toKey: string,
+    zone: string,
+): { start: Timestamp; end: Timestamp } {
+    const start = dayjs.tz(fromKey, 'YYYY-MM-DD', zone).startOf('day');
+    const end = dayjs.tz(toKey, 'YYYY-MM-DD', zone).add(1, 'day').startOf('day');
+    return { start: Timestamp.fromDate(start.toDate()), end: Timestamp.fromDate(end.toDate()) };
+}

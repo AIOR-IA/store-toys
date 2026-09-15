@@ -49,4 +49,10 @@ export const MENU: MenuEntry[] = [
         routerLink: ['/usuarios'],
         roles: ['admin'],
     },
+    {
+        label: 'app.menu.reports',
+        icon: 'fas fa-chart-line',
+        routerLink: ['/reportes'],
+        roles: ['admin'],
+    },
 ];

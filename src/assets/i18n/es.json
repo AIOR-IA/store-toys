@@ -437,6 +437,126 @@
         "confirmCancel": "¿Dar de baja esta tarjeta de forma definitiva? No se puede deshacer."
       }
     },
+    "reports": {
+      "title": "Reportes",
+      "subtitle": "Cierre de caja y consolidado financiero",
+      "filters": {
+        "from": "Desde",
+        "to": "Hasta",
+        "presets": {
+          "today": "Hoy",
+          "yesterday": "Ayer",
+          "last7": "Últimos 7 días",
+          "thisMonth": "Este mes",
+          "custom": "Rango personalizado"
+        }
+      },
+      "kpis": {
+        "merchandiseSales": "Ventas de mercadería",
+        "cashReceived": "Efectivo recibido",
+        "qrReceived": "QR recibido",
+        "giftCardRedeemed": "Gift Card aplicada",
+        "giftCardsIssued": "Gift Cards vendidas/emitidas",
+        "salesCount": "N.º de ventas",
+        "itemsCount": "Artículos vendidos"
+      },
+      "identities": {
+        "title": "Comprobación de consistencia",
+        "merchandise": "Mercancía vendida = Σ pagos de las ventas",
+        "received": "Dinero recibido = (efectivo + QR de ventas) + (efectivo + QR de emisiones)",
+        "ok": "Cuadra",
+        "mismatch": "No cuadra — revisa este rango manualmente.",
+        "integrity": {
+          "title": "Verificación de integridad (dailySummaries vs. sales)",
+          "ok": "El resumen diario coincide con la suma en vivo de las ventas.",
+          "mismatch": "El resumen diario NO coincide con la suma en vivo de las ventas. Revisa manualmente este rango.",
+          "field": {
+            "salesCount": "N.º de ventas",
+            "totalCents": "Mercancía vendida",
+            "cashCents": "Efectivo de ventas",
+            "qrCents": "QR de ventas",
+            "giftCardCents": "Gift Card aplicada"
+          },
+          "summarySource": "Resumen diario",
+          "salesSource": "Suma en vivo (sales)"
+        }
+      },
+      "breakdown": {
+        "merchandiseTitle": "TOTAL MERCADERÍA",
+        "issuesTitle": "GIFT CARDS EMITIDAS",
+        "totalNominal": "Total nominal",
+        "collectedCash": "Cobrado en efectivo",
+        "collectedQr": "Cobrado en QR",
+        "forfeited": "Sobrante perdido (forfeited)"
+      },
+      "giftCards": {
+        "title": "Gift Cards",
+        "inventoryTitle": "Inventario actual",
+        "denominationsTitle": "Denominaciones registradas",
+        "activityTitle": "Actividad del período",
+        "issuesCount": "Activaciones/ventas de tarjeta",
+        "redemptionsCount": "Canjes",
+        "liabilityTitle": "Pasivo pendiente (a hoy)",
+        "liabilityHelp": "Tarjetas ACTIVE/SUSPENDED con dinero ya cobrado, aún no canjeadas.",
+        "issuesTableTitle": "Detalle de activaciones del período",
+        "columns": {
+          "date": "Fecha",
+          "code": "Tarjeta",
+          "cycle": "Ciclo",
+          "amount": "Monto",
+          "cash": "Efectivo",
+          "qr": "QR",
+          "buyer": "Comprador",
+          "seller": "Vendedor",
+          "status": "Estado"
+        },
+        "cycleStatus": {
+          "active": "Activa",
+          "suspended": "Suspendida",
+          "redeemed": "Canjeada",
+          "cancelled": "Anulada"
+        },
+        "empty": "No hay activaciones de Gift Card en este rango."
+      },
+      "topProducts": {
+        "title": "Productos más vendidos",
+        "columns": {
+          "code": "Código",
+          "name": "Producto",
+          "qty": "Cantidad",
+          "total": "Total"
+        },
+        "empty": "No hay productos vendidos en este rango."
+      },
+      "bySeller": {
+        "title": "Ventas por vendedor",
+        "selectSeller": "Elige un vendedor",
+        "salesCount": "N.º de ventas",
+        "merchandiseSales": "Mercadería vendida",
+        "cash": "Efectivo",
+        "qr": "QR",
+        "giftCard": "Gift Card aplicada",
+        "empty": "Elige un vendedor para ver su desglose."
+      },
+      "dailyDetail": {
+        "title": "Detalle de ventas del día",
+        "onlySingleDay": "El detalle de ventas solo se muestra cuando el rango es un único día.",
+        "paymentMethod": "Forma de pago",
+        "allMethods": "Todas"
+      },
+      "charts": {
+        "byDayTitle": "Ventas por día",
+        "paymentDistributionTitle": "Distribución de pago (mercadería)"
+      },
+      "export": {
+        "action": "Exportar PDF",
+        "title": "Reporte de cierre de caja",
+        "period": "Período",
+        "generatedAt": "Generado",
+        "sellerScope": "Vendedor"
+      },
+      "empty": "No hay datos para el rango seleccionado."
+    },
     "profile": {
       "title": "Perfil",
       "changePassword": "Cambiar contraseña",

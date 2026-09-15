@@ -80,12 +80,22 @@
             border-bottom-left-radius: 0;
         }
 
+        // El backdrop tiene que quedar POR DEBAJO del sidebar (z-index: 90 en
+        // _menu.scss) y del topbar (z-index: 900 en _topbar.scss): con
+        // `z-index: 998` (mayor que ambos) el backdrop quedaba encima de los
+        // dos pese a pintarse antes en el DOM, así que capturaba TODOS los
+        // clics del móvil — incluidos los de los propios ítems del menú, que
+        // nunca llegaban a su `routerLink` porque el navegador entrega el
+        // clic al elemento más alto en el stacking order, no al primero en
+        // el DOM. El backdrop solo necesita superar el contenido normal de
+        // la página (stacking "auto"), nunca el chrome fijo — de ahí `89`,
+        // un nivel por debajo del sidebar.
         .layout-mask {
             display: none;
             position: fixed;
             top: 0;
             left: 0;
-            z-index: 998;
+            z-index: 89;
             width: 100%;
             height: 100%;
             background-color: var(--maskbg);

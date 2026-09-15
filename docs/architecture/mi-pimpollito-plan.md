@@ -1539,25 +1539,32 @@ export interface GiftCardMovement {
 }
 ```
 
-### 8.9 Índices compuestos previstos
+### 8.9 Índices compuestos (estado real, actualizado en la Fase 7)
+
+> Esta tabla listaba originalmente índices "previstos" que en varios casos nunca se
+> implementaron tal cual (p.ej. `paymentMethods ARRAY, dateKey ASC` nunca hizo falta).
+> Lo que sigue es el contenido REAL de `firestore.indexes.json`, verificado en vivo.
 
 | Colección | Campos | Para |
 |---|---|---|
 | `users` | `isActive ASC, searchName ASC` | Listado filtrado por estado, orden alfabético |
-| `users` | `role ASC, searchName ASC` | Filtro por rol |
+| `users` | `isActive ASC, emailLower ASC` | Búsqueda/orden por email |
+| `users` | `searchTokens ARRAY, searchName ASC` | Búsqueda por token |
+| `users` | `isActive ASC, searchTokens ARRAY, searchName ASC` | Búsqueda por token + filtro de estado |
 | `products` | `isActive ASC, nameLower ASC` | Catálogo activo ordenado |
 | `products` | `isActive ASC, stock ASC` | Alerta de stock bajo y stock negativo |
 | `sales` | `dateKey ASC, createdAt DESC` | Ventas del día |
-| `sales` | `sellerId ASC, dateKey ASC, createdAt DESC` | **Ventas propias del día** del vendedor (§10) |
-| `sales` | `sellerId ASC, createdAt DESC` | Ventas por vendedor, rango libre (admin) |
-| `sales` | `status ASC, dateKey ASC` | Reportes que excluyen anuladas |
-| `sales` | `paymentMethods ARRAY, dateKey ASC` | Desglose por forma de pago |
+| `sales` | `sellerId ASC, dateKey ASC, createdAt DESC` | **Ventas propias del día** del vendedor (§10, §15.5) |
+| `sales` | `status ASC, dateKey ASC, cashCents ASC, giftCardCents ASC, qrCents ASC, totalCents ASC` | Fase 7: verificación de integridad — `sum()`/`count()` sobre `sales` en el rango (§18.3). Los cuatro campos sumados van en el índice: es un requisito de Firestore para `getAggregateFromServer` con `sum()`, no solo de `where`/`orderBy` |
+| `sales` | `sellerId ASC, status ASC, dateKey ASC, cashCents ASC, giftCardCents ASC, qrCents ASC, totalCents ASC` | Fase 7: ventas por vendedor, mismo motivo que la fila anterior (§18.3, "por vendedor") |
 | `giftCards` | `status ASC, cardCode ASC` | Listado filtrado por estado, orden por código (§16) |
+| `giftCardIssues` | `dateKey DESC, activatedAt DESC` | Fase 7: detalle de activaciones del período, paginado (§18.3) |
 | `giftCardMovements` | `giftCardId ASC, createdAt ASC` | Historial completo de una tarjeta, TODOS sus ciclos (§16) |
+| `giftCardMovements` | `type ASC, createdAt ASC` | Fase 7: conteo de canjes (`REDEEMED`) en el rango — `createdAt` se acota con los límites de `dateKeyRangeToTimestampBounds` en la zona del negocio, porque `giftCardMovements` no guarda `dateKey` propio |
 
 Se declaran en `firestore.indexes.json` y se despliegan con el resto. Cuando falta un
 índice, Firestore devuelve un error con un enlace directo para crearlo: **conviene
-recogerlo en el archivo en vez de crearlo por consola**, para que DEV y PROD no divergan.
+recogerlo en el archivo en vez de crearlo por consola**, para que DEV y PROD no diverjan.
 
 ---
 
@@ -2768,6 +2775,58 @@ Si no coinciden, hay algo que arreglar y el sistema lo dice en lugar de esconder
 
 **Exportación:** solo **PDF** (F4: *"basta con un PDF"*). Sin Excel ni CSV.
 
+> **Nota de la Fase 7 — implementación real, `features/reports/`.** Un solo
+> componente (`ReportsDashboardComponent`) orquesta filtros (presets Hoy/Ayer/
+> Últimos 7 días/Este mes + rango personalizado con `p-calendar
+> selectionMode="range"`, y un filtro de vendedor opcional), KPIs, las dos
+> identidades de §18.2, la verificación de integridad de este apartado,
+> desglose de pagos, Gift Cards (inventario/denominaciones — snapshot de HOY,
+> reutilizando `GiftCardsService.listAllForSummary()` ya existente, sin
+> índices ni consultas nuevas — y actividad del período), detalle de
+> activaciones (`giftCardIssues`, paginado), productos más vendidos,
+> desglose por vendedor y el detalle de ventas del DÍA (solo cuando el rango
+> es un único día, reutilizando `SalesService.createPager` y
+> `SaleDetailDialogComponent` tal cual — condición para avanzar de la Fase 4).
+> Ningún dato nuevo en Firestore, ninguna Function nueva: todo son lecturas
+> con las Rules `isAdmin()` que ya existían.
+>
+> **Gotcha real de Firestore descubierto en vivo** (no está documentado con
+> claridad en la referencia pública): una consulta de agregación con `sum()`
+> exige que **cada campo sumado** forme parte del índice compuesto, no solo
+> los campos de `where`/`orderBy` — a diferencia de un `count()` simple con
+> los mismos filtros, que no lo pide. El primer índice desplegado
+> (`sales(status, dateKey)`) quedó `Habilitado` en la consola pero la consulta
+> seguía fallando con `failed-precondition`, porque `getSalesIntegrity`/
+> `getSellerTotals` además suman `totalCents`/`cashCents`/`qrCents`/
+> `giftCardCents`. El índice correcto (§8.9 actualizado) es
+> `sales(status, dateKey, cashCents, giftCardCents, qrCents, totalCents)` — y
+> su equivalente con `sellerId` al frente para el desglose por vendedor. El
+> propio mensaje de error de Firestore trae la forma exacta que hace falta
+> (`create_composite=...`), que es como se detectó.
+>
+> **Gap real encontrado y corregido — no fue un descuadre financiero.**
+> `dailySummaries/2026-09-13` (un documento creado antes de que la Fase 6
+> añadiera `giftCardIssuesCashCents`/`giftCardIssuesQrCents`, §8.7) no tenía
+> esos dos campos: un `update` de Firestore nunca agrega un campo que no
+> menciona, y ese día nunca tuvo actividad de gift card que disparara esa
+> escritura. Verificado contra `giftCardIssues` (cero documentos con
+> `dateKey == '2026-09-13'`) antes de tocar nada — su valor real siempre fue
+> 0, así que `dailySummaryConverter` ahora coalesce esos dos campos a `0` al
+> leer, igual que ya hace el propio servidor con campos que pueden faltar en
+> un documento antiguo (`functions/src/sales.ts`). Ninguna Function, ninguna
+> Rule y ningún documento de `dailySummaries` se tocó.
+>
+> **Verificado en vivo con datos reales de DEV:** la verificación de
+> integridad (`dailySummaries` vs. `sum()` en vivo sobre `sales`) coincidió
+> exactamente para "Hoy" y para "Últimos 7 días" (21/27 ventas,
+> 3 798,00/5 133,00 Bs, sin diferencia en ningún campo); el desglose por
+> vendedor de dos vendedores distintos sumó exactamente el total global
+> (9 + 12 ventas = 21; 1 495 + 2 303 = 3 798,00 Bs). Un `user` (vendedor)
+> confirmado rechazado en las tres vías: sin `/reportes` en el menú, guard
+> redirige a `/` por URL directa, y una lectura REST directa a
+> `dailySummaries` con su propio ID token devuelve `403
+> PERMISSION_DENIED`.
+
 ### 18.4 Comprobante PDF
 
 - **Recomendación:** `pdfmake` en el cliente, **hoja carta**, generado bajo demanda desde la
@@ -3839,7 +3898,7 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
 
 ---
 
-### FASE 7 — Reportes y cierre de caja
+### FASE 7 — Reportes y cierre de caja — ✅ IMPLEMENTADA Y PROBADA EN VIVO (sin commit todavía)
 
 - **Objetivo.** Que el dueño pueda responder "¿cuánto gané y cuánto dinero entró?" sin
   ambigüedad y sin doble contabilización.
@@ -3864,12 +3923,26 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
   ningún total. Entrar como `user` y verificar que `/reportes` no es accesible ni por URL ni
   por consulta directa a `dailySummaries`.
 - **Criterios de aceptación.**
-  - [ ] Las dos identidades de §18.2 se muestran y cuadran.
-  - [ ] La emisión de gift cards **nunca** suma a "mercancía vendida".
-  - [ ] El detalle por producto de un año cuesta ~365 lecturas, no miles.
-  - [ ] El reporte se exporta a PDF.
-  - [ ] Un `user` no puede ver reportes por ninguna vía.
+  - [x] Las dos identidades de §18.2 se muestran y cuadran.
+  - [x] La emisión de gift cards **nunca** suma a "mercancía vendida".
+  - [x] El detalle por producto de un año cuesta ~365 lecturas, no miles (un rango de
+        `dailySummaries` cuesta 1 lectura por día, nunca se pagina `sales` para esto).
+  - [x] El reporte se exporta a PDF.
+  - [x] Un `user` no puede ver reportes por ninguna vía.
 - **Condición para avanzar.** Los números del sistema coinciden con el dinero del cajón.
+  **Cumplida** — verificado en vivo con datos reales de DEV (no datos de prueba
+  sintéticos): la verificación de integridad (`dailySummaries` vs. `sum()` en vivo sobre
+  `sales`) coincidió exactamente para "Hoy" (21 ventas, 3 798,00 Bs) y "Últimos 7 días"
+  (27 ventas, 5 133,00 Bs) en todos los campos (`salesCount`, `totalCents`, `cashCents`,
+  `qrCents`, `giftCardCents`); el desglose por vendedor de Lenar Lima (9 ventas,
+  1 495,00 Bs) y Mario Santos (12 ventas, 2 303,00 Bs) sumó exactamente el total global
+  (21 ventas, 3 798,00 Bs). Un solo gap real encontrado y corregido en el camino — ver
+  §18.3, "Gap real encontrado y corregido" — que no era un descuadre financiero, sino un
+  campo ausente en un `dailySummaries` anterior a la Fase 6; documentado y resuelto sin
+  tocar ninguna Function, Rule ni documento existente. `user` confirmado rechazado en las
+  tres vías (menú, guard por URL, lectura REST directa → `403 PERMISSION_DENIED`). Ambos
+  builds (`development` y `production`) limpios. **Pendiente de aprobación del cliente
+  para hacer commit** — instrucción explícita de no commitear hasta cerrar la fase.
 
 ---
 

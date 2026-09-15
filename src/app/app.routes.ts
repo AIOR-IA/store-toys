@@ -20,6 +20,10 @@ import { adminGuard, authGuard } from '@core/session';
  * comparten el mostrador de Gift Cards (CLAUDE.md, tabla de roles); lo que
  * cada rol puede hacer se decide dentro del componente y, sobre todo, en las
  * Functions/Rules (nunca solo escondiendo un botón).
+ *
+ * FASE 7: `/reportes` SÍ lleva `adminGuard` — igual que `/usuarios`, el
+ * vendedor no ve el consolidado financiero por ninguna vía (CLAUDE.md, tabla
+ * de roles; plan §18.3).
  */
 export const routes: Routes = [
     {
@@ -54,6 +58,11 @@ export const routes: Routes = [
                 path: 'usuarios',
                 canActivate: [adminGuard],
                 loadChildren: () => import('./features/users/users.routes'),
+            },
+            {
+                path: 'reportes',
+                canActivate: [adminGuard],
+                loadChildren: () => import('./features/reports/reports.routes'),
             },
         ],
     },
