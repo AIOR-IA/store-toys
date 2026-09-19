@@ -149,6 +149,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Contador técnico por denominación para el código GENERADO de Gift
+    // Cards (ajuste posterior a la Fase 6, ver `functions/src/giftcards.ts`,
+    // comentario de cabecera sobre `codeMode`). A diferencia de
+    // `counters/internalCode` (que el cliente incrementa bajo Rule), este
+    // contador SOLO lo toca el Admin SDK dentro de `registerGiftCard`/
+    // `registerGiftCardBatch`: la reserva del siguiente código tiene que
+    // ocurrir en la MISMA transacción que verifica unicidad contra
+    // `giftCards` (requerimiento §6, §8, §9), algo que una Rule de cliente
+    // no puede expresar. Cerrado por completo — ni un admin puede leer o
+    // falsear la secuencia desde DevTools.
+    match /giftCardCodeCounters/{denominationLabel} {
+      allow read, write: if false;
+    }
+
     // El PLÁSTICO (plan §16.1, §8.8): estado visible en 1 lectura
     // (`status`, `amountCents`, `activeCycleId`, `currentBuyerName`…) — ya no
     // hacen falta 2 lecturas (plástico + emisión) como preveía el plan

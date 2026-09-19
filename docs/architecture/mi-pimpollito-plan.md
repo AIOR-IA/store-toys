@@ -2613,6 +2613,47 @@ obligación de entregar mercancía por ese valor ya no existe. Verificado en viv
 tarjeta de Bs 500 pagada en efectivo (`dailySummaries.giftCardsIssuedCents` +500,
 `giftCardIssuesCashCents` +500), cancelarla, y confirmar que ambos vuelven a 0.
 
+### 16.12 Código GENERADO por el sistema — ajuste posterior a la Fase 6
+
+> **Motivo (sin abrir una fase nueva):** la primera imprenta trae 20-40 tarjetas con
+> numeración propia, pero la tienda necesita poder generar ella misma el código de una
+> tarjeta física nueva cuando fabrique más, o si cambia de imprenta. El código manual
+> (§16.3) **sigue funcionando exactamente igual** — esto es una segunda forma de obtener un
+> código, no un reemplazo.
+
+- **Nomenclatura:** `GC{denominación}-{secuencia}`, denominación = `amountCents / 100` sin
+  decimales cuando es entero (el caso real de todas las denominaciones del cliente),
+  secuencia con mínimo 3 dígitos (`001`…`999`…`1000`…, crece sin techo). Ejemplos:
+  `GC50-001`, `GC1000-010`.
+- **El código generado ES el código de la tarjeta física**, permanentemente — igual que un
+  código manual, sobrevive todos sus ciclos (`cycleNumber`/`activeCycleId` son conceptos
+  independientes del código, §16.5). Nunca se genera un código nuevo por ciclo.
+- **Contador por denominación**, `giftCardCodeCounters/{denominación}` (p. ej. `.../1000`,
+  `.../500`): solo de dónde arrancar a buscar. La única fuente de verdad de unicidad sigue
+  siendo `giftCards/{code}` (§16.3) — cada candidato se verifica contra `giftCards` **dentro
+  de la misma transacción** antes de aceptarlo; si ya existe (código manual que se adelantó,
+  o una tarjeta `CANCELLED` — su documento nunca se borra, así que su código nunca se
+  reutiliza), se prueba el siguiente candidato sin sobreescribir nada. Contadores
+  independientes por denominación: el de `100` no afecta al de `500`.
+- **Atómico de punta a punta:** todo ocurre dentro de la transacción de `registerGiftCard`/
+  `registerGiftCardBatch` (Admin SDK) — nunca un paso de "generar" separado de "registrar".
+  Verificado en vivo con datos reales de DEV: `GC1000-001`/`GC1000-002` ya existían
+  (manual/cancelada) y el generador los saltó correctamente, aterrizando en `GC1000-003`; 5
+  llamadas `generateGiftCard` verdaderamente simultáneas para la misma denominación
+  produjeron 5 códigos distintos, cero colisiones.
+- **Extiende `registerGiftCard`/`registerGiftCardBatch`** con `codeMode: 'manual' | 'generated'`
+  (default `'manual'` si se omite — comportamiento sin cambios). No se creó ninguna Function
+  nueva. En modo lote generado, `quantity` reemplaza a `codes`.
+- **Permisos:** admin-only en ambos modos — mismo `assertAdmin()` incondicional que ya
+  protegía el registro manual, sin excepción para `codeMode: 'generated'`.
+- **Barcode:** siempre `CODE128` (nunca EAN/UPC — el código nunca es un estándar comercial
+  real, sea manual o generado). Reutiliza `printBarcodeLabel` (`shared/utils`) y
+  `LABEL_SIZE_MM` (`shared/constants`, 50×30 mm) — la misma implementación de Productos,
+  parametrizada, no una segunda copia. Imprimir etiqueta funciona igual para un código
+  manual (reimpresión) que para uno generado, desde "Ver detalle" de la tarjeta.
+- **Rules:** `giftCardCodeCounters/{denominación}` con `allow read, write: if false` —
+  cerrado por completo, solo el Admin SDK dentro de la Function lo toca.
+
 ---
 
 ## 17. Dinero y fechas

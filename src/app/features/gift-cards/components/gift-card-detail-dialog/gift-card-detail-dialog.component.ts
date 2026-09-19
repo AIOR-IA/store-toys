@@ -15,6 +15,7 @@ import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
 import { GiftCard, GiftCardIssuePaymentMethod, GiftCardMovement } from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
+import { GiftCardLabelDialogComponent, GiftCardLabelTarget } from '../gift-card-label-dialog/gift-card-label-dialog.component';
 
 type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel';
 
@@ -40,6 +41,7 @@ type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel';
         ConfirmDialogModule,
         TranslateModule,
         MoneyPipe,
+        GiftCardLabelDialogComponent,
     ],
     providers: [ConfirmationService],
     templateUrl: './gift-card-detail-dialog.component.html',
@@ -72,6 +74,14 @@ export class GiftCardDetailDialogComponent {
     movements = signal<GiftCardMovement[]>([]);
     loadingMovements = signal(false);
 
+    /**
+     * Etiqueta de impresión (ajuste posterior a la Fase 6, prompt §15-§16):
+     * admin-only, igual que registrar — funciona para códigos manuales Y
+     * generados por igual, porque el diálogo solo necesita `{code,
+     * amountCents}`, no distingue el origen del código.
+     */
+    labelTarget = signal<GiftCardLabelTarget | null>(null);
+
     constructor() {
         // Al cambiar de tarjeta (o cerrar/abrir), vuelve siempre a la vista
         // de solo lectura y recarga el historial — mismo patrón de
@@ -87,6 +97,7 @@ export class GiftCardDetailDialogComponent {
                 this.suspendReason.set('');
                 this.cancelReason.set('');
                 this.movements.set([]);
+                this.labelTarget.set(null);
                 if (card && admin) {
                     this.loadMovements(card.cardCode);
                 }
@@ -120,6 +131,14 @@ export class GiftCardDetailDialogComponent {
     }
     backToView(): void {
         this.mode.set('view');
+    }
+
+    openLabel(card: GiftCard): void {
+        this.labelTarget.set({ code: card.cardCode, amountCents: card.amountCents });
+    }
+
+    closeLabel(): void {
+        this.labelTarget.set(null);
     }
 
     confirmActivate(): void {

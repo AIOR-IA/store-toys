@@ -8,7 +8,7 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { ItemsNotFoundComponent, SpinnerComponent, TitleBarComponent } from '@shared/components/ui';
 import { ToastService } from '@core/services';
 import { BarcodeFormat, toJsBarcodeFormat } from '@core/utils';
-import { LABEL_SIZE_MM } from '../../label-size.const';
+import { LABEL_SIZE_MM } from '@shared/constants';
 import { ProductsService } from '../../products.service';
 import { Product } from '../../product.model';
 

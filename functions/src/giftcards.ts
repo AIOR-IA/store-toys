@@ -53,6 +53,17 @@ import { normalizeGiftCardCode } from './normalize';
  * `giftCardMovements` — las Rules cierran `allow write: if false` en las
  * tres (prompt §17, §35): ni un admin puede cambiar un `status`, un
  * `amountCents` o crear un movimiento a mano desde la consola.
+ *
+ * AJUSTE POSTERIOR A LA FASE 6 (sin abrir una fase nueva) — `codeMode`:
+ * hasta ahora `registerGiftCard`/`registerGiftCardBatch` solo aceptaban un
+ * código YA IMPRESO por la imprenta (modo `'manual'`, sin cambios: sigue
+ * siendo exactamente el mismo flujo). Se añade un segundo modo,
+ * `'generated'`, para cuando la tienda necesita generar ella misma el
+ * código de una tarjeta física nueva (imprenta distinta, numeración propia
+ * agotada, etc.) — ver `reserveGeneratedCodes()` más abajo para el porqué
+ * de cada decisión. Ninguna de las dos Functions existentes se duplicó: el
+ * modo es un parámetro más, como ya sugería el propio requerimiento
+ * ("preferiblemente extender, no crear Functions redundantes").
  */
 const REGION = 'southamerica-west1';
 
@@ -63,8 +74,19 @@ const MAX_AMOUNT_CENTS = Number.MAX_SAFE_INTEGER;
 const MAX_BUYER_NAME_LENGTH = 120;
 const MAX_REASON_LENGTH = 300;
 
+/**
+ * Techo defensivo de intentos al buscar el siguiente código libre de una
+ * denominación (ver `reserveGeneratedCodes`). A esta escala (20-40 tarjetas
+ * iniciales, unas pocas denominaciones) nunca se acerca ni de lejos — existe
+ * solo para que una denominación corrupta a mano no cuelgue la Function en
+ * un bucle infinito.
+ */
+const MAX_GENERATION_ATTEMPTS = 10000;
+
 type IssuePaymentMethod = 'cash' | 'qr';
 const ISSUE_PAYMENT_METHODS: IssuePaymentMethod[] = ['cash', 'qr'];
+
+type GiftCardCodeMode = 'manual' | 'generated';
 
 interface IssuePaymentInput {
     method: IssuePaymentMethod;
@@ -72,13 +94,19 @@ interface IssuePaymentInput {
 }
 
 interface RegisterGiftCardData {
-    code: string;
+    /** Solo en modo `'manual'` (por defecto si se omite `codeMode`). */
+    code?: string;
     amountCents: number;
+    codeMode?: GiftCardCodeMode;
 }
 
 interface RegisterGiftCardBatchData {
     amountCents: number;
-    codes: string[];
+    codeMode?: GiftCardCodeMode;
+    /** Solo en modo `'manual'` (por defecto si se omite `codeMode`). */
+    codes?: string[];
+    /** Solo en modo `'generated'`: cuántos códigos nuevos generar. */
+    quantity?: number;
 }
 
 interface ActivateGiftCardData {
@@ -127,6 +155,132 @@ function requireAmountCents(value: unknown, field = 'amountCents'): number {
     return value;
 }
 
+function requireCodeMode(value: unknown): GiftCardCodeMode {
+    if (value === undefined || value === null) return 'manual'; // default: comportamiento sin cambios
+    if (value === 'manual' || value === 'generated') return value;
+    throw new HttpsError('invalid-argument', 'El modo de código no es válido.');
+}
+
+function requireBatchQuantity(value: unknown): number {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > MAX_CODES_PER_BATCH
+    ) {
+        throw new HttpsError(
+            'invalid-argument',
+            `La cantidad debe ser un número entero entre 1 y ${MAX_CODES_PER_BATCH}.`,
+        );
+    }
+    return value;
+}
+
+/**
+ * Denominación legible para el código generado (requerimiento §1): el monto
+ * en bolivianos, sin decimales cuando es un entero — el caso real de todas
+ * las denominaciones fijas del cliente (50/100/250/500/1000 Bs). Si alguna
+ * vez existiera una denominación con centavos, se conserva el decimal en vez
+ * de redondearlo en silencio (nunca se pierde información del monto real).
+ */
+function denominationLabel(amountCents: number): string {
+    const bs = amountCents / 100;
+    return Number.isInteger(bs) ? String(bs) : bs.toFixed(2);
+}
+
+function padSequence(seq: number): string {
+    // Mínimo 3 dígitos (requerimiento §1); crece naturalmente más allá de
+    // 999 porque `padStart` nunca trunca, solo rellena por la izquierda.
+    return String(seq).padStart(3, '0');
+}
+
+function buildGeneratedCode(label: string, seq: number): string {
+    return `GC${label}-${padSequence(seq)}`;
+}
+
+/**
+ * Reserva `count` código(s) NUEVOS y únicos para una denominación, dentro de
+ * la MISMA transacción del caller (requerimiento §6-§9) — nunca como un paso
+ * previo separado: así la generación es atómica de punta a punta y dos
+ * pestañas generando a la vez para la misma denominación nunca pueden
+ * terminar con el mismo código (Firestore reintenta la transacción que pierde
+ * la carrera con una lectura fresca).
+ *
+ * El contador `giftCardCodeCounters/{denominationLabel}` (uno independiente
+ * por denominación, requerimiento §7) es solo de dónde arrancar a buscar —
+ * la única fuente de verdad de unicidad sigue siendo `giftCards/{code}`
+ * (plan §16.3), exactamente igual que ya hace `registerGiftCard` en modo
+ * manual. Por eso cada candidato se verifica contra `giftCards` antes de
+ * aceptarlo: si la imprenta ya registró a mano el código que el contador
+ * cree que sigue (p. ej. "GC1000-010"), el candidato se descarta sin
+ * sobreescribir nada y se prueba el siguiente (requerimiento §8) — lo mismo
+ * ocurre naturalmente con una tarjeta CANCELLED, porque su documento sigue
+ * existiendo para siempre (nunca se borra), así que su código nunca se
+ * reutiliza.
+ *
+ * Todas las lecturas (`tx.get`) ocurren aquí, antes de que el caller escriba
+ * nada — regla de las transacciones de Firestore: todas las lecturas antes
+ * que cualquier escritura. El caller es responsable de persistir el contador
+ * con `finalSeq` y de crear los documentos de `codes` devueltos.
+ */
+async function reserveGeneratedCodes(
+    tx: FirebaseFirestore.Transaction,
+    amountCents: number,
+    count: number,
+): Promise<{
+    codes: string[];
+    counterRef: FirebaseFirestore.DocumentReference;
+    counterExists: boolean;
+    finalSeq: number;
+}> {
+    const label = denominationLabel(amountCents);
+    const counterRef = db.doc(`giftCardCodeCounters/${label}`);
+    const counterSnap = await tx.get(counterRef);
+    const counterExists = counterSnap.exists;
+    let seq = counterExists ? ((counterSnap.get('seq') as number) ?? 0) : 0;
+
+    const codes: string[] = [];
+    let attempts = 0;
+    while (codes.length < count) {
+        attempts++;
+        if (attempts > MAX_GENERATION_ATTEMPTS) {
+            throw new HttpsError(
+                'internal',
+                'No se pudo generar un código único para esta denominación. Intenta nuevamente.',
+            );
+        }
+        seq++;
+        const candidate = buildGeneratedCode(label, seq);
+        const candidateSnap = await tx.get(db.doc(`giftCards/${candidate}`));
+        if (!candidateSnap.exists) {
+            codes.push(candidate);
+        }
+    }
+
+    return { codes, counterRef, counterExists, finalSeq: seq };
+}
+
+function writeGeneratedCodeCounter(
+    tx: FirebaseFirestore.Transaction,
+    counterRef: FirebaseFirestore.DocumentReference,
+    counterExists: boolean,
+    finalSeq: number,
+): void {
+    if (counterExists) {
+        tx.update(counterRef, { seq: finalSeq, updatedAt: FieldValue.serverTimestamp() });
+    } else {
+        // Nace la primera vez que se genera un código de esta denominación
+        // — no requiere una siembra manual previa (a diferencia de
+        // `counters/internalCode` de Productos): esta escritura la hace
+        // siempre el Admin SDK dentro de la Function, nunca el cliente.
+        tx.create(counterRef, {
+            seq: finalSeq,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+    }
+}
+
 function requireReason(value: unknown): string {
     if (typeof value !== 'string' || !value.trim()) {
         throw new HttpsError('invalid-argument', 'Escribe un motivo.');
@@ -172,32 +326,65 @@ function staffName(snap: FirebaseFirestore.DocumentSnapshot): string {
     return `${snap.get('firstName')} ${snap.get('lastName')}`.trim();
 }
 
-/** Registra una tarjeta física nueva (admin, prompt §13, §16). AVAILABLE desde el día 1. */
+/**
+ * Registra una tarjeta física nueva (admin, prompt §13, §16). AVAILABLE
+ * desde el día 1.
+ *
+ * `codeMode` (ajuste posterior a la Fase 6, ver comentario de cabecera):
+ * - `'manual'` (default si se omite) — SIN CAMBIOS: el código lo trae quien
+ *   registra (imprenta), se valida y se rechaza si ya existe.
+ * - `'generated'` — el servidor decide el código (`reserveGeneratedCodes`),
+ *   dentro de la MISMA transacción que crea la tarjeta: nunca hay una
+ *   ventana entre "generar" y "registrar" donde otro código pudiera colarse.
+ */
 export const registerGiftCard = onCall<RegisterGiftCardData>({ region: REGION }, async (request) => {
     const adminSnap = await assertAdmin(request.auth);
     const uid = request.auth!.uid;
     const name = staffName(adminSnap);
 
-    const cardCode = requireCode(request.data.code);
     const amountCents = requireAmountCents(request.data.amountCents);
+    const codeMode = requireCodeMode(request.data.codeMode);
 
-    const cardRef = db.doc(`giftCards/${cardCode}`);
-    const movementRef = db.collection('giftCardMovements').doc();
+    let resultCardCode = '';
 
-    await db.runTransaction(async (tx) => {
-        const cardSnap = await tx.get(cardRef);
-        if (cardSnap.exists) {
-            throw new HttpsError(
-                'already-exists',
-                `El código "${cardCode}" ya está registrado.`,
+    if (codeMode === 'generated') {
+        await db.runTransaction(async (tx) => {
+            const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(
+                tx,
+                amountCents,
+                1,
             );
-        }
+            const cardCode = codes[0];
+            resultCardCode = cardCode;
 
-        tx.create(cardRef, buildNewCardDoc(cardCode, amountCents, uid, name));
-        tx.create(movementRef, buildRegisteredMovement(cardCode, amountCents, uid, name));
-    });
+            writeGeneratedCodeCounter(tx, counterRef, counterExists, finalSeq);
+            tx.create(db.doc(`giftCards/${cardCode}`), buildNewCardDoc(cardCode, amountCents, uid, name));
+            tx.create(
+                db.collection('giftCardMovements').doc(),
+                buildRegisteredMovement(cardCode, amountCents, uid, name),
+            );
+        });
+    } else {
+        const cardCode = requireCode(request.data.code);
+        resultCardCode = cardCode;
+        const cardRef = db.doc(`giftCards/${cardCode}`);
+        const movementRef = db.collection('giftCardMovements').doc();
 
-    return { cardCode };
+        await db.runTransaction(async (tx) => {
+            const cardSnap = await tx.get(cardRef);
+            if (cardSnap.exists) {
+                throw new HttpsError(
+                    'already-exists',
+                    `El código "${cardCode}" ya está registrado.`,
+                );
+            }
+
+            tx.create(cardRef, buildNewCardDoc(cardCode, amountCents, uid, name));
+            tx.create(movementRef, buildRegisteredMovement(cardCode, amountCents, uid, name));
+        });
+    }
+
+    return { cardCode: resultCardCode };
 });
 
 /**
@@ -205,6 +392,13 @@ export const registerGiftCard = onCall<RegisterGiftCardData>({ region: REGION },
  * todo o nada — si un código ya existe (en `giftCards` o repetido dentro del
  * mismo lote), no se crea ninguna. Hasta `MAX_CODES_PER_BATCH` por llamada,
  * de sobra para las 20-40 tarjetas iniciales del cliente.
+ *
+ * `codeMode` (ajuste posterior a la Fase 6, ver comentario de cabecera):
+ * - `'manual'` (default si se omite) — SIN CAMBIOS: `codes` trae la lista.
+ * - `'generated'` — `quantity` reemplaza a `codes`: el servidor reserva esa
+ *   cantidad de códigos nuevos y únicos de la denominación pedida, dentro de
+ *   la misma transacción (`reserveGeneratedCodes`), con las mismas garantías
+ *   de todo-o-nada que el modo manual.
  */
 export const registerGiftCardBatch = onCall<RegisterGiftCardBatchData>(
     { region: REGION },
@@ -214,6 +408,32 @@ export const registerGiftCardBatch = onCall<RegisterGiftCardBatchData>(
         const name = staffName(adminSnap);
 
         const amountCents = requireAmountCents(request.data.amountCents);
+        const codeMode = requireCodeMode(request.data.codeMode);
+
+        if (codeMode === 'generated') {
+            const quantity = requireBatchQuantity(request.data.quantity);
+            let resultCodes: string[] = [];
+
+            await db.runTransaction(async (tx) => {
+                const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(
+                    tx,
+                    amountCents,
+                    quantity,
+                );
+                resultCodes = codes;
+
+                writeGeneratedCodeCounter(tx, counterRef, counterExists, finalSeq);
+                for (const code of codes) {
+                    tx.create(db.doc(`giftCards/${code}`), buildNewCardDoc(code, amountCents, uid, name));
+                    tx.create(
+                        db.collection('giftCardMovements').doc(),
+                        buildRegisteredMovement(code, amountCents, uid, name),
+                    );
+                }
+            });
+
+            return { cardCodes: resultCodes };
+        }
 
         const rawCodes = request.data.codes;
         if (!Array.isArray(rawCodes) || rawCodes.length < 1 || rawCodes.length > MAX_CODES_PER_BATCH) {

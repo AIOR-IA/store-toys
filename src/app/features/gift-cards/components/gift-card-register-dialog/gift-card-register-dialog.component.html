@@ -8,6 +8,36 @@
     [header]="'app.giftCards.register.title' | translate"
     (onHide)="close()"
 >
+    @if (showResult()) {
+    <div class="flex flex-col gap-4">
+        <p class="text-sm font-medium">
+            {{ (resultCodes()!.length > 1 ? "app.giftCards.register.generatedResultBatch" : "app.giftCards.register.generatedResult") | translate }}
+        </p>
+        <ul class="flex flex-col gap-2 max-h-64 overflow-y-auto">
+            @for (code of resultCodes(); track code) {
+            <li class="flex items-center justify-between border border-gray-200 rounded px-3 py-2">
+                <span class="font-mono font-medium">{{ code }}</span>
+                <button
+                    pButton
+                    type="button"
+                    class="p-button-text p-button-sm"
+                    icon="fas fa-print"
+                    [label]="'app.giftCards.labels.print' | translate"
+                    (click)="openLabel(code)"
+                ></button>
+            </li>
+            }
+        </ul>
+        <div class="flex justify-end pt-2">
+            <button
+                pButton
+                type="button"
+                [label]="'app.common.close' | translate"
+                (click)="close()"
+            ></button>
+        </div>
+    </div>
+    } @else {
     <form (ngSubmit)="submit()" class="flex flex-col gap-4">
         <p-selectButton
             [options]="modeOptions"
@@ -19,6 +49,20 @@
         >
             <ng-template let-item pTemplate="item">{{ item.label | translate }}</ng-template>
         </p-selectButton>
+
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium">{{ "app.giftCards.register.codeModeLabel" | translate }}</label>
+            <p-selectButton
+                [options]="codeModeOptions"
+                [ngModel]="codeMode()"
+                (ngModelChange)="codeMode.set($event)"
+                optionLabel="label"
+                optionValue="value"
+                [name]="'codeMode'"
+            >
+                <ng-template let-item pTemplate="item">{{ item.label | translate }}</ng-template>
+            </p-selectButton>
+        </div>
 
         <div class="flex flex-col gap-1">
             <label class="text-sm font-medium" for="amountBs">{{
@@ -39,7 +83,7 @@
             <div class="text-xs text-gray-500">{{ "app.giftCards.register.amountHelp" | translate }}</div>
         </div>
 
-        @if (mode() === 'single') {
+        @if (codeMode() === 'manual') { @if (mode() === 'single') {
         <div class="flex flex-col gap-1">
             <label class="text-sm font-medium" for="code">{{
                 "app.giftCards.code" | translate
@@ -73,7 +117,26 @@
                 {{ "app.giftCards.register.codesCount" | translate: { count: batchCodes().length } }}
             </div>
         </div>
-        }
+        } } @else {
+        <div class="text-xs text-gray-500">{{ "app.giftCards.register.generatedHelp" | translate }}</div>
+        @if (mode() === 'batch') {
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="quantity">{{
+                "app.giftCards.register.quantity" | translate
+            }}</label>
+            <p-inputNumber
+                inputId="quantity"
+                [ngModel]="quantity()"
+                (ngModelChange)="quantity.set($event)"
+                [name]="'quantity'"
+                [showButtons]="true"
+                [min]="1"
+                [max]="maxBatchQuantity"
+                styleClass="w-full"
+                inputStyleClass="w-full"
+            ></p-inputNumber>
+        </div>
+        } }
 
         <div class="flex justify-end gap-2 pt-2">
             <button
@@ -92,4 +155,10 @@
             ></button>
         </div>
     </form>
+    }
 </p-dialog>
+
+<app-gift-card-label-dialog
+    [target]="labelTarget()"
+    (closed)="closeLabel()"
+></app-gift-card-label-dialog>

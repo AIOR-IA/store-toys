@@ -95,6 +95,15 @@
                 [label]="'app.giftCards.actions.cancel' | translate"
                 (click)="openCancel()"
             ></button>
+            } @if (isAdmin()) {
+            <button
+                pButton
+                type="button"
+                class="p-button-outlined"
+                icon="fas fa-print"
+                [label]="'app.giftCards.labels.print' | translate"
+                (click)="openLabel(card)"
+            ></button>
             }
         </div>
 
@@ -222,3 +231,8 @@
 </p-dialog>
 
 <p-confirmDialog></p-confirmDialog>
+
+<app-gift-card-label-dialog
+    [target]="labelTarget()"
+    (closed)="closeLabel()"
+></app-gift-card-label-dialog>

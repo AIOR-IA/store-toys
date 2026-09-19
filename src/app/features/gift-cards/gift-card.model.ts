@@ -26,6 +26,17 @@ import { Timestamp } from '@angular/fire/firestore';
  */
 export type GiftCardStatus = 'AVAILABLE' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
 
+/**
+ * Origen del código al registrar una tarjeta física (ajuste posterior a la
+ * Fase 6, sin tocar el modelo de `GiftCard`: el código sigue siendo el ID
+ * del documento en ambos casos, indistinguible una vez creado — ver
+ * `functions/src/giftcards.ts`, comentario de cabecera).
+ *
+ * - `'manual'` — el código viene de la imprenta, tecleado por quien registra.
+ * - `'generated'` — el servidor lo decide: `GC{denominación}-{secuencia}`.
+ */
+export type GiftCardCodeMode = 'manual' | 'generated';
+
 export interface GiftCard {
     cardCode: string; // del ID del documento — NO se guarda en el documento
     amountCents: number; // denominación fija, decidida al registrar (nunca cambia)

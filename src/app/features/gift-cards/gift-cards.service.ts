@@ -124,6 +124,39 @@ export class GiftCardsService {
         return from(callable({ amountCents, codes })).pipe(map((r) => r.data));
     }
 
+    /**
+     * `registerGiftCard` en modo `'generated'` (Function, admin — ajuste
+     * posterior a la Fase 6): el servidor decide el código
+     * (`GC{denominación}-{secuencia}`), atómico dentro de la misma
+     * transacción que crea la tarjeta. No toca `registerGiftCard(code, ...)`
+     * de arriba — ese sigue siendo exactamente el modo manual de siempre.
+     */
+    generateGiftCard(amountCents: number): Observable<{ cardCode: string }> {
+        const callable = httpsCallable<
+            { amountCents: number; codeMode: 'generated' },
+            { cardCode: string }
+        >(this.functions, 'registerGiftCard');
+        return from(callable({ amountCents, codeMode: 'generated' })).pipe(map((r) => r.data));
+    }
+
+    /**
+     * `registerGiftCardBatch` en modo `'generated'`: `quantity` códigos
+     * nuevos y únicos de una denominación, todo o nada — mismas garantías
+     * que el lote manual de arriba.
+     */
+    generateGiftCardBatch(
+        amountCents: number,
+        quantity: number,
+    ): Observable<{ cardCodes: string[] }> {
+        const callable = httpsCallable<
+            { amountCents: number; codeMode: 'generated'; quantity: number },
+            { cardCodes: string[] }
+        >(this.functions, 'registerGiftCardBatch');
+        return from(callable({ amountCents, codeMode: 'generated', quantity })).pipe(
+            map((r) => r.data),
+        );
+    }
+
     /** `activateGiftCard` (Function, staff, prompt §10): AVAILABLE → ACTIVE, ciclo nuevo. */
     activateGiftCard(
         input: ActivateGiftCardInput,

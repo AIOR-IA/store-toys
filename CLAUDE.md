@@ -254,6 +254,14 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   **único** pago mixto que la UI ofrece.
 - No caducan, no se recargan, el plástico se reutiliza. Activan admin y vendedor; registrar
   plástico nuevo y cancelar definitivamente es solo del admin.
+- **Código: manual O generado** (ajuste posterior a la Fase 6, admin-only en ambos). Manual:
+  el código lo trae la imprenta, tecleado tal cual. Generado: el servidor decide
+  `GC{denominación}-{secuencia}` (mín. 3 dígitos), atómico dentro de la transacción de
+  `registerGiftCard`/`registerGiftCardBatch` (`codeMode`), con un contador
+  `giftCardCodeCounters/{denominación}` independiente por denominación que solo indica por
+  dónde arrancar — la unicidad real siempre se verifica contra `giftCards/{code}` antes de
+  aceptar un candidato. El código (de cualquier origen) es el mismo durante todos los ciclos
+  de la tarjeta. Detalle completo: plan §16.12.
 - Todo cambio de estado nace con su movimiento **en la misma transacción**.
 - `cancelSale` revierte una gift card **solo si el ciclo sigue intacto** desde la redención
   (nadie lo reactivó desde entonces); si ya se reutilizó, la anulación completa se rechaza

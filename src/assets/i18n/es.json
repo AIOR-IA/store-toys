@@ -407,7 +407,14 @@
         "codePlaceholder": "Código impreso en la tarjeta",
         "codesLabel": "Códigos (uno por línea)",
         "codesPlaceholder": "GC100-001\nGC100-002\nGC100-003",
-        "codesCount": "{{count}} código(s)"
+        "codesCount": "{{count}} código(s)",
+        "codeModeLabel": "Código de la tarjeta",
+        "codeModeManual": "Ingresar código",
+        "codeModeGenerated": "Generar automáticamente",
+        "generatedHelp": "El sistema genera el código automáticamente (ej. GC1000-010) al registrar: no hace falta calcularlo.",
+        "quantity": "Cantidad",
+        "generatedResult": "Tarjeta registrada. Código generado:",
+        "generatedResultBatch": "Tarjetas registradas. Códigos generados:"
       },
       "movements": {
         "title": "Historial de movimientos",
@@ -432,9 +439,15 @@
         "amountRequired": "Indica el monto de la tarjeta.",
         "codeRequired": "Escribe el código de la tarjeta.",
         "codesRequired": "Escribe al menos un código.",
+        "quantityRequired": "Indica cuántas tarjetas generar.",
         "reasonRequired": "Escribe un motivo.",
         "confirmReactivate": "¿Reactivar esta tarjeta? Vuelve a estar habilitada para canjearse.",
         "confirmCancel": "¿Dar de baja esta tarjeta de forma definitiva? No se puede deshacer."
+      },
+      "labels": {
+        "print": "Imprimir etiqueta",
+        "close": "Cerrar",
+        "amountText": "Gift Card {{amount}}"
       }
     },
     "reports": {
