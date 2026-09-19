@@ -89,8 +89,8 @@
     --font-family: ProximaNova, Roboto;
 
     /* PALETA MI PIMPOLLITO */
-    --pimpollito-primary: #bd1119;
-    --pimpollito-primary-dark: #8d0a10;
+    --pimpollito-primary: #d71920;
+    --pimpollito-primary-dark: #b81218;
     --pimpollito-primary-darker: #6b070c;
     --pimpollito-primary-light: #d01821;
 
@@ -98,31 +98,31 @@
     --pimpollito-gold-dark: #a97c2f;
     --pimpollito-gold-light: #f1cd76;
 
-    --pimpollito-soft-bg: #fff5ec;
-    --pimpollito-bg: #fffaf1;
+    --pimpollito-soft-bg: #f5f6f8;
+    --pimpollito-bg: #f5f6f8;
     --pimpollito-card: #ffffff;
-    --pimpollito-border: #ded8cf;
+    --pimpollito-border: #e5e7eb;
 
-    --pimpollito-text: #231c18;
-    --pimpollito-text-secondary: #6d665f;
+    --pimpollito-text: #1f2226;
+    --pimpollito-text-secondary: #6b7280;
 
     /* Compatibilidad con las clases heredadas */
     --primary-clear: var(--pimpollito-gold);
     --primary-clear-hover: var(--pimpollito-gold-light);
-    --primary-clear-soft: #fff5d8;
+    --primary-clear-soft: #eef0f3;
 
     --primary-default: var(--pimpollito-primary);
     --primary-hover: var(--pimpollito-primary-light);
-    --primary-light: rgba(189, 17, 25, 0.7);
+    --primary-light: rgba(215, 25, 32, 0.7);
     --primary-soft: #fdecec;
     --primary-dark: var(--pimpollito-primary-dark);
 
-    --bg-brand-soft: #fff5ec;
-    --bg-primary: #fff5ec;
-    --bg-secondary: #fffaf1;
+    --bg-brand-soft: #eef0f3;
+    --bg-primary: #e5e7eb;
+    --bg-secondary: #f5f6f8;
 
     --secondary-color: var(--pimpollito-gold);
-    --secondary-soft: #fff5d8;
+    --secondary-soft: #eef0f3;
     --secondary-dark: var(--pimpollito-gold-dark);
 
     --text-primary: var(--pimpollito-text);
@@ -190,34 +190,40 @@
     --inline-spacing: 0.5rem;
     --border-radius: 0.375rem;
 
-    --surface-ground: #fffaf1;
+    --surface-ground: #f5f6f8;
     --surface-section: #ffffff;
     --surface-card: #ffffff;
     --surface-overlay: #ffffff;
-    --surface-border: #ded8cf;
-    --surface-hover: #fff5ec;
+    --surface-border: #e5e7eb;
+    --surface-hover: #f5f6f8;
 
-    --highlight-bg: #fff5ec;
-    --highlight-text-color: #bd1119;
+    --highlight-bg: #fdecec;
+    --highlight-text-color: #d71920;
 
     --focus-ring: 0 0 0 1px var(--pimpollito-primary);
     --maskbg: rgba(0, 0, 0, 0.4);
 
     /* LAYOUT */
-    --topbar-bg: var(--pimpollito-primary);
-    --sidebar-bg: #2b2520;
-    --sidebar-item-hover: #3a322c;
-    --sidebar-item-active: rgba(216, 162, 61, 0.28);
+    --topbar-bg: #252424;
+    --sidebar-bg: #252424;
+    --sidebar-item-hover: #2a2f36;
+    --sidebar-item-active: #343a43;
+    --sidebar-text: #f3f4f6;
+    --sidebar-text-secondary: #b6bdc7;
+    --sidebar-icon-bg: #252424;
+    --sidebar-icon-bg-hover: #252424;
+    --sidebar-icon-border: #383c42;
+    --card-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 
     /* IONIC */
     --ion-color-primary: var(--pimpollito-primary);
-    --ion-color-primary-rgb: 189, 17, 25;
+    --ion-color-primary-rgb: 215, 25, 32;
     --ion-color-primary-contrast: #ffffff;
     --ion-color-primary-contrast-rgb: 255, 255, 255;
     --ion-color-primary-shade: var(--pimpollito-primary-dark);
     --ion-color-primary-tint: var(--pimpollito-primary-light);
 
-    --ion-background-color: #fffaf1;
+    --ion-background-color: #f5f6f8;
     --ion-text-color: var(--pimpollito-text);
 
     color-scheme: light;
@@ -1814,7 +1820,7 @@ a.p-menuitem-link:hover {
         color: var(--text-primary);
         background: #ffffff;
         padding: 0.75rem 0.75rem;
-        border: 1px solid #e4e4e7;
+        border: 1px solid var(--surface-border);
         transition: none;
         appearance: none;
         border-radius: 0.375rem;
@@ -1825,8 +1831,8 @@ a.p-menuitem-link:hover {
     .p-inputtext:enabled:focus {
         outline: 0 none;
         outline-offset: 0;
-        box-shadow: 0 0 0 1px var(--primary-dark);
-        border-color: var(--primary-color);
+        box-shadow: 0 0 0 2px rgba(215, 25, 32, 0.12);
+        border-color: rgba(215, 25, 32, 0.45);
     }
     .p-inputtext.ng-dirty.ng-invalid {
         border-color: #f0a9a7;

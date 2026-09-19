@@ -17,8 +17,8 @@ module.exports = {
                  * ya usan los componentes reutilizados sigan resolviendo.
                  */
                 primary: {
-                    DEFAULT: "#bd1119", // rojo de marca
-                    hover: "#d01821",
+                    DEFAULT: "#d71920", // rojo de marca
+                    hover: "#b81218",
                     light: "#e04a51",
                     soft: "#fdecec",
                     dark: "#8d0a10",
@@ -26,10 +26,10 @@ module.exports = {
                 },
 
                 carbon: {
-                    DEFAULT: "#2b2520", // carbón: texto, topbar, sidebar
-                    light: "#4a423b",
-                    soft: "#f3f1ee",
-                    dark: "#171310",
+                    DEFAULT: "#1f2226", // grafito frío: texto, topbar, sidebar
+                    light: "#343a43",
+                    soft: "#f3f4f6",
+                    dark: "#1b1e22",
                 },
 
                 gold: {
@@ -40,8 +40,8 @@ module.exports = {
                 },
 
                 cream: {
-                    DEFAULT: "#fffaf1", // fondo de aplicación
-                    dark: "#f5efe4",
+                    DEFAULT: "#f5f6f8", // fondo de aplicación
+                    dark: "#e5e7eb",
                 },
 
                 giraffe: {
@@ -53,17 +53,17 @@ module.exports = {
 
                 /** Alias conservados: los usan componentes reutilizados. */
                 brand: {
-                    DEFAULT: "#bd1119",
-                    light: "rgba(189, 17, 25, 0.7)",
+                    DEFAULT: "#d71920",
+                    light: "rgba(215, 25, 32, 0.7)",
                     dark: "#8d0a10",
                     soft: "#fff5d8",
                     medium: "#d8a23d",
                 },
 
                 "primary-clear": {
-                    DEFAULT: "#d8a23d",
-                    hover: "#f1cd76",
-                    soft: "#fff5d8",
+                    DEFAULT: "#343a43",
+                    hover: "#2a2f36",
+                    soft: "#eef0f3",
                 },
 
                 danger: {

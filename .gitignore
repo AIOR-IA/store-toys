@@ -2,7 +2,7 @@
 
 # TEMPORAL - Capacitor Android (remover cuando se finalice mobile)
 android/
-
+docs/
 
 # Compiled output
 /dist

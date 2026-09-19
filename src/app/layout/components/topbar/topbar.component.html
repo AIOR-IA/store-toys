@@ -1,5 +1,5 @@
-<div class="layout-topbar bg-primary text-center relative w-full gap-5">
-    <div class="layout-topbar-logo hidden md:flex">
+<div class="layout-topbar text-center relative w-full gap-5">
+    <!-- <div class="layout-topbar-logo hidden md:flex">
         <div class="topbar-logo-badge">
             <img
                 src="assets/images/logo.png"
@@ -7,11 +7,11 @@
                 alt="Mi Pimpollito"
             />
         </div>
-    </div>
+    </div> -->
 
     @if (isDevFirebase) {
     <span
-        class="absolute top-1 left-1 md:left-16 bg-gold text-carbon text-[10px] font-bold uppercase px-2 py-0.5 rounded"
+        class="absolute top-1 left-1 md:left-16 firebase-dev-badge text-[10px] font-bold uppercase px-2 py-0.5 rounded"
         [title]="'Este build habla con Firebase ' + firebaseProjectId"
         >Firebase DEV</span
     >

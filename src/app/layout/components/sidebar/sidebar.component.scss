@@ -1,15 +1,15 @@
 ::ng-deep .sidebar-button {
     .p-button {
-        color: #28406e;
-        background: #ffffff;
-        border: 1px solid #28406e;
+        color: var(--primary-color);
+        background: var(--sidebar-icon-bg);
+        border: 1px solid var(--sidebar-icon-border);
         padding: 0.75rem 1rem;
         font-size: 1rem;
         transition: none;
         outline-color: transparent;
         &:hover {
-            background: rgb(218, 222, 230);
-            border: 1px solid var(--primary-dark);
+            background: var(--sidebar-icon-bg-hover);
+            border: 1px solid var(--primary-color);
         }
     }
 }

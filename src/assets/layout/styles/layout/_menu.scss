@@ -25,7 +25,7 @@
             font-size: 0.857rem;
             text-transform: uppercase;
             font-weight: 700;
-            color: rgba(255, 255, 255, 0.55);
+            color: var(--sidebar-text-secondary);
             margin: 0.75rem 0;
         }
 
@@ -37,7 +37,7 @@
     a {
         user-select: none;
         // color: var(--primary-dark) !important;
-        color: white !important;
+        color: var(--sidebar-text) !important;
 
         &.active-menuitem {
             > .layout-submenu-toggler {
@@ -77,6 +77,19 @@
                 margin-right: 0.5rem;
             }
 
+            .icon-container {
+                background-color: var(--sidebar-icon-bg);
+                border-color: var(--sidebar-icon-border);
+            }
+
+            .layout-menuitem-text {
+                color: var(--sidebar-text);
+            }
+
+            &:hover .icon-container {
+                background-color: var(--sidebar-icon-bg-hover);
+            }
+
             .layout-submenu-toggler {
                 font-size: 75%;
                 margin-left: auto;
@@ -92,7 +105,14 @@
             &.active-route {
                 font-weight: bold;
                 background-color: var(--sidebar-item-active);
-                color: #ffffff;
+                color: var(--sidebar-text);
+                box-shadow: inset 4px 0 0 var(--primary-color);
+
+                .icon-container {
+                    background-color: var(--primary-color);
+                    border-color: var(--primary-color);
+                    color: #ffffff;
+                }
                 &::after {
                     content: "▶"; /* O usa '›', '❯', etc., para un estilo más suave */
                     font-size: 0.9em;

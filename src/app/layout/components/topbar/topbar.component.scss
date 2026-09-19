@@ -117,7 +117,7 @@
     justify-content: center;
 
     background: #ffffff;
-    border: 3px solid rgba(103, 173, 61, 0.75);
+    border: 3px solid var(--primary-color);
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
 
     overflow: hidden;
@@ -128,4 +128,10 @@
     height: 100%;
     object-fit: contain;
     display: block;
+}
+
+.firebase-dev-badge {
+    background: var(--sidebar-item-active);
+    color: var(--sidebar-text);
+    border: 1px solid var(--sidebar-icon-border);
 }
