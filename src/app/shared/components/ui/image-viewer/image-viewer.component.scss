@@ -1,0 +1,45 @@
+.image-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3.5rem 1rem 1rem;
+    background: rgba(15, 18, 22, 0.88);
+    overflow: hidden;
+
+    &__img {
+        max-width: 90vw;
+        max-height: 85vh;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        cursor: default;
+        border-radius: 0.25rem;
+    }
+
+    &__close {
+        position: absolute;
+        top: 0.75rem;
+        right: 0.75rem;
+        width: 2.5rem;
+        height: 2.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--sidebar-icon-border);
+        border-radius: 0.5rem;
+        background: var(--sidebar-item-active);
+        color: #ffffff;
+        font-size: 1.1rem;
+        cursor: pointer;
+        transition: background-color 0.15s;
+
+        &:hover,
+        &:focus-visible {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+    }
+}

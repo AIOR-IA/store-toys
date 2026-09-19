@@ -19,6 +19,7 @@ import {
     ReactiveFormsModule,
     Validators,
 } from '@angular/forms';
+import { ImageViewerComponent } from '@shared/components/ui/image-viewer/image-viewer.component';
 import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -69,6 +70,7 @@ function integerValidator(control: AbstractControl): ValidationErrors | null {
         InputNumberModule,
         TranslateModule,
         ProductCodePickerComponent,
+        ImageViewerComponent,
     ],
     templateUrl: './product-form-dialog.component.html',
 })
@@ -99,6 +101,7 @@ export class ProductFormDialogComponent {
 
     resolvedCode = signal<ResolvedCode | null>(null);
     imagePreviewUrl = signal<string | null>(null);
+    viewerSrc = signal<string | null>(null);
     pendingImage = signal<Blob | null>(null);
     compressingImage = signal(false);
 

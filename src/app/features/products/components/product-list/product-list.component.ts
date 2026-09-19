@@ -7,6 +7,7 @@ import { ConfirmationService } from 'primeng/api';
 import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { TooltipModule } from 'primeng/tooltip';
+import { ImageViewerComponent } from '@shared/components/ui/image-viewer/image-viewer.component';
 import {
     CardsPaginatorComponent,
     FilterTabComponent,
@@ -60,6 +61,7 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 3;
         ProductFormDialogComponent,
         ProductLabelDialogComponent,
         ProductChangeCodeDialogComponent,
+        ImageViewerComponent,
     ],
     templateUrl: './product-list.component.html',
 })
@@ -106,6 +108,7 @@ export class ProductListComponent implements OnInit {
     singleResultMode = signal(false);
 
     formVisible = signal(false);
+    viewerSrc = signal<string | null>(null);
     editingProduct = signal<Product | null>(null);
     labelProduct = signal<Product | null>(null);
     changeCodeProduct = signal<Product | null>(null);

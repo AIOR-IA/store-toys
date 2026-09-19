@@ -1,0 +1,13 @@
+@if (src()) {
+<div class="image-viewer" role="dialog" aria-modal="true" (click)="closed.emit()">
+    <button
+        type="button"
+        class="image-viewer__close"
+        [attr.aria-label]="'app.common.close' | translate"
+        (click)="closed.emit()"
+    >
+        <i class="fas fa-times"></i>
+    </button>
+    <img class="image-viewer__img" [src]="src()" alt="" (click)="$event.stopPropagation()" />
+</div>
+}

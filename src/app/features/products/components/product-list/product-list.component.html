@@ -56,7 +56,8 @@
                 <img
                     [src]="product.imageUrl"
                     alt=""
-                    class="w-10 h-10 object-cover rounded"
+                    class="w-10 h-10 object-cover rounded cursor-zoom-in hover:opacity-80 transition-opacity"
+                    (click)="product.imageUrl && viewerSrc.set(product.imageUrl)"
                 />
             </td>
             <td>{{ product.name }}</td>
@@ -160,6 +161,8 @@
     [product]="labelProduct()"
     (closed)="labelProduct.set(null)"
 ></app-product-label-dialog>
+
+<app-image-viewer [src]="viewerSrc()" (closed)="viewerSrc.set(null)"></app-image-viewer>
 
 <app-product-change-code-dialog
     [product]="changeCodeProduct()"

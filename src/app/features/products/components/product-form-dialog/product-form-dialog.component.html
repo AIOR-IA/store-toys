@@ -101,7 +101,8 @@
                 <img
                     [src]="imagePreviewUrl()"
                     alt=""
-                    class="w-20 h-20 object-cover rounded border border-gray-200"
+                    class="w-20 h-20 object-cover rounded border border-gray-200 cursor-zoom-in hover:opacity-80 transition-opacity"
+                    (click)="viewerSrc.set(imagePreviewUrl())"
                 />
                 }
                 <label
@@ -160,3 +161,5 @@
         ></button>
     </ng-template>
 </p-dialog>
+
+<app-image-viewer [src]="viewerSrc()" (closed)="viewerSrc.set(null)"></app-image-viewer>
