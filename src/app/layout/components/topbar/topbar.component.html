@@ -66,26 +66,63 @@
     }
 </div>
 
-<p-overlayPanel #overlay [dismissable]="true" styleClass="user-menu-panel">
-    <div class="p-3 text-sm min-w-[180px]">
-        <div class="font-semibold text-carbon">{{ fullName() }}</div>
-        <div class="text-gray-500 text-xs mb-3 truncate">{{ userEmail() }}</div>
-        <button
-            type="button"
-            class="w-full text-left hover:underline flex items-center gap-2 mb-2"
-            (click)="openChangePassword()"
-        >
-            <i class="fas fa-key"></i>
-            {{ "app.profile.changePassword" | translate }}
-        </button>
-        <button
-            type="button"
-            class="w-full text-left text-danger hover:underline flex items-center gap-2"
-            (click)="logout()"
-        >
-            <i class="fas fa-right-from-bracket"></i>
-            {{ "app.auth.logout" | translate }}
-        </button>
+
+<p-overlayPanel
+    #overlay
+    [dismissable]="true"
+    styleClass="user-menu-panel"
+>
+    <div class="user-menu">
+        <!-- Información del usuario -->
+        <div class="user-menu-header">
+            <div class="user-menu-name" [title]="fullName()">
+                {{ fullName() }}
+            </div>
+
+            <div class="user-menu-email" [title]="userEmail()">
+                {{ userEmail() }}
+            </div>
+        </div>
+
+        <!-- Separador -->
+        <div class="user-menu-divider"></div>
+
+        <!-- Opciones del usuario -->
+        <div class="user-menu-actions">
+            <!-- Cambiar contraseña -->
+            <button
+                type="button"
+                class="user-menu-action"
+                (click)="openChangePassword()"
+            >
+                <span class="user-menu-action-icon">
+                    <i class="fas fa-key"></i>
+                </span>
+
+                <span class="user-menu-action-label">
+                    {{ "app.profile.changePassword" | translate }}
+                </span>
+
+                <i class="fas fa-chevron-right user-menu-chevron"></i>
+            </button>
+
+            <!-- Cerrar sesión -->
+            <button
+                type="button"
+                class="user-menu-action user-menu-action-logout"
+                (click)="logout()"
+            >
+                <span class="user-menu-action-icon">
+                    <i class="fas fa-right-from-bracket"></i>
+                </span>
+
+                <span class="user-menu-action-label">
+                    {{ "app.auth.logout" | translate }}
+                </span>
+
+                <i class="fas fa-chevron-right user-menu-chevron"></i>
+            </button>
+        </div>
     </div>
 </p-overlayPanel>
 

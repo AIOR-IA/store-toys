@@ -9,8 +9,242 @@
     @apply w-full flex items-center justify-start gap-4 py-4 px-8 hover:bg-gray-100 rounded-none;
 }
 
-::ng-deep .p-overlaypanel .p-overlaypanel-content {
-    padding: 0 !important;
+
+/* ==========================================
+   MENÚ DE USUARIO - MI PIMPOLLITO
+   ========================================== */
+
+::ng-deep .p-overlaypanel.user-menu-panel {
+    width: 320px;
+    max-width: calc(100vw - 24px);
+
+    background: #25282c !important;
+    color: #f3f4f6;
+
+    border: 1px solid #40454d !important;
+    border-radius: 14px !important;
+
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.24),
+        0 4px 12px rgba(0, 0, 0, 0.12) !important;
+
+    overflow: visible;
+
+    /* Eliminar padding interno de PrimeNG */
+    .p-overlaypanel-content {
+        padding: 0 !important;
+        background: transparent !important;
+        border-radius: inherit;
+    }
+
+    /* Flecha que conecta el menú con el avatar */
+    &::before {
+        border-bottom-color: #40454d !important;
+    }
+
+    &::after {
+        border-bottom-color: #25282c !important;
+    }
+
+    /* ======================================
+       CONTENEDOR PRINCIPAL
+       ====================================== */
+
+    .user-menu {
+        width: 100%;
+        padding: 16px;
+
+        background: #25282c;
+        border-radius: 14px;
+
+        font-size: 13px;
+        text-align: left;
+    }
+
+    /* ======================================
+       INFORMACIÓN DEL USUARIO
+       ====================================== */
+
+    .user-menu-header {
+        padding: 4px 4px 12px;
+        min-width: 0;
+    }
+
+    .user-menu-name {
+        color: #f9fafb;
+
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.4;
+
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .user-menu-email {
+        margin-top: 4px;
+
+        color: #aeb6c2;
+
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 1.4;
+
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* ======================================
+       SEPARADOR
+       ====================================== */
+
+    .user-menu-divider {
+        width: 100%;
+        height: 1px;
+
+        margin-bottom: 12px;
+
+        background: #40454d;
+    }
+
+    /* ======================================
+       CONTENEDOR DE ACCIONES
+       ====================================== */
+
+    .user-menu-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    /* ======================================
+       BOTONES DEL MENÚ
+       ====================================== */
+
+    .user-menu-action {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        width: 100%;
+        min-height: 46px;
+
+        padding: 7px 10px;
+
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 9px;
+
+        color: #f3f4f6;
+
+        font-size: 13px;
+        font-weight: 500;
+        text-align: left;
+
+        cursor: pointer;
+
+        transition:
+            background-color 0.18s ease,
+            border-color 0.18s ease,
+            color 0.18s ease;
+
+        &:hover {
+            background: #343a43;
+            border-color: #40454d;
+        }
+
+        &:focus-visible {
+            outline: 2px solid #d71920;
+            outline-offset: 2px;
+        }
+
+        /* Contenedor del icono */
+        .user-menu-action-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            flex-shrink: 0;
+
+            width: 36px;
+            height: 36px;
+
+            background: #343a43;
+            border: 1px solid #40454d;
+            border-radius: 8px;
+
+            color: #e5e7eb;
+
+            i {
+                font-size: 14px;
+            }
+        }
+
+        /* Texto de la opción */
+        .user-menu-action-label {
+            flex: 1;
+            min-width: 0;
+
+            line-height: 1.4;
+        }
+
+        /* Flecha derecha */
+        .user-menu-chevron {
+            flex-shrink: 0;
+
+            color: #9ca3af;
+
+            font-size: 11px;
+        }
+    }
+
+    /* ======================================
+       CERRAR SESIÓN
+       ====================================== */
+
+    .user-menu-action-logout {
+        color: #ff4d57;
+
+        background: rgba(215, 25, 32, 0.04);
+
+        .user-menu-action-icon {
+            color: #ff4d57;
+        }
+
+        &:hover {
+            color: #ff626b;
+
+            background: rgba(215, 25, 32, 0.12);
+            border-color: rgba(215, 25, 32, 0.25);
+
+            .user-menu-action-icon {
+                color: #ff626b;
+
+                background: rgba(215, 25, 32, 0.12);
+                border-color: rgba(215, 25, 32, 0.25);
+            }
+        }
+    }
+}
+
+/* ==========================================
+   RESPONSIVE DEL MENÚ DE USUARIO
+   ========================================== */
+
+@media (max-width: 480px) {
+    ::ng-deep .p-overlaypanel.user-menu-panel {
+        width: min(320px, calc(100vw - 24px));
+
+        .user-menu {
+            padding: 14px;
+        }
+
+        .user-menu-action {
+            min-height: 44px;
+        }
+    }
 }
 
 .notifications-icon {
