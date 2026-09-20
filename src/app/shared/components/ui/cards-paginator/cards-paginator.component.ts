@@ -5,6 +5,7 @@ import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { DropdownModule } from 'primeng/dropdown';
 import { TooltipModule } from 'primeng/tooltip';
+import { DEFAULT_PAGE_SIZE } from '@core/data';
 
 /**
  * Paginador sin salto de página (plan §12.1): *Primera · Anterior ·
@@ -34,7 +35,7 @@ export class CardsPaginatorComponent {
     total = input<number | null>(null);
     currentCount = input<number>(0);
     pageSizeOptions = input<number[]>([]);
-    pageSize = model<number>(20);
+    pageSize = model<number>(DEFAULT_PAGE_SIZE);
 
     onFirst = output<void>();
     onNext = output<void>();

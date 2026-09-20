@@ -18,7 +18,7 @@ import {
     TitleBarComponent,
 } from '@shared/components/ui';
 import { MoneyPipe } from '@shared/pipes';
-import { PageSize } from '@core/data';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import {
     dateFromKey,
@@ -91,7 +91,7 @@ export class ReportsDashboardComponent implements OnInit {
 
     private readonly timezone = 'America/La_Paz'; // plan §17.2 — la misma zona fija que Ventas/Gift Cards
 
-    readonly pageSizeOptions: PageSize[] = [10, 20, 50];
+    readonly pageSizeOptions: PageSize[] = PAGE_SIZE_OPTIONS;
 
     /** No se pueden elegir fechas futuras (no hay ventas todavía). */
     readonly maxSelectableDate = dateFromKey(todayKeyInZone(this.timezone));
@@ -176,7 +176,7 @@ export class ReportsDashboardComponent implements OnInit {
     readonly redemptionsCountInRange = signal(0);
 
     // ---- Detalle de activaciones del período (paginado) ----
-    readonly issuesPageSize = signal<PageSize>(10);
+    readonly issuesPageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
     readonly issuesRows = signal<GiftCardIssue[]>([]);
     readonly issuesHasNext = signal(false);
     readonly issuesHasPrev = signal(false);
@@ -196,7 +196,7 @@ export class ReportsDashboardComponent implements OnInit {
     readonly loadingSellerTotals = signal(false);
 
     // ---- Detalle de ventas del día (solo si el rango es un único día) ----
-    readonly dailyPageSize = signal<PageSize>(20);
+    readonly dailyPageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
     readonly dailyRows = signal<Sale[]>([]);
     readonly dailyHasNext = signal(false);
     readonly dailyHasPrev = signal(false);

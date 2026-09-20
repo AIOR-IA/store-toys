@@ -17,7 +17,7 @@ import {
 } from '@shared/components/ui';
 import { MoneyPipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
-import { PageSize } from '@core/data';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { normalizeGiftCardCode } from '@core/utils';
 import { GiftCardRegisterDialogComponent } from '../gift-card-register-dialog/gift-card-register-dialog.component';
@@ -78,11 +78,11 @@ export class GiftCardListComponent implements OnInit {
             value: 'CANCELLED',
         },
     ];
-    readonly pageSizeOptions: PageSize[] = [10, 20, 50];
+    readonly pageSizeOptions: PageSize[] = PAGE_SIZE_OPTIONS;
 
     filter = signal<GiftCardsFilter>('all');
     searchTerm = signal('');
-    pageSize = signal<PageSize>(20);
+    pageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
 
     rows = signal<GiftCard[]>([]);
     total = signal(0);

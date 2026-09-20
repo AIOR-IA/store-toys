@@ -16,7 +16,7 @@ import {
     TitleBarComponent,
 } from '@shared/components/ui';
 import { AppUser, SessionService } from '@core/session';
-import { PageSize } from '@core/data';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { UserFormDialogComponent } from '../user-form-dialog/user-form-dialog.component';
 import { UsersFilter, UsersService } from '../../users.service';
@@ -69,11 +69,11 @@ export class UserListComponent implements OnInit {
             value: 'inactive',
         },
     ];
-    readonly pageSizeOptions: PageSize[] = [10, 20, 50];
+    readonly pageSizeOptions: PageSize[] = PAGE_SIZE_OPTIONS;
 
     filter = signal<UsersFilter>('all');
     searchTerm = signal('');
-    pageSize = signal<PageSize>(20);
+    pageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
 
     rows = signal<AppUser[]>([]);
     total = signal(0);

@@ -8,7 +8,14 @@ import {
     startAfter,
 } from '@angular/fire/firestore';
 
-export type PageSize = 10 | 20 | 50;
+/**
+ * Tamaños de página ofrecidos en TODAS las listas paginadas (una sola fuente).
+ * Son pequeños a propósito: cada página cuesta `pageSize + 1` lecturas y el
+ * usuario recorre pocas filas a la vez (plan §12.1).
+ */
+export type PageSize = 5 | 10 | 15;
+export const PAGE_SIZE_OPTIONS: PageSize[] = [5, 10, 15];
+export const DEFAULT_PAGE_SIZE: PageSize = 10;
 
 export interface PageResult<T> {
     rows: T[];
@@ -44,7 +51,7 @@ export class CursorPager<T> {
             constraints: QueryConstraint[],
         ) => Query<T>,
         private readonly buildCountQuery: () => Query<T>,
-        public pageSize: PageSize = 20,
+        public pageSize: PageSize = DEFAULT_PAGE_SIZE,
     ) {}
 
     async first(): Promise<PageResult<T>> {

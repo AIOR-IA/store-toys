@@ -19,7 +19,7 @@ import {
 } from '@shared/components/ui';
 import { MoneyPipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
-import { PageSize } from '@core/data';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { SettingsService, ToastService } from '@core/services';
 import { looksLikeCode } from '@core/utils';
 import { ProductFormDialogComponent } from '../product-form-dialog/product-form-dialog.component';
@@ -91,11 +91,11 @@ export class ProductListComponent implements OnInit {
             value: 'lowStock',
         },
     ];
-    readonly pageSizeOptions: PageSize[] = [10, 20, 50];
+    readonly pageSizeOptions: PageSize[] = PAGE_SIZE_OPTIONS;
 
     filter = signal<ProductsFilter>('all');
     searchTerm = signal('');
-    pageSize = signal<PageSize>(20);
+    pageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
     lowStockThreshold = signal(DEFAULT_LOW_STOCK_THRESHOLD);
 
     rows = signal<Product[]>([]);

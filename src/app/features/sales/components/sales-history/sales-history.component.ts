@@ -16,7 +16,7 @@ import {
 } from '@shared/components/ui';
 import { MoneyPipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
-import { PageSize } from '@core/data';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { dateFromKey, dateToKey, todayKeyInZone } from '@core/utils/date.util';
 import { SaleDetailDialogComponent } from '../sale-detail-dialog/sale-detail-dialog.component';
@@ -57,7 +57,7 @@ export class SalesHistoryComponent implements OnInit {
     private readonly sessionService = inject(SessionService);
     private readonly toast = inject(ToastService);
 
-    readonly pageSizeOptions: PageSize[] = [10, 20, 50];
+    readonly pageSizeOptions: PageSize[] = PAGE_SIZE_OPTIONS;
 
     readonly isAdmin = computed(() => {
         const session = this.sessionService.session();
@@ -71,7 +71,7 @@ export class SalesHistoryComponent implements OnInit {
     selectedDate = signal<Date>(new Date());
     sellerId = signal<string | null>(null);
     sellers = signal<{ uid: string; name: string }[]>([]);
-    pageSize = signal<PageSize>(20);
+    pageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
 
     rows = signal<Sale[]>([]);
     total = signal(0);
