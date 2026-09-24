@@ -164,6 +164,9 @@ quede ninguna duda de cuál es la decisión vigente.
   respuesta D4 dice que "generalmente no ocurre" — y es exactamente la razón por la que
   `payments[]` es un array desde el primer día (§15). La UI ofrece **solo** esa
   combinación: `[giftcard, cash]` o `[giftcard, qr]`. Nunca `cash + qr`.
+  > **⚠ Decisión MODIFICADA** (Ajuste de Ventas, obs. 2, reunión posterior con el cliente): la
+  > UI **ya ofrece también `cash + qr`** ("Efectivo + QR"). Se conserva el texto original arriba
+  > como contexto histórico de D4; la regla vigente está en **§15.7**.
 
 #### C-3 · Productos: el **vendedor también los crea**
 
@@ -1345,7 +1348,9 @@ export interface Sale {
   sellerName: string;         // snapshot: el reporte no debe depender del usuario actual
 
   items: SaleItem[];
-  totalCents: number;
+  subtotalCents: number;          // Σ items[].subtotalCents, ANTES de la rebaja (§15.6)
+  discountCents: number;          // rebaja fija opcional; 0 si no hubo (§15.6)
+  totalCents: number;             // total FINAL cobrado = subtotalCents − discountCents
 
   payments: Payment[];            // uno o dos (giftcard + diferencia)
   paymentMethods: PaymentMethod[]; // denormalizado para poder consultar
@@ -1379,8 +1384,11 @@ contablemente y lo más barato.
 **Campos decididos ahora para no migrar después:** `status` (se escribe `'completed'`
 desde el primer día, aunque la anulación llegue con la Fase 4), `sellerName`,
 `customerName`, y los tres campos denormalizados de importe por forma de pago.
-**Sin descuentos** por ahora: cuando aparezcan, el lugar natural es un `discountCents` por
-línea y otro por venta, con `totalCents` siempre como campo autoritativo.
+**Descuentos:** no hay descuentos por línea. Desde el *Ajuste de Ventas, obs. 1* existe una
+única **rebaja fija por venta** (`discountCents`, §15.6), con `totalCents` como campo
+autoritativo (siempre el total final cobrado). Las ventas anteriores al ajuste **no se
+migraron**: no tienen `subtotalCents`/`discountCents` y el cliente las lee como
+`subtotalCents = totalCents`, `discountCents = 0` (`saleConverter`).
 
 ### 8.7 `dailySummaries/{dateKey}`
 
@@ -1392,7 +1400,8 @@ export interface DailySummary {
 
   salesCount: number;
   itemsCount: number;         // unidades vendidas
-  totalCents: number;         // mercancía vendida
+  totalCents: number;         // mercancía vendida, NETA (después de rebajas)
+  discountCents: number;      // Σ rebajas aplicadas (§15.6). No es dinero cobrado. Bruto = total + rebajas
   cashCents: number;
   qrCents: number;
   giftCardCents: number;      // saldo consumido: NO es dinero nuevo
@@ -1409,7 +1418,9 @@ export interface DailySummary {
   giftCardIssuesCashCents: number;
   giftCardIssuesQrCents: number;
 
-  // detalle por producto del día. Solo los productos que se vendieron
+  // detalle por producto del día. Solo los productos que se vendieron.
+  // `totalCents` por producto es a PRECIO DE LISTA (la rebaja es de la venta, no de un
+  // artículo): Σ products[].totalCents == totalCents + discountCents del día.
   products: Record<string, { code: string; name: string; qty: number; totalCents: number }>;
 
   updatedAt: Timestamp;
@@ -1542,7 +1553,8 @@ export interface GiftCardMovement {
 ### 8.9 Índices compuestos (estado real, actualizado en la Fase 7)
 
 > Esta tabla listaba originalmente índices "previstos" que en varios casos nunca se
-> implementaron tal cual (p.ej. `paymentMethods ARRAY, dateKey ASC` nunca hizo falta).
+> implementaron tal cual (p.ej. `paymentMethods ARRAY, dateKey ASC` no hizo falta en la
+> Fase 7; sí hizo falta después, con `createdAt`, para el filtro del detalle diario — ver filas).
 > Lo que sigue es el contenido REAL de `firestore.indexes.json`, verificado en vivo.
 
 | Colección | Campos | Para |
@@ -1555,6 +1567,8 @@ export interface GiftCardMovement {
 | `products` | `isActive ASC, stock ASC` | Alerta de stock bajo y stock negativo |
 | `sales` | `dateKey ASC, createdAt DESC` | Ventas del día |
 | `sales` | `sellerId ASC, dateKey ASC, createdAt DESC` | **Ventas propias del día** del vendedor (§10, §15.5) |
+| `sales` | `paymentMethods ARRAY, dateKey ASC, createdAt DESC` | **Ajuste de Ventas:** detalle de ventas del día de Reportes filtrado por método (Efectivo / QR / Gift Card) — `where dateKey == … AND paymentMethods array-contains … orderBy createdAt desc`, para página **y** conteo. (Antes el filtro se hacía en el cliente sobre la página descargada y mostraba páginas incompletas o vacías; el comentario de arriba sobre este índice quedó obsoleto.) |
+| `sales` | `paymentMethods ARRAY, dateKey ASC, sellerId ASC, createdAt DESC` | Igual, cuando además se filtra por vendedor. Los dos son necesarios: Firestore no reutiliza uno para la consulta del otro |
 | `sales` | `status ASC, dateKey ASC, cashCents ASC, giftCardCents ASC, qrCents ASC, totalCents ASC` | Fase 7: verificación de integridad — `sum()`/`count()` sobre `sales` en el rango (§18.3). Los cuatro campos sumados van en el índice: es un requisito de Firestore para `getAggregateFromServer` con `sum()`, no solo de `where`/`orderBy` |
 | `sales` | `sellerId ASC, status ASC, dateKey ASC, cashCents ASC, giftCardCents ASC, qrCents ASC, totalCents ASC` | Fase 7: ventas por vendedor, mismo motivo que la fila anterior (§18.3, "por vendedor") |
 | `giftCards` | `status ASC, cardCode ASC` | Listado filtrado por estado, orden por código (§16) |
@@ -1949,7 +1963,7 @@ a la pantalla de login.
 
 - **Recomendación:** cursores (`orderBy` + `limit` + `startAfter`) con una **pila de
   cursores en memoria** para retroceder, y `getCountFromServer()` para el total. Tamaños de
-  página 10 / 20 / 50.
+  página **5 / 10 / 15** (por defecto 10), definidos una sola vez en `core/data` (`PAGE_SIZE_OPTIONS`, `DEFAULT_PAGE_SIZE`). Ajuste transversal posterior a la Fase 7.
 - **Por qué:** Firestore no tiene `OFFSET`: no existe forma de pedir "la página 7" sin
   leer las seis anteriores. Un cursor tiene coste **constante** por página. Y la paginación
   heredada (`PaginatedResult.meta` con `total`, `lastPage`, `prev`, `next` y `page/perPage`)
@@ -1974,7 +1988,7 @@ una decena de líneas en `pagedQuery()` y no hay dos caminos de consulta que man
 
 ```ts
 // core/data/paged-query.ts  (esquema)
-export interface PageRequest { pageSize: 10 | 20 | 50; direction: 'first'|'next'|'prev'; }
+export interface PageRequest { pageSize: 5 | 10 | 15; direction: 'first'|'next'|'prev'; }
 export interface PageResult<T> { rows: T[]; hasNext: boolean; hasPrev: boolean; total?: number; }
 ```
 
@@ -2247,6 +2261,11 @@ export type PaymentMethod = 'cash' | 'qr' | 'giftcard';
 celular de la tienda, y se guarda una foto como evidencia (D2). **No hay integración con la
 API de ningún banco**, y no se planifica.
 
+> **⚠ Actualización (Ajuste de Ventas, obs. 2):** el párrafo siguiente es el diseño ORIGINAL y
+> se conserva como contexto histórico de D4. **Ya no es la regla vigente:** la UI y `createSale`
+> admiten tres combinaciones mixtas —Efectivo + QR, Gift Card + Efectivo y Gift Card + QR—;
+> ver **§15.7**. Sigue prohibido Gift Card + Efectivo + QR.
+
 **Pago mixto.** D4 dice que no se paga mixto, y para `cash` + `qr` la UI **no lo ofrece**.
 La única combinación permitida es **gift card + la diferencia** en efectivo o QR, que la
 política de consumo total (§2.1 C-2) hace inevitable cuando la compra supera el valor de la
@@ -2307,9 +2326,11 @@ indexada. Es una denormalización de una línea, derivada siempre por la Functio
 1. assertStaff()  — sesión válida, perfil existente, isActive
 2. Validación de forma (antes de la transacción):
      ≥ 1 ítem · cantidades enteras > 0 · ≤ 50 líneas
-     Σ payments[].amountCents === totalCents
+     discountCents ∈ {0, 500, 1000, 1500, 2000, 2500, 3000} (ausente = 0)   ← §15.6
+     Σ payments[].amountCents === totalCents  (total FINAL, ya con la rebaja)
      todo pago 'giftcard' con giftCardIssueId
-     ≤ 1 pago 'giftcard' y ≤ 1 pago de "diferencia"  (D4 · §15.1)
+     1 o 2 pagos · ≤ 1 pago 'giftcard' · NO repetir método (§15.7). Deja exactamente tres
+     combinaciones mixtas: cash+qr, giftcard+cash, giftcard+qr. Tres pagos se rechazan.
 3. Leer settings/app  → allowSaleWithoutStock, giftCardAllowsPartial
 4. DENTRO de la transacción, primero TODAS las lecturas:
      los N documentos de producto · la emisión de gift card si aplica
@@ -2317,6 +2338,8 @@ indexada. Es una denormalización de una línea, derivada siempre por la Functio
 5. Validar contra el estado real:
      cada producto existe y está activo
      unitPriceCents enviado === producto.priceCents      ← el cliente NO fija el precio
+     subtotalCents = Σ precios reales × cantidades → applyDiscount(subtotal, discountCents)
+       → totalCents. Rechaza si discountCents >= subtotalCents (total cero o negativo)
      stock >= quantity   → si no: rechazar SOLO si allowSaleWithoutStock === false
      la emisión de gift card está 'active' y cubre su importe
 6. Escrituras:
@@ -2398,6 +2421,87 @@ Diseñado para **laptop, teclado y lector** (G1: monitores no táctiles), un sol
 - **Un vendedor solo ve sus ventas del día** en la pestaña de listado (A5, C5). El admin ve
   todas y puede filtrar por vendedor y por rango.
 
+### 15.6 Rebaja fija opcional — Ajuste de Ventas, observación 1
+
+Pedida por el cliente para cuando el comprador pide redondear el precio. **Es opcional**: sin
+rebaja, el flujo y los importes son idénticos a los anteriores.
+
+- **Importes permitidos** (lista cerrada, en centavos): `0, 500, 1000, 1500, 2000, 2500, 3000`
+  (Sin rebaja, Bs 5 … Bs 30). **Bs 30 es el máximo absoluto por venta**, no por producto. Sin
+  importe libre y sin acumular rebajas.
+- **Una sola vez sobre el subtotal completo** de la venta; nunca por artículo. No toca el
+  precio de ningún producto ni el catálogo: pertenece a la venta.
+- **Orden del cálculo (servidor, `createSale`):** subtotal recalculado con los precios reales
+  → `parseDiscountCents` (forma) → `applyDiscount` (rechaza `discount >= subtotal`) →
+  `totalCents` → recién entonces gift card y validación `Σ payments == totalCents`. La lógica
+  vive en `functions/src/sale-discount.ts`; `sale-discount.const.ts` en Angular solo limita
+  las opciones de la interfaz.
+- **La rebaja NO es un método de pago.** Nunca entra en `payments[]` ni en
+  `cashCents`/`qrCents`/`giftCardCents`. Por eso es independiente de cómo se pague y sirve tal
+  cual para cualquier combinación de pagos futura (p. ej. efectivo + QR): solo hay que
+  repartir `totalCents` (ya final) entre los pagos.
+- **Gift card:** consume sobre el total FINAL. Tarjeta de Bs 1.000 con total Bs 950 → aplica
+  Bs 950 y `FORFEITED` por Bs 50; tarjeta de Bs 500 → aplica Bs 500 y Bs 450 en efectivo/QR.
+  Ciclos, movimientos y protección de `cancelSale` sin cambios.
+- **Campos** (§8.6): `subtotalCents`, `discountCents`, `totalCents` (siempre el total final).
+  Ventas antiguas sin migrar: se leen como sin rebaja (`saleConverter`).
+- **`dailySummaries`** (§8.7): `discountCents` acumulado. `totalCents` sigue siendo la
+  mercadería NETA; bruta = `totalCents + discountCents`. `createSale` lo suma y `cancelSale` lo
+  resta usando lo persistido en la venta (solo escribe el campo si la venta tuvo rebaja).
+- **Interfaz del POS:** selector «Rebaja» (por defecto «Sin rebaja»); las opciones que no caben
+  en el subtotal quedan deshabilitadas; si el carrito cambia y la elegida deja de aplicar se
+  reinicia y se avisa; se limpia al confirmar/vaciar. Detalle de venta y comprobante PDF
+  muestran Subtotal / Rebaja / Total solo cuando hubo rebaja.
+- **Limitación conocida:** la verificación de integridad de Reportes (`sum()` sobre `sales`,
+  §18.3) y el desglose por vendedor **no suman `discountCents`**: hacerlo exige añadir el campo
+  a los índices compuestos de `sales` y desplegarlos antes que el código. Decisión pendiente.
+
+### 15.7 Pago mixto Efectivo + QR — Ajuste de Ventas, observación 2
+
+> **Decisión modificada.** El diseño original (§2.1 D4, §15.1) no ofrecía `cash + qr` en la
+> interfaz. El cliente pidió después poder cobrar una misma venta parte en efectivo y parte por
+> QR; **este apartado reemplaza esa regla** (el texto original se conserva como historia).
+
+- **Combinaciones mixtas permitidas — exactamente tres:**
+  1. **Efectivo + QR**
+  2. **Gift Card + Efectivo**
+  3. **Gift Card + QR**
+
+  **Gift Card + Efectivo + QR NO se permite** (decisión de negocio): `createSale` rechaza más de
+  dos pagos y cualquier método repetido (`cash + cash`, `qr + qr`, dos gift cards).
+- **Sobre el total FINAL.** Los pagos se reparten sobre `totalCents` después de la rebaja
+  (§15.6): `Σ payments[].amountCents === totalCents`.
+- **POS — cuarta opción «Efectivo + QR».** El vendedor teclea **solo el «Monto por QR»** (el
+  importe exacto que muestra la app del banco); el efectivo aplicado es `total − QR`. Por
+  construcción la suma es exacta y no existe un «orden» de captura: 100 + 40 y 40 + 100 son el
+  mismo estado. Todo en centavos enteros (`toCents` en el borde del formulario).
+  - Válido si `0 < QR < total` (con `QR == total` el efectivo sería 0: eso es «QR»).
+  - Si cambian carrito, cantidad o rebaja y el QR deja de ser válido, se reinicia con aviso;
+    mientras tanto la confirmación ya está bloqueada. Un QR que sigue siendo válido se
+    conserva y el efectivo se recalcula.
+- **Efectivo recibido y cambio: solo de pantalla.** `cambio = recibido − efectivo APLICADO`
+  (no el total). Total 140, QR 40, el cliente entrega 200 → efectivo aplicado 100, cambio 100.
+  A `createSale` viaja `cash 10000` (no 20000) y `qr 4000`; ni el recibido ni el cambio se
+  guardan en Firestore, así que el cambio nunca puede contarse como ingreso.
+- **Registro (una sola vez cada importe).** Venta: `payments: [cash 10000, qr 4000]`,
+  `cashCents 10000`, `qrCents 4000`, `totalCents 14000`. `dailySummaries`: `cashCents += 10000`,
+  `qrCents += 4000`, `totalCents += 14000`. `cancelSale` resta esos mismos importes una vez.
+  Reportes, historial, detalle y comprobante ya leían `payments[]` de forma genérica y no
+  cambian (el detalle del día filtrado por «Efectivo» o por «QR» muestra esta venta en ambos
+  filtros: es correcto, pero no se deben sumar a mano las filas visibles).
+- **El orden de `payments[]` se guarda tal como llega** (no se reordena). Consecuencia: el pago
+  QR puede estar en cualquier índice (`qr` solo → 0; `cash + qr` enviado por el POS → 1;
+  `giftcard + qr` → 1). **El voucher se resuelve por el índice REAL del pago QR** (`attachVoucher`
+  no cambió): el POS lo calcula sobre el mismo arreglo que envía a `createSale`. Antes
+  `attachPendingVoucher` fijaba el índice `0`, que en `[cash, qr]` es efectivo y `attachVoucher`
+  rechaza. El voucher sigue siendo opcional e inmutable; es uno por pago QR.
+- **Endurecimiento de `createSale`:** un pago por método como máximo y mensaje claro para
+  más de dos pagos (antes decía «al menos una forma de pago»). Las llamadas existentes
+  —un pago, gift card + diferencia— no cambian de resultado.
+- **Pruebas:** `npm run test:functions` ejecuta el `createSale`/`cancelSale` reales sobre un
+  Firestore en memoria (`tests/functions/sales.harness.js`); specs de TestBed del POS en
+  `sales-pos.component.spec.ts`. No sustituyen la prueba en DEV.
+
 ---
 
 ## 16. Gift Cards
@@ -2446,7 +2550,7 @@ Modelos en §8.8.
 | Consumo | **Total, en una sola venta**. Sin saldo remanente — confirmado sin cambios en la Fase 6 | E3 |
 | Vuelto en efectivo | **No** | E4 |
 | Sobrante si la compra es menor | Se extingue como movimiento `FORFEITED` (§2.1 C-2) | derivado de E3+E4 |
-| Compra mayor al valor de la tarjeta | Único pago mixto permitido: gift card + la diferencia en cash o QR | E3+E4, §16.8 |
+| Compra mayor al valor de la tarjeta | Pago mixto: gift card + la diferencia en cash o QR (desde el Ajuste de Ventas obs. 2 ya no es el único mixto: §15.7) | E3+E4, §16.8 |
 | Caducidad | **No caducan** | E5 |
 | Recarga | **No** | E6 |
 | Pérdida o robo | **⟳ Fase 6 — nuevo estado `SUSPENDED`**: bloquea la tarjeta sin cerrar el ciclo; `reactivateGiftCard` la recupera sin crear un ciclo nuevo. E8 quedó sin responder en el cuestionario original — esta es la respuesta, dada en vivo en la Fase 6 | E8 resuelta en Fase 6 |
@@ -2528,7 +2632,8 @@ Secuencia, dentro de la transacción de `createSale`:
    `amountCents` real de la tarjeta importa (mismo principio que `unitPriceCents` en
    productos, plan §15.3):
    - compra ≥ denominación → se aplica el valor completo; el resto (si sobra compra) se
-     cobra con el segundo pago (cash/qr) — único mixto permitido;
+     cobra con el segundo pago (cash/qr) — con la gift card, este es el único mixto (no se
+     admite gift card + efectivo + QR; §15.7);
    - compra < denominación → se aplica solo lo que cubre la compra; el resto se pierde como
      `FORFEITED`.
 4. Escrituras: `sales/{saleId}` con el snapshot del pago (§16.8) · `giftCardIssues/{id}` →
@@ -2755,7 +2860,8 @@ diseño, en lugar de depender de que cada consulta recuerde aplicar un filtro.
 
 | Magnitud | Fuente | Cálculo |
 |---|---|---|
-| **Mercancía vendida** | `sales` | `Σ totalCents` donde `status == 'completed'` |
+| **Mercancía vendida** (NETA, después de rebajas) | `sales` | `Σ totalCents` donde `status == 'completed'` |
+| Rebajas aplicadas (§15.6) — no es dinero cobrado | `dailySummaries` | `Σ discountCents` del rango. Bruta = mercancía vendida + rebajas (métrica aparte, nunca mezclada con la neta) |
 | Efectivo recibido en ventas | `sales` | `Σ cashCents` |
 | QR recibido en ventas | `sales` | `Σ qrCents` |
 | Saldo de gift card consumido | `sales` | `Σ giftCardCents` — **no es dinero nuevo** |
@@ -2802,7 +2908,7 @@ detalle de qué productos, la cantidad y total, y un total general de todo"*.
 | Mes | `monthKey == '2026-09'` sobre `dailySummaries` | 28–31 lecturas |
 | Trimestre / año | rango de `dateKey` sobre `dailySummaries` | 90 / 365 lecturas |
 | Rango personalizado | `dateKey >= a && dateKey <= b` | tantas como días |
-| Detalle de ventas de un día | `sales where dateKey == …` paginado | 20 por página |
+| Detalle de ventas de un día | `sales where dateKey == …` paginado | 10 por página (5/10/15) |
 | Por vendedor | `sales where sellerId == …` + rango | índice compuesto (§8.9) |
 
 El **detalle por producto** (código, nombre, cantidad y total) sale del mapa `products` de
@@ -2906,6 +3012,8 @@ MP000123    Auto rojo             2      Bs 50,00     Bs 100,00
 ------------------------------------------------------------------
                                             TOTAL    Bs 220,00
                           Pago: Efectivo             Bs 220,00
+   (con rebaja, §15.6, el bloque de totales pasa a: Subtotal / Rebaja (−Bs) / TOTAL;
+    sin rebaja no se imprime ninguna fila de Bs 0,00)
 ------------------------------------------------------------------
         Gracias por su compra · No se aceptan devoluciones
 ```
@@ -3699,7 +3807,7 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
      alta y edición, activar/desactivar, detalle.
   4. `core/data/base-firestore.service.ts` + `paged-query.ts`: converters,
      `serverTimestamp()`, normalización de `searchName`/`emailLower`, cursores.
-  5. Paginador sin salto de página (§12.1), tamaños 10/20/50, `getCountFromServer()`.
+  5. Paginador sin salto de página (§12.1), tamaños 5/10/15, `getCountFromServer()`.
   6. Búsqueda por prefijo sobre `searchName` y `emailLower`, con `debounceTime(300)`.
   7. `layout/menu/menu.config.ts` declarativo + sidebar filtrado por `computed()`;
      eliminación de `AppMenuContentService` y `canSeeMenu`.
@@ -4015,6 +4123,22 @@ crea todavía") por la de §5.5. Cambios de código de esta corrección:
 
 ---
 
+### FASE 9 (adelantada) — Hosting DEV / demo online
+
+> **Adelantada por necesidad del negocio (2026-09-20). No reemplaza ni completa la Fase 8, y no
+> aprueba ningún despliegue a producción.** DEMO = Hosting DEV + backend DEV. PROD real =
+> pendiente. FASE 8 = pendiente.
+
+- **Hecho:** build `production` (usa Firebase DEV, §5.5) desplegado con
+  `firebase deploy --only hosting -P dev` en `https://mi-pimpollito-dev.web.app`. Sin tocar Functions,
+  Rules ni índices. Configuración de `firebase.json` sin cambios (ya coincidía con §20.1).
+- **Comprobado sin sesión:** rutas profundas devuelven `index.html` (rewrite SPA), `index.html` con
+  `no-cache`, archivos con hash `immutable`, redirección a `/auth/login` desde `/ventas`, preflight CORS
+  de las Functions aceptado desde el dominio, y llamada sin sesión rechazada (`UNAUTHENTICATED`).
+- **Pendiente de prueba manual autenticada:** login admin/vendedor, F5, roles, Productos, POS/PDF,
+  Gift Cards, Reportes, responsive real. Requiere cuentas que crea el admin (`docs/DEPLOYMENT.md`).
+- **Pendiente:** CI/CD de DEV (solo Hosting), a la espera de que la demo esté validada.
+
 ### FASE 9 — CI/CD automatizado
 
 - **Objetivo.** Que desplegar deje de ser un acto manual, con la separación de ambientes garantizada.
@@ -4113,7 +4237,7 @@ y está escrita con sus palabras.
 | D1 | ¿Aceptan tarjeta de débito o crédito? | *"no, directamente solo efectivo, qr o gift card"* | §15.1 |
 | D2 | ¿El QR está conectado a un banco? | *"no tenemos un sistema directamente conectado al qr de un banco; la idea es simple: paga por efectivo, nos da el dinero; paga por QR, nos muestra su registro de pago desde el celular del cliente, le tomamos una foto a eso y la idea es guardar en la venta como registro de que se pagó; y por giftcard que no paga nada, ya que previamente alguien debería haber registrado que salió o se compró un gift card"* | §2.1 C-4 · §15.1 |
 | D3 | ¿Con qué celular se fotografía el comprobante? | *"el dueño, llega la confirmación, o el celular que pueden dejar en la tienda"* | §2.1 C-4 · §2.2 |
-| D4 | ¿Se paga a veces con dos métodos? | *"no, generalmente se paga con efectivo o qr, no mixta"* | §15.1 |
+| D4 | ¿Se paga a veces con dos métodos? | *"no, generalmente se paga con efectivo o qr, no mixta"* — **modificada después** (Ajuste de Ventas obs. 2): el cliente pidió poder pagar Efectivo + QR en una misma venta | §15.1, §15.7 |
 | D5 | ¿Se aceptan dólares? | *"solo bolivianos"* | §2.3 |
 
 ### Bloque E — Gift Cards

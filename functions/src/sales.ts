@@ -4,6 +4,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { db, storage } from './admin';
 import { assertActive, assertAdmin } from './guards';
 import { dateKeys } from './date-keys';
+import { applyDiscount, parseDiscountCents } from './sale-discount';
 
 /**
  * Cloud Functions de Ventas (plan §15).
@@ -55,6 +56,12 @@ interface CreateSaleData {
     items: CreateSaleItemInput[];
     payments: CreateSalePaymentInput[];
     customerName?: string;
+    /**
+     * Rebaja fija opcional (en centavos) sobre el subtotal de la venta. Solo
+     * es la INTENCIÓN del vendedor: el servidor la valida contra la lista
+     * cerrada y contra el subtotal que él mismo recalcula. Ausente = sin rebaja.
+     */
+    discountCents?: number;
 }
 
 interface CancelSaleData {
@@ -136,8 +143,17 @@ function validateItemsShape(value: unknown): CreateSaleItemInput[] {
 }
 
 function validatePaymentsShape(value: unknown): CreateSalePaymentInput[] {
-    if (!Array.isArray(value) || value.length < 1 || value.length > 2) {
+    if (!Array.isArray(value) || value.length < 1) {
         throw new HttpsError('invalid-argument', 'La venta debe tener al menos una forma de pago.');
+    }
+    if (value.length > 2) {
+        // Gift card + efectivo + QR (tres pagos) NO se permite (decisión de
+        // negocio, plan §15.1): antes de este mensaje caía en el genérico de
+        // "al menos una forma de pago", que confundía.
+        throw new HttpsError(
+            'invalid-argument',
+            'Una venta admite como máximo dos formas de pago (efectivo + QR, gift card + efectivo o gift card + QR).',
+        );
     }
 
     const payments = value.map((raw) => {
@@ -168,11 +184,21 @@ function validatePaymentsShape(value: unknown): CreateSalePaymentInput[] {
         return { method: method as PaymentMethod, amountCents };
     });
 
-    // ≤ 1 pago 'giftcard' y ≤ 1 pago de "diferencia" (plan §15.1, §15.3): el
-    // único pago mixto permitido es gift card + la diferencia en cash o qr.
+    // ≤ 1 pago 'giftcard' (plan §15.1, §15.3).
     const giftcardCount = payments.filter((p) => p.method === 'giftcard').length;
     if (giftcardCount > 1) {
         throw new HttpsError('invalid-argument', 'Solo se admite una gift card por venta.');
+    }
+
+    // Un pago por método como máximo. Con el máximo de 2 pagos de arriba, esto
+    // deja EXACTAMENTE tres combinaciones mixtas posibles: efectivo + QR,
+    // gift card + efectivo y gift card + QR (plan §15.1). Sin esta regla se
+    // aceptaban `cash + cash` o `qr + qr` (dos vouchers para un mismo método).
+    if (new Set(payments.map((p) => p.method)).size !== payments.length) {
+        throw new HttpsError(
+            'invalid-argument',
+            'No se puede repetir la misma forma de pago en una venta.',
+        );
     }
 
     return payments;
@@ -198,6 +224,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
     const saleId = requireDocId(request.data.saleId, 'saleId');
     const items = validateItemsShape(request.data.items);
     const payments = validatePaymentsShape(request.data.payments);
+    const discountCents = parseDiscountCents(request.data.discountCents);
     const customerNameRaw = request.data.customerName;
     const customerName =
         typeof customerNameRaw === 'string' && customerNameRaw.trim()
@@ -311,8 +338,18 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 });
             }
 
-            const totalCents = assertSafeIntegerCents(
+            // Orden del cálculo (Ajuste de Ventas, obs. 1): subtotal de los
+            // productos con los precios REALES → rebaja fija validada →
+            // total final. Todo lo que sigue (gift card, pagos, resumen)
+            // trabaja sobre `totalCents`, que sigue siendo el total FINAL
+            // cobrado — la rebaja no es un método de pago y nunca aparece en
+            // `payments[]`.
+            const subtotalCents = assertSafeIntegerCents(
                 saleItems.reduce((sum, item) => sum + item.subtotalCents, 0),
+                'sale.subtotalCents',
+            );
+            const totalCents = assertSafeIntegerCents(
+                applyDiscount(subtotalCents, discountCents),
                 'sale.totalCents',
             );
 
@@ -370,6 +407,8 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 sellerId: request.auth!.uid,
                 sellerName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
                 items: saleItems,
+                subtotalCents,
+                discountCents,
                 totalCents,
                 payments: payments.map((p) => {
                     if (p.method === 'qr') {
@@ -487,6 +526,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     salesCount: 1,
                     itemsCount: totalItems,
                     totalCents,
+                    discountCents,
                     cashCents,
                     qrCents,
                     giftCardCents: giftCardAppliedCents,
@@ -534,6 +574,15 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     giftCardForfeitedCents: newGiftCardForfeitedCents,
                     updatedAt: FieldValue.serverTimestamp(),
                 };
+                // Un resumen de un día anterior al ajuste no tiene este campo:
+                // solo se escribe cuando esta venta trae rebaja (nunca se
+                // retroactiva a documentos que no la necesitan).
+                if (discountCents > 0) {
+                    update['discountCents'] = assertSafeIntegerCents(
+                        ((summarySnap.get('discountCents') as number) ?? 0) + discountCents,
+                        'dailySummaries.discountCents',
+                    );
+                }
                 for (const item of saleItems) {
                     const existing = summarySnap.get(`products.${item.productId}`) as
                         | { totalCents?: number }
@@ -741,6 +790,13 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 saleSnap.get('qrCents') as number,
                 'sale.qrCents',
             );
+            // Ventas anteriores al ajuste no tienen `discountCents`: se
+            // leen como sin rebaja. Se revierte lo PERSISTIDO en la venta,
+            // nunca un recálculo con precios actuales.
+            const saleDiscountCents = assertSafeIntegerCents(
+                (saleSnap.get('discountCents') as number | undefined) ?? 0,
+                'sale.discountCents',
+            );
             const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
             // Igual que en `createSale`: los campos `*Cents` se leen y se
@@ -767,6 +823,12 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 qrCents: newQrCents,
                 updatedAt: FieldValue.serverTimestamp(),
             };
+            if (saleDiscountCents > 0) {
+                update['discountCents'] = assertSafeIntegerCents(
+                    ((summarySnap.get('discountCents') as number) ?? 0) - saleDiscountCents,
+                    'dailySummaries.discountCents',
+                );
+            }
 
             if (giftCardRevert) {
                 const newGiftCardCents = assertSafeIntegerCents(

@@ -261,11 +261,23 @@
         "title": "Forma de pago",
         "cash": "Efectivo",
         "qr": "QR",
+        "cashQr": "Efectivo + QR",
         "giftcard": "Gift Card",
         "received": "Efectivo recibido",
         "change": "Cambio"
       },
-      "total": "Total",
+      "mixed": {
+        "qrAmount": "Monto por QR",
+        "cashApplied": "Efectivo a cobrar",
+        "invalidQr": "El monto por QR debe ser mayor que cero y menor que el total a pagar.",
+        "resetByTotal": "El total cambió y el monto por QR ya no es válido: se quitó. Ingrésalo de nuevo."
+      },
+      "total": "Total a pagar",
+      "discount": {
+        "label": "Rebaja",
+        "none": "Sin rebaja",
+        "resetByCart": "La rebaja elegida ya no aplica al nuevo subtotal y se quitó. Elígela de nuevo si corresponde."
+      },
       "confirm": "Confirmar venta",
       "clear": "Cancelar venta",
       "saleConfirmed": {
@@ -471,7 +483,9 @@
         "giftCardRedeemed": "Gift Card aplicada",
         "giftCardsIssued": "Gift Cards vendidas/emitidas",
         "salesCount": "N.º de ventas",
-        "itemsCount": "Artículos vendidos"
+        "itemsCount": "Artículos vendidos",
+        "discountApplied": "Rebajas aplicadas",
+        "netHint": "Neto: importe final después de rebajas"
       },
       "identities": {
         "title": "Comprobación de consistencia",
@@ -497,6 +511,7 @@
       "breakdown": {
         "merchandiseTitle": "TOTAL MERCADERÍA",
         "issuesTitle": "GIFT CARDS EMITIDAS",
+        "grossMerchandise": "Mercadería a precio de lista (bruta)",
         "totalNominal": "Total nominal",
         "collectedCash": "Cobrado en efectivo",
         "collectedQr": "Cobrado en QR",
@@ -533,6 +548,7 @@
       },
       "topProducts": {
         "title": "Productos más vendidos",
+        "grossNote": "Importes a precio de lista, antes de las rebajas de cada venta (la rebaja es de la venta completa, no de un producto).",
         "columns": {
           "code": "Código",
           "name": "Producto",

@@ -82,6 +82,53 @@ export class SaleReceiptService {
         });
     }
 
+    /**
+     * Totales del comprobante. Sin rebaja queda EXACTAMENTE como antes (una
+     * sola línea `TOTAL`, sin filas de Bs 0,00 que no aportan nada); con
+     * rebaja se muestran subtotal, rebaja y total — los tres persistidos en
+     * la venta, nunca recalculados. La rebaja no es un pago: los pagos se
+     * imprimen debajo, ya sumando el total final (`buildPaymentRows`).
+     */
+    private buildTotalsBlock(sale: Sale): unknown {
+        if (sale.discountCents <= 0) {
+            return {
+                margin: [0, 10, 0, 0],
+                columns: [
+                    { text: '', width: '*' },
+                    {
+                        width: 'auto',
+                        text: `${this.t('total')}    ${this.money(sale.totalCents)}`,
+                        bold: true,
+                    },
+                ],
+            };
+        }
+
+        const row = (label: string, amount: string, bold = false): unknown => ({
+            columns: [
+                { text: label, width: '*', bold },
+                { text: amount, width: 'auto', alignment: 'right', bold },
+            ],
+        });
+        return {
+            margin: [0, 10, 0, 0],
+            columns: [
+                { text: '', width: '*' },
+                {
+                    width: 200,
+                    stack: [
+                        row(this.t('columns.subtotal'), this.money(sale.subtotalCents)),
+                        row(
+                            this.translate.instant('app.sales.discount.label'),
+                            `-${this.money(sale.discountCents)}`,
+                        ),
+                        row(this.t('total'), this.money(sale.totalCents), true),
+                    ],
+                },
+            ],
+        };
+    }
+
     private buildDocDefinition(sale: Sale, settings: AppSettings): unknown {
         const shortId = sale.id.slice(-8).toUpperCase();
         const dateStr = formatInStoreTimezone(sale.createdAt, settings.timezone);
@@ -162,17 +209,7 @@ export class SaleReceiptService {
                     layout: 'lightHorizontalLines',
                 },
                 line,
-                {
-                    margin: [0, 10, 0, 0],
-                    columns: [
-                        { text: '', width: '*' },
-                        {
-                            width: 'auto',
-                            text: `${this.t('total')}    ${this.money(sale.totalCents)}`,
-                            bold: true,
-                        },
-                    ],
-                },
+                this.buildTotalsBlock(sale),
                 {
                     margin: [0, 4, 0, 0],
                     columns: [

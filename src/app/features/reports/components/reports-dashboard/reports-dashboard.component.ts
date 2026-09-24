@@ -30,7 +30,7 @@ import {
 } from '@core/utils/date.util';
 import { SaleDetailDialogComponent } from '../../../sales/components/sale-detail-dialog/sale-detail-dialog.component';
 import { PaymentMethod, Sale } from '../../../sales/sale.model';
-import { SalesService } from '../../../sales/sales.service';
+import { SalesHistoryFilter, SalesService } from '../../../sales/sales.service';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { GiftCard, GiftCardIssue, GiftCardStatus } from '../../../gift-cards/gift-card.model';
 import { DailySummary } from '../../daily-summary.model';
@@ -210,16 +210,23 @@ export class ReportsDashboardComponent implements OnInit {
         { label: 'app.sales.payment.qr', value: 'qr' },
         { label: 'app.sales.payment.giftcard', value: 'giftcard' },
     ];
-    readonly filteredDailyRows = computed(() => {
-        const filter = this.dailyPaymentFilter();
-        const rows = this.dailyRows();
-        if (filter === 'all') return rows;
-        return rows.filter((sale) => sale.paymentMethods.includes(filter));
-    });
-    private dailyPager = this.salesService.createPager(
-        { dateKey: this.fromKey(), sellerId: this.selectedSellerId() ?? undefined },
-        this.dailyPageSize(),
-    );
+    /**
+     * Filtro de la tabla (fecha + vendedor + método) tal como viaja a Firestore.
+     * El método se aplica EN LA CONSULTA —`paymentMethods array-contains`—,
+     * antes de paginar: filas, conteo y cursores salen de la misma consulta.
+     * `'all'` no agrega nada (misma consulta de siempre). Solo afecta a la
+     * tabla del detalle: los KPIs, los totales por método y la verificación de
+     * integridad salen de otras consultas y no dependen de este filtro.
+     */
+    private dailyFilter(): SalesHistoryFilter {
+        const method = this.dailyPaymentFilter();
+        return {
+            dateKey: this.fromKey(),
+            sellerId: this.selectedSellerId() ?? undefined,
+            paymentMethod: method === 'all' ? undefined : method,
+        };
+    }
+    private dailyPager = this.salesService.createPager(this.dailyFilter(), this.dailyPageSize());
     readonly detailSale = signal<Sale | null>(null);
 
     readonly exporting = signal(false);
@@ -320,8 +327,10 @@ export class ReportsDashboardComponent implements OnInit {
         });
     }
 
+    /** Vuelve a consultar Firestore con el método elegido (paginador, cursores y conteo nuevos). Los KPIs no se recargan. */
     onDailyPaymentFilterChange(filter: 'all' | PaymentMethod): void {
         this.dailyPaymentFilter.set(filter);
+        if (this.isSingleDay()) this.loadDailyFirstPage();
     }
 
     openDailyDetail(sale: Sale): void {
@@ -472,15 +481,20 @@ export class ReportsDashboardComponent implements OnInit {
 
     // ---- Paginador del detalle de ventas del día ----
 
+    /**
+     * Primera página de la consulta ACTUAL (fecha + vendedor + método): crea un
+     * paginador nuevo —cursores y conteo desde cero—. Si mientras tanto se
+     * creó otro (p. ej. cambios seguidos de filtro), la respuesta del anterior
+     * se descarta para que no pise a la más reciente.
+     */
     loadDailyFirstPage(): void {
         this.loadingDaily.set(true);
-        this.dailyPager = this.salesService.createPager(
-            { dateKey: this.fromKey(), sellerId: this.selectedSellerId() ?? undefined },
-            this.dailyPageSize(),
-        );
-        this.dailyPager
+        const pager = this.salesService.createPager(this.dailyFilter(), this.dailyPageSize());
+        this.dailyPager = pager;
+        pager
             .first()
             .then((result) => {
+                if (pager !== this.dailyPager) return;
                 this.dailyRows.set(result.rows);
                 this.dailyHasNext.set(result.hasNext);
                 this.dailyHasPrev.set(result.hasPrev);
@@ -489,6 +503,13 @@ export class ReportsDashboardComponent implements OnInit {
                 this.dailyLoadedOnce.set(true);
             })
             .catch(() => {
+                if (pager !== this.dailyPager) return;
+                // Nunca dejar a la vista filas de OTRA consulta bajo el filtro elegido
+                // (p. ej. si el índice del filtro aún no está desplegado).
+                this.dailyRows.set([]);
+                this.dailyHasNext.set(false);
+                this.dailyHasPrev.set(false);
+                this.dailyTotal.set(0);
                 this.loadingDaily.set(false);
                 this.dailyLoadedOnce.set(true);
                 this.toast.error('app.common.errors.general');
@@ -497,7 +518,9 @@ export class ReportsDashboardComponent implements OnInit {
 
     onDailyNextPage(): void {
         this.loadingDaily.set(true);
-        this.dailyPager.next().then((result) => {
+        const pager = this.dailyPager;
+        pager.next().then((result) => {
+            if (pager !== this.dailyPager) return;
             this.dailyRows.set(result.rows);
             this.dailyHasNext.set(result.hasNext);
             this.dailyHasPrev.set(result.hasPrev);
@@ -507,7 +530,9 @@ export class ReportsDashboardComponent implements OnInit {
 
     onDailyPrevPage(): void {
         this.loadingDaily.set(true);
-        this.dailyPager.prev().then((result) => {
+        const pager = this.dailyPager;
+        pager.prev().then((result) => {
+            if (pager !== this.dailyPager) return;
             this.dailyRows.set(result.rows);
             this.dailyHasNext.set(result.hasNext);
             this.dailyHasPrev.set(result.hasPrev);

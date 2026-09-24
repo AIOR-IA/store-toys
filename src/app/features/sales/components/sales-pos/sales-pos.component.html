@@ -164,7 +164,7 @@
 
         <div class="flex flex-col gap-2">
             <label class="text-sm font-medium">{{ "app.sales.payment.title" | translate }}</label>
-            <div class="flex gap-6">
+            <div class="flex flex-wrap gap-x-6 gap-y-2">
                 <div class="flex items-center gap-2">
                     <p-radioButton
                         name="paymentMethod"
@@ -184,6 +184,16 @@
                         (ngModelChange)="setPaymentMethod($event)"
                     ></p-radioButton>
                     <label for="pm-qr">{{ "app.sales.payment.qr" | translate }}</label>
+                </div>
+                <div class="flex items-center gap-2">
+                    <p-radioButton
+                        name="paymentMethod"
+                        value="cashqr"
+                        inputId="pm-cashqr"
+                        [ngModel]="paymentMethod()"
+                        (ngModelChange)="setPaymentMethod($event)"
+                    ></p-radioButton>
+                    <label for="pm-cashqr">{{ "app.sales.payment.cashQr" | translate }}</label>
                 </div>
                 <div class="flex items-center gap-2">
                     <p-radioButton
@@ -271,7 +281,38 @@
             </div>
             }
 
-            @if (paymentMethod() === 'qr') {
+            @if (paymentMethod() === 'cashqr') {
+            <div class="flex flex-col gap-2 mt-2">
+                <label class="text-sm font-medium" for="qrPart">{{ "app.sales.mixed.qrAmount" | translate }}</label>
+                <p-inputNumber
+                    inputId="qrPart"
+                    mode="currency"
+                    currency="BOB"
+                    locale="es-BO"
+                    [minFractionDigits]="2"
+                    [ngModel]="qrPartBs()"
+                    (ngModelChange)="qrPartBs.set($event)"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
+                @if (mixedQrInvalid()) {
+                <div class="text-xs text-danger">{{ "app.sales.mixed.invalidQr" | translate }}</div>
+                } @else if (isMixedQrValid()) {
+                <div class="flex flex-col gap-1 text-sm">
+                    <div class="flex items-center justify-between">
+                        <span>{{ "app.sales.mixed.cashApplied" | translate }}</span>
+                        <span class="font-medium">{{ mixedCashCents() | money }}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span>{{ "app.sales.payment.qr" | translate }}</span>
+                        <span class="font-medium">{{ mixedQrCents() | money }}</span>
+                    </div>
+                </div>
+                }
+            </div>
+            }
+
+            @if (paymentMethod() === 'qr' || paymentMethod() === 'cashqr') {
             <div class="flex flex-col gap-2 mt-2">
                 <label class="text-sm font-medium">{{ "app.sales.voucher.optional" | translate }}</label>
                 <p class="text-xs text-gray-500">{{ "app.sales.voucher.helpText" | translate }}</p>
@@ -316,7 +357,7 @@
             </div>
             }
 
-            @if (paymentMethod() === 'cash') {
+            @if (paymentMethod() === 'cash' || paymentMethod() === 'cashqr') {
             <div class="grid grid-cols-2 gap-4 mt-2">
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-medium" for="cashReceived">{{
@@ -349,9 +390,46 @@
             }
         </div>
 
-        <div class="flex items-center justify-between text-xl font-bold border-t border-gray-200 pt-4 mt-2">
-            <span>{{ "app.sales.total" | translate }}</span>
-            <span>{{ totalCents() | money }}</span>
+        <div class="flex flex-col gap-2 border-t border-gray-200 pt-4 mt-2">
+            <div class="flex items-center justify-between">
+                <span>{{ "app.sales.cart.subtotal" | translate }}</span>
+                <span>{{ subtotalCents() | money }}</span>
+            </div>
+
+            <div class="flex items-center justify-between gap-4">
+                <label for="saleDiscount">{{ "app.sales.discount.label" | translate }}</label>
+                <p-dropdown
+                    inputId="saleDiscount"
+                    [options]="discountOptions()"
+                    optionLabel="value"
+                    optionValue="value"
+                    optionDisabled="disabled"
+                    appendTo="body"
+                    styleClass="w-44"
+                    [ngModel]="discountCents()"
+                    (onChange)="onDiscountChange($event.value)"
+                    [disabled]="!cart().length"
+                >
+                    <ng-template let-option pTemplate="selectedItem">
+                        @if (option.value === 0) { {{ "app.sales.discount.none" | translate }} } @else { {{ option.value | money }} }
+                    </ng-template>
+                    <ng-template let-option pTemplate="item">
+                        @if (option.value === 0) { {{ "app.sales.discount.none" | translate }} } @else { {{ option.value | money }} }
+                    </ng-template>
+                </p-dropdown>
+            </div>
+
+            @if (appliedDiscountCents() > 0) {
+            <div class="flex items-center justify-between text-success">
+                <span>{{ "app.sales.discount.label" | translate }}</span>
+                <span>-{{ appliedDiscountCents() | money }}</span>
+            </div>
+            }
+
+            <div class="flex items-center justify-between text-xl font-bold pt-2">
+                <span>{{ "app.sales.total" | translate }}</span>
+                <span>{{ totalCents() | money }}</span>
+            </div>
         </div>
 
         <div class="flex gap-2">

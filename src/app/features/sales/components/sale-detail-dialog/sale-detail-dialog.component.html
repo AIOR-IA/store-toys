@@ -62,6 +62,18 @@
             </tbody>
         </table>
 
+        @if (sale.discountCents > 0) {
+        <div class="flex flex-col gap-1 text-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-gray-600">{{ "app.sales.receipt.columns.subtotal" | translate }}</span>
+                <span>{{ sale.subtotalCents | money }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-gray-600">{{ "app.sales.discount.label" | translate }}</span>
+                <span>-{{ sale.discountCents | money }}</span>
+            </div>
+        </div>
+        }
         <div class="flex items-center justify-between font-semibold text-lg">
             <span>{{ "app.sales.receipt.total" | translate }}</span>
             <span>{{ sale.totalCents | money }}</span>

@@ -32,6 +32,9 @@ export const dailySummaryConverter: FirestoreDataConverter<DailySummary> = {
         const data = snapshot.data(options) as DailySummary;
         return {
             ...data,
+            // Resúmenes anteriores al ajuste de rebaja (mismo criterio que los
+            // dos campos de gift card de abajo): sin el campo = sin rebajas.
+            discountCents: data.discountCents ?? 0,
             giftCardIssuesCashCents: data.giftCardIssuesCashCents ?? 0,
             giftCardIssuesQrCents: data.giftCardIssuesQrCents ?? 0,
         };

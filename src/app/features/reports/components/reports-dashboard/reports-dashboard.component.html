@@ -76,10 +76,15 @@
 } @else {
 
 <!-- KPIs principales (prompt §7) -->
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
     <p-card>
         <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.merchandiseSales" | translate }}</div>
         <div class="text-2xl font-semibold">{{ rangeTotals().totalCents | money }}</div>
+        <div class="text-xs text-gray-500">{{ "app.reports.kpis.netHint" | translate }}</div>
+    </p-card>
+    <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.discountApplied" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ rangeTotals().discountCents | money }}</div>
     </p-card>
     <p-card>
         <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.cashReceived" | translate }}</div>
@@ -162,6 +167,10 @@
 <!-- Desglose por forma de pago (prompt §33) -->
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
     <p-card [header]="'app.reports.breakdown.merchandiseTitle' | translate">
+        @if (rangeTotals().discountCents > 0) {
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.grossMerchandise" | translate }}</span><span>{{ (rangeTotals().totalCents + rangeTotals().discountCents) | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.kpis.discountApplied" | translate }}</span><span>-{{ rangeTotals().discountCents | money }}</span></div>
+        }
         <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.kpis.merchandiseSales" | translate }}</span><span class="font-semibold">{{ rangeTotals().totalCents | money }}</span></div>
         <div class="flex justify-between text-sm py-1"><span>{{ "app.sales.payment.cash" | translate }}</span><span>{{ rangeTotals().cashCents | money }}</span></div>
         <div class="flex justify-between text-sm py-1"><span>{{ "app.sales.payment.qr" | translate }}</span><span>{{ rangeTotals().qrCents | money }}</span></div>
@@ -289,6 +298,7 @@
     @if (!topProducts().length) {
     <app-items-not-found></app-items-not-found>
     } @else {
+    <p class="text-xs text-gray-500 mb-2">{{ "app.reports.topProducts.grossNote" | translate }}</p>
     <p-table [value]="topProducts()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
         <ng-template pTemplate="header">
             <tr>
@@ -352,10 +362,10 @@
 
     @if (loadingDaily()) {
     <app-spinner></app-spinner>
-    } @else if (!filteredDailyRows().length) {
+    } @else if (!dailyRows().length) {
     <app-items-not-found></app-items-not-found>
     } @else {
-    <p-table [value]="filteredDailyRows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+    <p-table [value]="dailyRows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
         <ng-template pTemplate="header">
             <tr>
                 <th>{{ "app.sales.historyPage.columns.number" | translate }}</th>

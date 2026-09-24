@@ -36,12 +36,25 @@ export interface CreateSaleInput {
     items: CreateSaleItemInput[];
     payments: CreateSalePaymentInput[];
     customerName?: string;
+    /** Rebaja fija opcional en centavos; `createSale` la valida y recalcula el total. */
+    discountCents?: number;
 }
 
 export interface SalesHistoryFilter {
     dateKey: string;
     /** Solo lo usa el admin (plan §15.5): el vendedor siempre ve las suyas. */
     sellerId?: string;
+    /**
+     * Solo lo usa el detalle diario de Reportes (admin): se filtra EN LA
+     * CONSULTA —antes de paginar— por `paymentMethods array-contains`, así el
+     * conteo, las páginas y los cursores corresponden a las ventas que
+     * usaron ese método (una venta mixta Efectivo + QR entra en ambos
+     * filtros, una sola vez en cada uno). Ausente = todas las ventas, con la
+     * misma consulta de siempre. Requiere los índices compuestos
+     * `sales(paymentMethods, dateKey, createdAt)` y
+     * `sales(paymentMethods, dateKey, sellerId, createdAt)`.
+     */
+    paymentMethod?: PaymentMethod;
 }
 
 /**
@@ -157,6 +170,9 @@ export class SalesService {
             const constraints = [where('dateKey', '==', filter.dateKey)];
             if (filter.sellerId) {
                 constraints.push(where('sellerId', '==', filter.sellerId));
+            }
+            if (filter.paymentMethod) {
+                constraints.push(where('paymentMethods', 'array-contains', filter.paymentMethod));
             }
             return [...constraints, orderBy('createdAt', 'desc')];
         };

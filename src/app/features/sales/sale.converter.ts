@@ -19,6 +19,13 @@ export const saleConverter: FirestoreDataConverter<Sale> = {
     },
     fromFirestore(snapshot: QueryDocumentSnapshot, options?: SnapshotOptions): Sale {
         const data = snapshot.data(options);
-        return { ...data, id: snapshot.id } as Sale;
+        // Ventas previas al ajuste de rebaja: sin los campos nuevos, se leen
+        // como "sin rebaja" con su total histórico (ver `Sale`).
+        return {
+            ...data,
+            id: snapshot.id,
+            subtotalCents: data['subtotalCents'] ?? data['totalCents'],
+            discountCents: data['discountCents'] ?? 0,
+        } as Sale;
     },
 };

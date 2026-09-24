@@ -175,7 +175,7 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 ### Datos
 
 - **Paginación por cursores** siempre (`orderBy` + `limit` + `startAfter`, pila de cursores
-  en memoria). Tamaños 10/20/50, sin salto de página. Total con `getCountFromServer()`.
+  en memoria). Tamaños 5/10/15 (por defecto 10; `PAGE_SIZE_OPTIONS`/`DEFAULT_PAGE_SIZE` en `core/data`), sin salto de página. Total con `getCountFromServer()`.
 - **Nunca `getDocs()` sin `limit()`**, ni en desarrollo ni para depurar.
 - **No descargar colecciones completas.** No filtrar ni sumar en el cliente lo que se puede
   consultar o agregar en el servidor.
@@ -219,6 +219,20 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   `paymentMethods: PaymentMethod[]` (para consultar) y `cashCents`/`qrCents`/`giftCardCents`
   (para agregar). Invariante: `Σ payments[].amountCents === totalCents`.
 - `PaymentMethod = 'cash' | 'qr' | 'giftcard'`. **No hay tarjeta de débito/crédito.**
+- **Pagos mixtos — exactamente tres combinaciones** (plan §15.7; **modifica la decisión D4**,
+  que antes no ofrecía Efectivo + QR): **Efectivo + QR**, **Gift Card + Efectivo** y
+  **Gift Card + QR**. **Gift Card + Efectivo + QR está prohibido.** `createSale` admite 1 o 2
+  pagos y rechaza métodos repetidos. En «Efectivo + QR» el vendedor teclea solo el monto QR y el
+  efectivo aplicado es `total − QR`; el efectivo **recibido** y el **cambio** son solo de
+  pantalla (`cambio = recibido − efectivo aplicado`), nunca se guardan ni son ingreso.
+- **El QR puede estar en cualquier índice de `payments[]`** (el orden se guarda tal cual): el
+  voucher se adjunta con el **índice real** del pago QR, nunca un `0` fijo.
+- **Rebaja fija opcional** (plan §15.6): `discountCents ∈ {0, 500, 1000, 1500, 2000, 2500, 3000}`
+  (máx. Bs 30 por venta, una vez sobre el subtotal, sin importe libre), validada en
+  `createSale` (`functions/src/sale-discount.ts`). **No es un método de pago**: nunca va en
+  `payments[]`. `totalCents` sigue siendo el total FINAL cobrado (`subtotalCents − discountCents`);
+  ventas antiguas sin los campos se leen como sin rebaja. `dailySummaries.discountCents`
+  acumula las rebajas; `totalCents` del resumen es neto.
 - **Se permite vender sin stock** (`settings.allowSaleWithoutStock`, inicial `true`):
   el stock **puede quedar negativo**, y por eso la Rule valida `stock is int` pero **no**
   `stock >= 0`.
@@ -250,8 +264,9 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 - **Consumo total, sin saldo remanente.** Si la compra es menor, el sobrante se extingue con
   un movimiento **`FORFEITED`** — así se mantiene `Σ payments == totalCents` sin perder el
   rastro del dinero.
-- Si la compra supera el valor de la tarjeta, la diferencia va en efectivo o QR: es el
-  **único** pago mixto que la UI ofrece.
+- Si la compra supera el valor de la tarjeta, la diferencia va en efectivo o QR: con la gift
+  card, ese es el **único** pago mixto (no Gift Card + Efectivo + QR). Desde el Ajuste de Ventas
+  obs. 2 existe además Efectivo + QR sin gift card (ver *Ventas*).
 - No caducan, no se recargan, el plástico se reutiliza. Activan admin y vendedor; registrar
   plástico nuevo y cancelar definitivamente es solo del admin.
 - **Código: manual O generado** (ajuste posterior a la Fase 6, admin-only en ambos). Manual:
@@ -329,6 +344,12 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
     ejecución de la Fase 1): el campo de correo tenía un `maxLength(20)` heredado que
     bloqueaba cualquier email real, y la contraseña exigía mínimo 8 mientras el mensaje ya
     dibujado decía 6 (que es además el mínimo real de Firebase Auth) — ambos corregidos.
+- **FASE 9 (adelantada) — DEMO online, sin implicar producción.** El cliente necesita ver la
+  aplicación desde una URL real. **DEMO = Hosting DEV + backend DEV**: `https://mi-pimpollito-dev.web.app`,
+  desplegado con `ng build --configuration production` + `firebase deploy --only hosting -P dev`.
+  **PROD real: pendiente** (`mi-pimpollito` no existe). **FASE 8 (auditoría de seguridad y Emulator):
+  pendiente** — desplegar la demo no la reemplaza ni aprueba un despliegue a producción. Los datos de
+  DEV son de prueba. Procedimiento y cuentas de demostración: `docs/DEPLOYMENT.md`.
 - **Qué existe hoy en `src/app`**: `layout/` completo, reactivo a la sesión ·
   `shared/` podado, con i18n restaurado · `core/{config,firebase,session,models,services/toast,utils}` ·
   `features/authentication` (login + forgot-password, con Firebase real) · `features/home`
@@ -354,6 +375,8 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 npm start                      # ng serve → DEV
 npm run build:dev              # ng build --configuration development → DEV
 npm run build                  # ng build (production) → TEMPORALMENTE también DEV
+npm run test:functions         # compila Functions y corre createSale/cancelSale reales en memoria (sin Firebase)
+npm test -- --watch=false --browsers=ChromeHeadless   # specs de Angular (Karma)
 firebase use dev               # selecciona mi-pimpollito-dev (ya es el default)
 firebase deploy --only hosting -P dev
 firebase deploy --only firestore:rules,firestore:indexes,storage -P dev

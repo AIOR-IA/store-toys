@@ -68,7 +68,22 @@ export interface Sale {
     sellerName: string;
 
     items: SaleItem[];
-    totalCents: number;
+
+    /**
+     * Rebaja fija opcional (Ajuste de Ventas, obs. 1). NO es un método de
+     * pago: nunca aparece en `payments[]`. `totalCents` sigue siendo el total
+     * FINAL cobrado (`subtotalCents - discountCents`), así que la identidad
+     * `Σ payments[].amountCents === totalCents` y todo consumidor previo
+     * siguen intactos.
+     *
+     * Las ventas anteriores al ajuste no tienen estos dos campos en Firestore:
+     * `saleConverter` los normaliza al leer (`subtotalCents = totalCents`,
+     * `discountCents = 0`) — sin migrar ni tocar documentos históricos. Por
+     * eso aquí son obligatorios: quien lea un `Sale` nunca ve `undefined`.
+     */
+    subtotalCents: number; // suma de los productos, antes de la rebaja
+    discountCents: number; // 0 si no hubo rebaja
+    totalCents: number; // total final cobrado
 
     payments: Payment[];
     paymentMethods: PaymentMethod[];

@@ -20,7 +20,16 @@ export interface DailySummary {
 
     salesCount: number;
     itemsCount: number; // unidades vendidas
-    totalCents: number; // mercancía vendida (ventas `completed`)
+    totalCents: number; // mercancía vendida (ventas `completed`), NETA: después de las rebajas
+    /**
+     * Rebajas fijas aplicadas a las ventas del día (Ajuste de Ventas, obs. 1).
+     * NO son dinero cobrado ni un método de pago: `totalCents` ya viene neto,
+     * así que `totalCents + discountCents` es la mercadería BRUTA (a precio de
+     * lista) y `totalCents === cashCents + qrCents + giftCardCents` sigue
+     * cumpliéndose. Un resumen previo al ajuste no tiene este campo:
+     * `dailySummaryConverter` lo lee como 0.
+     */
+    discountCents: number;
     cashCents: number; // efectivo de VENTAS de mercadería
     qrCents: number; // QR de VENTAS de mercadería
     giftCardCents: number; // saldo de gift card CONSUMIDO en ventas — no es dinero nuevo
@@ -37,6 +46,8 @@ export interface DailySummary {
 
     // Detalle por producto del día — solo los que se vendieron. Es la razón
     // de ser de esta colección: `items[]` de una venta no es agregable con
-    // `sum()` (plan §8.7, §19).
+    // `sum()` (plan §8.7, §19). `totalCents` de cada producto es su importe a
+    // PRECIO DE LISTA: la rebaja es de la venta completa, no de un artículo,
+    // así que Σ products[].totalCents === totalCents + discountCents (bruto).
     products: Record<string, { code: string; name: string; qty: number; totalCents: number }>;
 }

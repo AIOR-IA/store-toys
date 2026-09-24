@@ -113,6 +113,8 @@ export class ReportsPdfService {
 
                 { text: this.t('kpis.merchandiseSales'), bold: true, margin: [0, 14, 0, 4] as [number, number, number, number] },
                 this.row(this.t('kpis.merchandiseSales'), this.money(t.totalCents), true),
+                { text: this.t('kpis.netHint'), fontSize: 8, color: 'gray' },
+                this.row(this.t('kpis.discountApplied'), this.money(t.discountCents)),
                 this.row(this.t('kpis.cashReceived'), this.money(data.cashReceivedCents)),
                 this.row(this.t('kpis.qrReceived'), this.money(data.qrReceivedCents)),
                 this.row(this.t('kpis.giftCardRedeemed'), this.money(t.giftCardCents)),
@@ -123,6 +125,15 @@ export class ReportsPdfService {
 
                 { ...line, margin: [0, 10, 0, 6] },
                 { text: this.t('breakdown.merchandiseTitle'), bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
+                ...(t.discountCents > 0
+                    ? [
+                          this.row(
+                              this.t('breakdown.grossMerchandise'),
+                              this.money(t.totalCents + t.discountCents),
+                          ),
+                          this.row(this.t('kpis.discountApplied'), `-${this.money(t.discountCents)}`),
+                      ]
+                    : []),
                 this.row(this.t('kpis.merchandiseSales'), this.money(t.totalCents)),
                 this.row(this.translate.instant('app.sales.payment.cash'), this.money(t.cashCents)),
                 this.row(this.translate.instant('app.sales.payment.qr'), this.money(t.qrCents)),
@@ -182,7 +193,13 @@ export class ReportsPdfService {
                 ...(data.topProducts.length
                     ? [
                           { ...line, margin: [0, 10, 0, 6] },
-                          { text: this.t('topProducts.title'), bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
+                          { text: this.t('topProducts.title'), bold: true, margin: [0, 0, 0, 2] as [number, number, number, number] },
+                          {
+                              text: this.t('topProducts.grossNote'),
+                              fontSize: 8,
+                              color: 'gray',
+                              margin: [0, 0, 0, 4] as [number, number, number, number],
+                          },
                           {
                               table: {
                                   headerRows: 1,

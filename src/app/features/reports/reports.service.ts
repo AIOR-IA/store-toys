@@ -41,7 +41,8 @@ export interface SalesAggregateTotals {
 export interface RangeTotals {
     salesCount: number;
     itemsCount: number;
-    totalCents: number;
+    totalCents: number; // mercadería vendida NETA (después de rebajas)
+    discountCents: number; // rebajas aplicadas en el rango (mercadería bruta = total + rebajas)
     cashCents: number;
     qrCents: number;
     giftCardCents: number;
@@ -59,6 +60,7 @@ function emptyRangeTotals(): RangeTotals {
         salesCount: 0,
         itemsCount: 0,
         totalCents: 0,
+        discountCents: 0,
         cashCents: 0,
         qrCents: 0,
         giftCardCents: 0,
@@ -83,6 +85,7 @@ export function mergeDailySummaries(summaries: DailySummary[]): RangeTotals {
         totals.salesCount += summary.salesCount;
         totals.itemsCount += summary.itemsCount;
         totals.totalCents += summary.totalCents;
+        totals.discountCents += summary.discountCents;
         totals.cashCents += summary.cashCents;
         totals.qrCents += summary.qrCents;
         totals.giftCardCents += summary.giftCardCents;

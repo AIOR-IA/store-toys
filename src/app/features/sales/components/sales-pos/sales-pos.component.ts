@@ -6,14 +6,17 @@ import {
     HostListener,
     ViewChild,
     computed,
+    effect,
     inject,
     signal,
+    untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { ConfirmationService } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
+import { DropdownModule } from 'primeng/dropdown';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { RadioButtonModule } from 'primeng/radiobutton';
@@ -26,11 +29,17 @@ import { GiftCard, GiftCardIssuePaymentMethod } from '../../../gift-cards/gift-c
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { Product } from '../../../products/product.model';
 import { ProductsService } from '../../../products/products.service';
+import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { CreateSalePaymentInput, SalesService } from '../../sales.service';
 import { PaymentMethod, Sale, SaleCartLine } from '../../sale.model';
 
-type PosPaymentMethod = PaymentMethod;
+/**
+ * Lo que el vendedor elige en pantalla. `'cashqr'` NO es un `PaymentMethod` de
+ * la venta: es un modo del POS que se descompone en DOS pagos (`cash` + `qr`)
+ * al armar `payments[]` (plan §15.1) — el servidor nunca ve `'cashqr'`.
+ */
+type PosPaymentMethod = PaymentMethod | 'cashqr';
 /** Segundo pago para cubrir la diferencia cuando la compra supera el valor de la gift card. */
 type GiftCardDifferenceMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
 
@@ -53,6 +62,7 @@ type GiftCardDifferenceMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
         FormsModule,
         RouterLink,
         ButtonModule,
+        DropdownModule,
         InputTextModule,
         InputNumberModule,
         RadioButtonModule,
@@ -113,8 +123,36 @@ export class SalesPosComponent implements AfterViewInit {
     /** Solo se usa si la compra supera el valor de la tarjeta (plan §16.3, fila 4''). */
     giftCardDifferenceMethod = signal<GiftCardDifferenceMethod>('cash');
 
-    readonly totalCents = computed(() =>
+    /**
+     * Rebaja fija opcional (Ajuste de Ventas, obs. 1) — lo que el vendedor
+     * ELIGIÓ. Vuelve a 0 con cada venta nueva (`resetCart`). Es solo la
+     * intención: `createSale` la valida y recalcula el total en servidor.
+     */
+    discountCents = signal(0);
+
+    readonly subtotalCents = computed(() =>
         this.cart().reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0),
+    );
+
+    /**
+     * La rebaja realmente aplicada: si la elegida dejó de ser válida para el
+     * subtotal (el carrito cambió), vale 0 — pero nunca en silencio: el
+     * `effect` del constructor además reinicia la selección y avisa.
+     */
+    readonly appliedDiscountCents = computed(() => {
+        const discount = this.discountCents();
+        return isDiscountApplicable(discount, this.subtotalCents()) ? discount : 0;
+    });
+
+    /** Total FINAL a pagar: sobre este importe se calculan efectivo, QR y gift card. */
+    readonly totalCents = computed(() => this.subtotalCents() - this.appliedDiscountCents());
+
+    /** Solo las rebajas permitidas; las que no caben en el subtotal actual quedan deshabilitadas. */
+    readonly discountOptions = computed(() =>
+        SALE_DISCOUNT_OPTIONS_CENTS.map((value) => ({
+            value,
+            disabled: !isDiscountApplicable(value, this.subtotalCents()),
+        })),
     );
 
     /** Monto que realmente se aplica de la tarjeta a esta compra (consumo total, plan §16.2). */
@@ -133,11 +171,57 @@ export class SalesPosComponent implements AfterViewInit {
         return card ? Math.max(0, this.totalCents() - card.amountCents) : 0;
     });
 
+    /**
+     * Modo «Efectivo + QR» (Ajuste de Ventas, obs. 2): el vendedor SOLO teclea
+     * el monto por QR — el que muestra la app del banco, exacto. El efectivo
+     * aplicado es lo que falta para el total (`total − QR`), así el orden en
+     * que se piensen los dos importes no existe y la suma es exacta por
+     * construcción. Todo se calcula en centavos enteros; `qrPartBs` solo es el
+     * valor crudo del campo (`toCents` en el borde del formulario, plan §17.1).
+     */
+    qrPartBs = signal<number | null>(null);
+
+    readonly mixedQrCents = computed(() => {
+        const qr = this.qrPartBs();
+        return qr === null || qr === undefined ? 0 : toCents(qr);
+    });
+    /** `0 < QR < total`: con `QR == total` el efectivo aplicado sería 0 (eso es «QR» a secas). */
+    readonly isMixedQrValid = computed(() => {
+        const qr = this.mixedQrCents();
+        return Number.isSafeInteger(qr) && qr > 0 && qr < this.totalCents();
+    });
+    /** Hay algo tecleado pero no sirve: se muestra el aviso en línea y se bloquea confirmar. */
+    readonly mixedQrInvalid = computed(() => this.qrPartBs() != null && !this.isMixedQrValid());
+    readonly mixedCashCents = computed(() =>
+        this.isMixedQrValid() ? this.totalCents() - this.mixedQrCents() : 0,
+    );
+
+    /**
+     * Efectivo APLICADO a la venta (el que viaja en `payments[]`), distinto
+     * del efectivo RECIBIDO: el cambio nunca es un ingreso.
+     */
+    readonly cashAppliedCents = computed(() => {
+        switch (this.paymentMethod()) {
+            case 'cash':
+                return this.totalCents();
+            case 'cashqr':
+                return this.mixedCashCents();
+            default:
+                return 0;
+        }
+    });
+
+    /**
+     * Cambio = efectivo recibido − efectivo APLICADO (no el total de la
+     * venta). Solo de pantalla: ni el recibido ni el cambio se guardan.
+     */
     readonly changeCents = computed(() => {
-        if (this.paymentMethod() !== 'cash') return null;
+        const method = this.paymentMethod();
+        if (method !== 'cash' && method !== 'cashqr') return null;
+        if (method === 'cashqr' && !this.isMixedQrValid()) return null;
         const received = this.cashReceivedBs();
         if (received === null || received === undefined) return null;
-        return toCents(received) - this.totalCents();
+        return toCents(received) - this.cashAppliedCents();
     });
 
     /** Nunca negativo en pantalla: un cambio negativo ya lo bloquea `canConfirm`. */
@@ -148,7 +232,8 @@ export class SalesPosComponent implements AfterViewInit {
 
     readonly canConfirm = computed(() => {
         if (!this.cart().length || this.confirming()) return false;
-        if (this.paymentMethod() === 'cash') {
+        if (this.paymentMethod() === 'cash' || this.paymentMethod() === 'cashqr') {
+            // En «Efectivo + QR», `changeCents` es null mientras el monto QR no sea válido.
             const change = this.changeCents();
             return change !== null && change >= 0;
         }
@@ -159,8 +244,44 @@ export class SalesPosComponent implements AfterViewInit {
         return true;
     });
 
+    constructor() {
+        // Si el carrito cambia y la rebaja elegida deja de aplicar (p. ej. Bs
+        // 30 sobre un subtotal de Bs 20), se reinicia a "Sin rebaja" y se
+        // avisa: nunca se envía en silencio una venta con otro total del que
+        // el vendedor vio al elegirla.
+        effect(() => {
+            const discount = this.discountCents();
+            if (discount > 0 && !isDiscountApplicable(discount, this.subtotalCents())) {
+                untracked(() => this.discountCents.set(0));
+                this.toast.info('app.sales.discount.resetByCart');
+            }
+        });
+
+        // Si el total cambia (cantidad, producto o rebaja) y el monto por QR
+        // tecleado ya no es válido, se reinicia y se avisa. Solo depende del
+        // total: reaccionar también al propio campo borraría el valor mientras
+        // el vendedor todavía está escribiendo. Un QR que sigue siendo válido
+        // se conserva y el efectivo aplicado se recalcula solo (`total − QR`).
+        // Mientras tanto `isMixedQrValid` ya bloquea confirmar, así que nunca
+        // se envía una venta con un estado anterior inconsistente.
+        effect(() => {
+            this.totalCents();
+            untracked(() => {
+                if (this.paymentMethod() === 'cashqr' && this.mixedQrInvalid()) {
+                    this.qrPartBs.set(null);
+                    this.toast.info('app.sales.mixed.resetByTotal');
+                }
+            });
+        });
+    }
+
     ngAfterViewInit(): void {
         this.focusScan();
+    }
+
+    onDiscountChange(discountCents: number): void {
+        this.discountCents.set(discountCents);
+        this.focusScan(); // el lector USB HID espera el foco en el input de escaneo
     }
 
     /**
@@ -264,14 +385,17 @@ export class SalesPosComponent implements AfterViewInit {
         this.cart.update((lines) => lines.filter((l) => l.productId !== line.productId));
     }
 
-    /** Cambiar de método limpia lo que no le pertenece (voucher QR / búsqueda de gift card). */
+    /** Cambiar de método limpia lo que no le pertenece (voucher QR / búsqueda de gift card / monto QR mixto). */
     setPaymentMethod(method: PosPaymentMethod): void {
         this.paymentMethod.set(method);
-        if (method !== 'qr') {
+        if (method !== 'qr' && method !== 'cashqr') {
             this.clearVoucherSelection();
         }
         if (method !== 'giftcard') {
             this.clearGiftCardSelection();
+        }
+        if (method !== 'cashqr') {
+            this.qrPartBs.set(null);
         }
     }
 
@@ -351,9 +475,13 @@ export class SalesPosComponent implements AfterViewInit {
     }
 
     private resetCart(): void {
+        // La rebaja se limpia ANTES que el carrito: así el `effect` de la
+        // rebaja nunca ve un estado inválido y no avisa por una limpieza normal.
+        this.discountCents.set(0);
+        this.qrPartBs.set(null);
+        this.paymentMethod.set('cash');
         this.cart.set([]);
         this.customerName.set('');
-        this.paymentMethod.set('cash');
         this.cashReceivedBs.set(null);
         this.clearVoucherSelection();
         this.clearGiftCardSelection();
@@ -368,8 +496,20 @@ export class SalesPosComponent implements AfterViewInit {
      * verdad del dinero, solo arma la intención.
      */
     private buildPayments(): CreateSalePaymentInput[] {
-        if (this.paymentMethod() !== 'giftcard') {
-            return [{ method: this.paymentMethod(), amountCents: this.totalCents() }];
+        const method = this.paymentMethod();
+
+        // «Efectivo + QR»: dos pagos que suman EXACTAMENTE el total final.
+        // `cash` es el efectivo APLICADO (`total − QR`), nunca lo recibido.
+        if (method === 'cashqr') {
+            if (!this.isMixedQrValid()) return [];
+            return [
+                { method: 'cash', amountCents: this.mixedCashCents() },
+                { method: 'qr', amountCents: this.mixedQrCents() },
+            ];
+        }
+
+        if (method !== 'giftcard') {
+            return [{ method, amountCents: this.totalCents() }];
         }
 
         const card = this.foundGiftCard();
@@ -396,10 +536,12 @@ export class SalesPosComponent implements AfterViewInit {
             return;
         }
         if (!this.canConfirm()) {
-            const message =
-                this.paymentMethod() === 'giftcard'
-                    ? 'app.sales.giftCard.searchFirst'
-                    : 'app.sales.messages.insufficientCash';
+            let message = 'app.sales.messages.insufficientCash';
+            if (this.paymentMethod() === 'giftcard') {
+                message = 'app.sales.giftCard.searchFirst';
+            } else if (this.paymentMethod() === 'cashqr' && !this.isMixedQrValid()) {
+                message = 'app.sales.mixed.invalidQr';
+            }
             this.toast.error(message);
             return;
         }
@@ -412,17 +554,28 @@ export class SalesPosComponent implements AfterViewInit {
         }));
         const payments: CreateSalePaymentInput[] = this.buildPayments();
         const customerName = this.customerName().trim() || undefined;
+        // Solo se envía la intención; el servidor recalcula subtotal y total.
+        const discountCents = this.appliedDiscountCents() || undefined;
 
-        this.salesService.createSale({ saleId, items, payments, customerName }).subscribe({
-            next: () => this.onSaleCreated(saleId),
-            error: (error) => this.onSaleError(error),
-        });
+        this.salesService
+            .createSale({ saleId, items, payments, customerName, discountCents })
+            .subscribe({
+                next: () => this.onSaleCreated(saleId, payments),
+                error: (error) => this.onSaleError(error),
+            });
     }
 
-    private onSaleCreated(saleId: string): void {
+    private onSaleCreated(saleId: string, sentPayments: CreateSalePaymentInput[]): void {
         // Se capturan ANTES de `resetCart()`, que los vacía para la próxima
         // venta — la foto ya comprimida sigue viva en esta variable local.
-        const pendingVoucher = this.paymentMethod() === 'qr' ? this.voucherImage() : null;
+        //
+        // El índice del pago QR sale del MISMO arreglo que se envió a
+        // `createSale` (el servidor guarda `payments[]` en ese orden): en QR
+        // solo es 0, en «Efectivo + QR» es 1, en «Gift Card + QR» es 1. Nunca
+        // se asume una posición fija (`attachVoucher` rechaza un índice que no
+        // sea un pago QR). `-1` = la venta no tiene pago QR: nada que adjuntar.
+        const qrPaymentIndex = sentPayments.findIndex((p) => p.method === 'qr');
+        const pendingVoucher = qrPaymentIndex >= 0 ? this.voucherImage() : null;
 
         this.salesService.getSale(saleId).subscribe({
             next: (sale) => {
@@ -431,7 +584,7 @@ export class SalesPosComponent implements AfterViewInit {
                 this.lastSale.set(sale);
                 this.resetCart();
                 if (pendingVoucher) {
-                    this.attachPendingVoucher(saleId, pendingVoucher);
+                    this.attachPendingVoucher(saleId, qrPaymentIndex, pendingVoucher);
                 }
             },
             error: () => {
@@ -441,7 +594,7 @@ export class SalesPosComponent implements AfterViewInit {
                 this.toast.success('app.sales.messages.saleCreated');
                 this.resetCart();
                 if (pendingVoucher) {
-                    this.attachPendingVoucher(saleId, pendingVoucher);
+                    this.attachPendingVoucher(saleId, qrPaymentIndex, pendingVoucher);
                 }
             },
         });
@@ -453,9 +606,9 @@ export class SalesPosComponent implements AfterViewInit {
      * comprobante no se pudo adjuntar y que se puede reintentar después
      * desde el historial. Nunca revierte ni marca la venta como inválida.
      */
-    private attachPendingVoucher(saleId: string, image: Blob): void {
+    private attachPendingVoucher(saleId: string, paymentIndex: number, image: Blob): void {
         this.attachingVoucher.set(true);
-        this.salesService.attachVoucherWithUpload(saleId, 0, image).subscribe({
+        this.salesService.attachVoucherWithUpload(saleId, paymentIndex, image).subscribe({
             next: () => {
                 this.salesService.getSale(saleId).subscribe({
                     next: (sale) => {
