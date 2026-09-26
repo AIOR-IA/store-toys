@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { TranslateModule } from '@ngx-translate/core';
 import { ToastService } from '@core/services';
@@ -10,6 +10,8 @@ import {
     sanitizeQuantity,
 } from './product-labels-sheet.component';
 
+const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+
 const makeProduct = (n: number): Product =>
     ({
         id: `p${n}`,
@@ -17,7 +19,8 @@ const makeProduct = (n: number): Product =>
         code: `MP${String(n).padStart(6, '0')}`,
         codeSource: 'internal',
         barcodeFormat: 'CODE128',
-        imageUrl: '',
+        // El producto 2 no tiene imagen real: no debe abrir el visor.
+        imageUrl: n === 2 ? '' : PIXEL,
         isActive: true,
     }) as unknown as Product;
 
@@ -64,6 +67,7 @@ describe('sanitizeQuantity', () => {
 
 describe('ProductLabelsSheetComponent — paginación y selección global', () => {
     let component: ProductLabelsSheetComponent;
+    let fixture: ComponentFixture<ProductLabelsSheetComponent>;
     let createPager: jasmine.Spy;
     let pagers: FakePager[];
 
@@ -89,7 +93,7 @@ describe('ProductLabelsSheetComponent — paginación y selección global', () =
             ],
         }).compileComponents();
 
-        const fixture = TestBed.createComponent(ProductLabelsSheetComponent);
+        fixture = TestBed.createComponent(ProductLabelsSheetComponent);
         component = fixture.componentInstance;
         fixture.detectChanges();
         await flush();
@@ -202,5 +206,55 @@ describe('ProductLabelsSheetComponent — paginación y selección global', () =
             'Producto 12',
             'Producto 21',
         ]);
+    });
+
+    describe('visor de imagen', () => {
+        const thumb = (i: number) =>
+            (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLImageElement>('img.w-8')[i];
+
+        it('click en la miniatura abre el visor con esa imagen, sin tocar checkbox ni cantidad', () => {
+            component.toggleSelected(product(1), true);
+            component.setQuantity(product(1), 3);
+            fixture.detectChanges();
+
+            thumb(0).click();
+            fixture.detectChanges();
+
+            expect(component.viewerSrc()).toBe(PIXEL);
+            expect(component.isSelected(product(1))).toBeTrue();
+            expect(component.quantityOf(product(1))).toBe(3);
+            expect(component.selectedCount()).toBe(1);
+        });
+
+        it('click en la miniatura de un producto NO seleccionado no lo selecciona', () => {
+            thumb(2).click();
+            fixture.detectChanges();
+            expect(component.viewerSrc()).toBe(PIXEL);
+            expect(component.selectedCount()).toBe(0);
+        });
+
+        it('producto sin imagen real: no abre el visor', () => {
+            thumb(1).click(); // producto 2
+            fixture.detectChanges();
+            expect(component.viewerSrc()).toBeNull();
+        });
+
+        it('cerrar el visor conserva selección, cantidad y página', async () => {
+            component.toggleSelected(product(1), true);
+            component.setQuantity(product(1), 3);
+            component.onNextPage();
+            await flush();
+            fixture.detectChanges();
+
+            thumb(0).click();
+            fixture.detectChanges();
+            expect(component.viewerSrc()).toBe(PIXEL);
+            component.viewerSrc.set(null); // (closed) del visor
+            fixture.detectChanges();
+
+            expect(component.rows()[0].id).toBe('p11');
+            expect(component.isSelected(product(1))).toBeTrue();
+            expect(component.quantityOf(product(1))).toBe(3);
+        });
     });
 });

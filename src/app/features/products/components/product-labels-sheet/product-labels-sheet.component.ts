@@ -11,6 +11,7 @@ import {
     SpinnerComponent,
     TitleBarComponent,
 } from '@shared/components/ui';
+import { ImageViewerComponent } from '@shared/components/ui/image-viewer/image-viewer.component';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { BarcodeFormat, toJsBarcodeFormat } from '@core/utils';
@@ -67,6 +68,7 @@ export function sanitizeQuantity(value: number | null): number {
         SpinnerComponent,
         ItemsNotFoundComponent,
         CardsPaginatorComponent,
+        ImageViewerComponent,
     ],
     templateUrl: './product-labels-sheet.component.html',
 })
@@ -82,6 +84,8 @@ export class ProductLabelsSheetComponent implements OnInit {
     /** Evita montar el paginador antes de la primera carga (ver template). */
     hasLoadedOnce = signal(false);
     generating = signal(false);
+    /** URL de la imagen abierta en el visor; `null` = cerrado (mismo patrón que el listado). */
+    viewerSrc = signal<string | null>(null);
 
     pageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
     rows = signal<Product[]>([]);
