@@ -11,6 +11,7 @@ import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { ProductsService } from '../../../products/products.service';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
+import { SAME_BARCODE_DEBOUNCE_MS } from '../../sale-scan.const';
 import { SaleCartLine } from '../../sale.model';
 import { SalesService } from '../../sales.service';
 import { SalesPosComponent } from './sales-pos.component';
@@ -737,6 +738,152 @@ describe('SalesPosComponent — rebaja', () => {
                 expect(component.discountCents()).toBe(2000);
                 expect(component.totalCents()).toBe(34000 - 2000);
             }
+        });
+    });
+    /**
+     * Anti-rebote del lector HID: el MISMO código dentro de SAME_BARCODE_DEBOUNCE_MS
+     * desde su última lectura aceptada se ignora; un código distinto nunca se
+     * bloquea. Reloj controlado con `jasmine.clock().mockDate` (sin esperas reales).
+     */
+    describe('anti-rebote del lector', () => {
+        const product = (id: string, code: string) => ({
+            id,
+            code,
+            name: `Producto ${id}`,
+            priceCents: 8500,
+            stock: 100,
+            isActive: true,
+        });
+        const CATALOG: Record<string, ReturnType<typeof product>> = {
+            A: product('A', '7772830181398'),
+            B: product('B', '7772830181399'),
+        };
+        let lookup: jasmine.Spy;
+
+        /** Simula una lectura del lector (input + Enter) en el instante `atMs`. */
+        const scan = (key: 'A' | 'B', atMs: number) => {
+            jasmine.clock().mockDate(new Date(atMs));
+            component.scanValue.set(CATALOG[key].code);
+            component.onScanSubmit();
+        };
+        const qtyOf = (id: string) => component.cart().find((l) => l.productId === id)?.quantity ?? 0;
+
+        beforeEach(() => {
+            jasmine.clock().install();
+            lookup = jasmine
+                .createSpy('lookupByCode')
+                .and.callFake((code: string) => of(Object.values(CATALOG).find((p) => p.code === code) ?? null));
+            (TestBed.inject(ProductsService) as unknown as { lookupByCode: jasmine.Spy }).lookupByCode = lookup;
+        });
+        afterEach(() => jasmine.clock().uninstall());
+
+        it('la constante inicial es 350 ms', () => {
+            expect(SAME_BARCODE_DEBOUNCE_MS).toBe(350);
+        });
+
+        it('1–2. A en t=0 se acepta; A en t=100 se ignora', () => {
+            scan('A', 0);
+            expect(qtyOf('A')).toBe(1);
+            scan('A', 100);
+            expect(qtyOf('A')).toBe(1);
+        });
+
+        it('3–4. A en t=349 se ignora; en t=350 se acepta y sube a 2', () => {
+            scan('A', 0);
+            scan('A', 349);
+            expect(qtyOf('A')).toBe(1);
+            scan('A', 350);
+            expect(qtyOf('A')).toBe(2);
+        });
+
+        it('5. Un código DIFERENTE se acepta al instante (A t=0, B t=50)', () => {
+            scan('A', 0);
+            scan('B', 50);
+            expect(qtyOf('A')).toBe(1);
+            expect(qtyOf('B')).toBe(1);
+        });
+
+        it('6. A t=0, B t=50, A t=100 → el segundo A es rebote (A se aceptó hace 100 ms)', () => {
+            scan('A', 0);
+            scan('B', 50);
+            scan('A', 100);
+            expect(qtyOf('A')).toBe(1);
+            expect(qtyOf('B')).toBe(1);
+        });
+
+        it('7. A t=0, B t=50, A t=400 → el segundo A se acepta', () => {
+            scan('A', 0);
+            scan('B', 50);
+            scan('A', 400);
+            expect(qtyOf('A')).toBe(2);
+            expect(qtyOf('B')).toBe(1);
+        });
+
+        it('8. Varias unidades legítimas con el MISMO barcode (t=0, 400, 800, 1200) → cantidad 4', () => {
+            for (const t of [0, 400, 800, 1200]) scan('A', t);
+            expect(qtyOf('A')).toBe(4);
+            expect(lookup).toHaveBeenCalledTimes(4);
+        });
+
+        it('9. Rebote real (t=0, 40, 90, 160) → una sola unidad', () => {
+            for (const t of [0, 40, 90, 160]) scan('A', t);
+            expect(qtyOf('A')).toBe(1);
+        });
+
+        it('10. Las lecturas ignoradas no consultan Firestore, no suman, no avisan y dejan el input vacío', () => {
+            const toast = TestBed.inject(ToastService) as unknown as Record<string, jasmine.Spy>;
+            scan('A', 0);
+            lookup.calls.reset();
+            toast['error'].calls.reset();
+
+            scan('A', 40);
+            scan('A', 90);
+
+            expect(lookup).not.toHaveBeenCalled();
+            expect(toast['error']).not.toHaveBeenCalled();
+            expect(qtyOf('A')).toBe(1);
+            expect(component.scanValue()).toBe(''); // si no, la siguiente lectura se concatenaría
+        });
+
+        it('11. Confirmar la venta limpia el historial: el mismo código se acepta de inmediato en la siguiente', () => {
+            scan('A', 0);
+            component.cashReceivedBs.set(100);
+            jasmine.clock().mockDate(new Date(10));
+            component.confirmSale();
+            expect(component.cart().length).toBe(0);
+
+            scan('A', 20); // solo 20 ms después de la lectura anterior, pero es otra venta
+            expect(qtyOf('A')).toBe(1);
+        });
+
+        it('12. Cancelar la venta (vaciar carrito) limpia el historial', () => {
+            const confirmation = TestBed.inject(ConfirmationService);
+            spyOn(confirmation, 'confirm').and.callFake(((c: { accept?: () => void }) => c.accept?.()) as never);
+
+            scan('A', 0);
+            component.onClearCart();
+            expect(component.cart().length).toBe(0);
+
+            scan('A', 20);
+            expect(qtyOf('A')).toBe(1);
+        });
+
+        it('13. Los botones + y − del carrito no dependen del anti-rebote', () => {
+            scan('A', 0);
+            const l = component.cart()[0];
+            component.incrementQty(l);
+            component.incrementQty(component.cart()[0]);
+            expect(qtyOf('A')).toBe(3);
+            component.decrementQty(component.cart()[0]);
+            expect(qtyOf('A')).toBe(2);
+        });
+
+        it('14. Código tecleado a mano (mismo input): sigue funcionando', () => {
+            jasmine.clock().mockDate(new Date(5000));
+            component.scanValue.set(`  ${CATALOG['B'].code} `);
+            component.onScanSubmit();
+            expect(qtyOf('B')).toBe(1);
+            expect(lookup).toHaveBeenCalledOnceWith(CATALOG['B'].code);
         });
     });
 });

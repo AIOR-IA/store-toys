@@ -31,6 +31,7 @@ import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { Product } from '../../../products/product.model';
 import { ProductsService } from '../../../products/products.service';
 import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
+import { SAME_BARCODE_DEBOUNCE_MS } from '../../sale-scan.const';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { CreateSalePaymentInput, SalesService } from '../../sales.service';
 import { PaymentMethod, Sale, SaleCartLine } from '../../sale.model';
@@ -89,6 +90,12 @@ export class SalesPosComponent implements AfterViewInit {
 
     scanValue = signal('');
     scanning = signal(false);
+    /**
+     * Anti-rebote del lector: última lectura ACEPTADA por código (ms). Es solo
+     * estado de la venta en curso (unos pocos códigos): se vacía en
+     * `resetCart()`, sin timers de limpieza.
+     */
+    private readonly lastAcceptedScanAt = new Map<string, number>();
     cart = signal<SaleCartLine[]>([]);
     customerName = signal('');
     paymentMethod = signal<PosPaymentMethod>('cash');
@@ -309,6 +316,19 @@ export class SalesPosComponent implements AfterViewInit {
         const code = this.scanValue().trim();
         if (!code || this.scanning()) return;
 
+        // Rebote del lector: el mismo código otra vez dentro de la ventana se
+        // descarta ANTES de cualquier lookup, toast o incremento. Se vacía el
+        // input (si no, la lectura siguiente se concatenaría a esta). Un código
+        // distinto nunca entra aquí: solo se compara contra SU propia última lectura.
+        const now = Date.now();
+        const lastAt = this.lastAcceptedScanAt.get(code);
+        if (lastAt !== undefined && now - lastAt < SAME_BARCODE_DEBOUNCE_MS) {
+            this.scanValue.set('');
+            this.focusScan();
+            return;
+        }
+        this.lastAcceptedScanAt.set(code, now);
+
         this.scanning.set(true);
         this.productsService.lookupByCode(code).subscribe({
             next: (product) => this.onLookupResult(product),
@@ -489,6 +509,7 @@ export class SalesPosComponent implements AfterViewInit {
     }
 
     private resetCart(): void {
+        this.lastAcceptedScanAt.clear(); // la siguiente venta empieza sin historial de rebote
         // La rebaja se limpia ANTES que el carrito: así el `effect` de la
         // rebaja nunca ve un estado inválido y no avisa por una limpieza normal.
         this.discountCents.set(0);
