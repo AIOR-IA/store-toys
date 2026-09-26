@@ -309,6 +309,15 @@ export class SalesPosComponent implements AfterViewInit {
         }
     }
 
+    /**
+     * Deja el POS listo para el siguiente escaneo. `focus()` sobre el input
+     * también quita el foco de cualquier botón que lo tuviera: un botón
+     * enfocado recibe el Enter del lector HID como un click (los dígitos no
+     * hacen nada, el Enter sí) — p. ej. reimprimía el comprobante o sumaba otra
+     * unidad con el «+» — y el código leído se perdía. Se llama tras toda
+     * acción que deja un botón enfocado (imprimir, +/−/quitar, cerrar el aviso
+     * de venta, error al confirmar, cancelar el diálogo de vaciar).
+     */
     focusScan(): void {
         this.scanInputRef?.nativeElement.focus();
     }
@@ -409,6 +418,7 @@ export class SalesPosComponent implements AfterViewInit {
                 l.productId === line.productId ? { ...l, quantity: l.quantity + 1 } : l,
             ),
         );
+        this.focusScan();
     }
 
     /** Si la cantidad llega a 0, la línea se retira del carrito (prompt §8). */
@@ -420,10 +430,12 @@ export class SalesPosComponent implements AfterViewInit {
                 )
                 .filter((l) => l.quantity > 0),
         );
+        this.focusScan();
     }
 
     removeLine(line: SaleCartLine): void {
         this.cart.update((lines) => lines.filter((l) => l.productId !== line.productId));
+        this.focusScan();
     }
 
     /**
@@ -524,6 +536,7 @@ export class SalesPosComponent implements AfterViewInit {
             icon: 'fas fa-triangle-exclamation',
             acceptButtonStyleClass: 'p-button-danger',
             accept: () => this.resetCart(),
+            reject: () => this.focusScan(),
         });
     }
 
@@ -694,6 +707,7 @@ export class SalesPosComponent implements AfterViewInit {
      */
     private onSaleError(error: unknown): void {
         this.confirming.set(false);
+        this.focusScan(); // el botón «Confirmar» quedó enfocado: un Enter del lector volvería a confirmar
         const message = (error as { message?: string })?.message;
         const code = (error as { code?: string })?.code;
 
@@ -704,11 +718,23 @@ export class SalesPosComponent implements AfterViewInit {
         this.toast.error('app.common.errors.general');
     }
 
+    /**
+     * El foco vuelve al scanner EN EL ACTO (al hacer click) y otra vez al
+     * terminar `print()`. No hace falta detectar que la ventana de impresión
+     * se cerró: el elemento activo del documento se conserva mientras otra
+     * ventana tiene el foco, así que al volver al POS el siguiente Enter del
+     * lector cae en el input y no en «Imprimir comprobante». Sin polling.
+     */
     printReceipt(sale: Sale): void {
-        this.receiptService.print(sale).catch(() => this.toast.error('app.common.errors.general'));
+        this.focusScan();
+        this.receiptService
+            .print(sale)
+            .catch(() => this.toast.error('app.common.errors.general'))
+            .finally(() => this.focusScan());
     }
 
     dismissConfirmation(): void {
         this.lastSale.set(null);
+        this.focusScan(); // el botón «X» desaparece: sin esto el foco cae en <body>
     }
 }

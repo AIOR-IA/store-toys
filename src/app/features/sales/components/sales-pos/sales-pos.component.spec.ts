@@ -1,10 +1,10 @@
 import { CurrencyPipe } from '@angular/common';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { provideRouter } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { ConfirmationService } from 'primeng/api';
-import { Subject, of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ImageCompressorService, ToastService } from '@core/services';
 import { GiftCard } from '../../../gift-cards/gift-card.model';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
@@ -40,6 +40,7 @@ describe('SalesPosComponent — rebaja', () => {
         }) as unknown as GiftCard;
 
     let component: SalesPosComponent;
+    let fixture: ComponentFixture<SalesPosComponent>;
     let createSale: jasmine.Spy;
     let attachVoucher: jasmine.Spy;
     let toastInfo: jasmine.Spy;
@@ -81,10 +82,14 @@ describe('SalesPosComponent — rebaja', () => {
             ],
         }).compileComponents();
 
-        const fixture = TestBed.createComponent(SalesPosComponent);
+        fixture = TestBed.createComponent(SalesPosComponent);
         component = fixture.componentInstance;
+        // Conectado al documento real: document.activeElement solo funciona así.
+        document.body.appendChild(fixture.nativeElement);
         fixture.detectChanges();
     });
+
+    afterEach(() => fixture.nativeElement.remove());
 
     it('sin rebaja: el total es el subtotal (Bs 400 → Bs 400) y se envía discountCents = 0', () => {
         component.cart.set([line(40000)]);
@@ -968,6 +973,177 @@ describe('SalesPosComponent — rebaja', () => {
                 expect(qtyOf('A')).toBe(1);
                 expect(toast()['error']).not.toHaveBeenCalled();
             });
+        });
+    });
+    /**
+     * Bug real: tras «Imprimir comprobante» el botón quedaba enfocado y el Enter
+     * del lector HID lo reactivaba (reabría el comprobante y el código se
+     * perdía). El POS debe devolver el foco al input del scanner.
+     *
+     * Límite de Karma: un `keydown Enter` sintético no activa botones (solo el
+     * Enter real lo hace), así que aquí se verifica el DESTINO del Enter
+     * (`document.activeElement`); la reproducción con teclas reales queda en la
+     * prueba manual con el lector.
+     */
+    describe('foco del scanner tras acciones con botón', () => {
+        let print: jasmine.Spy;
+        let lookup: jasmine.Spy;
+
+        const el = (): HTMLElement => fixture.nativeElement;
+        const scanInput = () => el().querySelector<HTMLInputElement>('input[name="scanValue"]')!;
+        const buttonOf = (icon: string) => el().querySelector<HTMLButtonElement>(`button .${icon}`)!.closest('button')!;
+        const printButton = () => buttonOf('fa-print');
+        const sale = { id: 'sale-abcdef12', paymentMethods: ['cash'], payments: [] } as never;
+        const oneLine = (quantity = 1) => [
+            { productId: 'p1', code: 'X', name: 'Juguete', unitPriceCents: 1000, quantity, stockReference: 9 },
+        ];
+
+        /** Click «real» de usuario: enfoca el botón y luego hace click (el .click() programático no enfoca). */
+        const userClick = (button: HTMLElement) => {
+            button.focus();
+            button.click();
+            fixture.detectChanges();
+        };
+        /** Lo que hace el lector HID: escribe en el elemento enfocado; solo el input del scanner lo procesa. */
+        const hidScan = (code: string) => {
+            const target = document.activeElement as HTMLElement;
+            if (target === scanInput()) {
+                scanInput().value = code;
+                scanInput().dispatchEvent(new Event('input'));
+                el().querySelector('form')!.dispatchEvent(new Event('submit'));
+            }
+            return target;
+        };
+        const settle = async () => {
+            for (let i = 0; i < 4; i++) await Promise.resolve();
+        };
+
+        beforeEach(() => {
+            print = jasmine.createSpy('print').and.returnValue(Promise.resolve());
+            (TestBed.inject(SaleReceiptService) as unknown as { print: jasmine.Spy }).print = print;
+            lookup = jasmine.createSpy('lookupByCode').and.returnValue(of(null));
+            (TestBed.inject(ProductsService) as unknown as { lookupByCode: jasmine.Spy }).lookupByCode = lookup;
+            component.lastSale.set(sale);
+            fixture.detectChanges();
+        });
+
+        it('el botón «Imprimir comprobante» es type="button" y no está dentro de un form', () => {
+            expect(printButton().getAttribute('type')).toBe('button');
+            expect(printButton().closest('form')).toBeNull();
+        });
+
+        it('click en Imprimir: se imprime y el foco pasa al scanner (no queda en el botón)', () => {
+            userClick(printButton());
+            expect(print).toHaveBeenCalledOnceWith(sale);
+            expect(document.activeElement).toBe(scanInput());
+            expect(document.activeElement).not.toBe(printButton());
+        });
+
+        it('caso crítico: tras imprimir, el código del lector va al input → onScanSubmit, y NO se reimprime', async () => {
+            userClick(printButton());
+            await settle();
+
+            const target = hidScan('7772830181398');
+            expect(target).toBe(scanInput()); // el Enter del lector llega al input, no al botón
+            expect(lookup).toHaveBeenCalledOnceWith('7772830181398');
+            expect(print).toHaveBeenCalledTimes(1);
+        });
+
+        it('si el foco vuelve al botón mientras print() está en curso, el scanner lo recupera al terminar', async () => {
+            userClick(printButton());
+            printButton().focus();
+            await settle();
+            expect(document.activeElement).toBe(scanInput());
+        });
+
+        it('impresión manual: click y segundo click voluntario reimprimen', () => {
+            userClick(printButton());
+            userClick(printButton());
+            expect(print).toHaveBeenCalledTimes(2);
+        });
+
+        it('si print() falla: avisa y el scanner queda enfocado', async () => {
+            print.and.returnValue(Promise.reject(new Error('x')));
+            userClick(printButton());
+            await settle();
+            expect((TestBed.inject(ToastService) as unknown as Record<string, jasmine.Spy>)['error']).toHaveBeenCalled();
+            expect(document.activeElement).toBe(scanInput());
+        });
+
+        it('cerrar el aviso de venta (X) devuelve el foco al scanner', () => {
+            userClick(buttonOf('fa-times'));
+            expect(component.lastSale()).toBeNull();
+            expect(document.activeElement).toBe(scanInput());
+        });
+
+        it('+ / − / quitar del carrito devuelven el foco al scanner (un Enter no los reactivaría)', () => {
+            component.cart.set(oneLine(2));
+            fixture.detectChanges();
+            for (const icon of ['fa-plus', 'fa-minus']) {
+                // dentro de la tabla del carrito (el botón «Agregar» del scanner también usa fa-plus)
+                userClick(el().querySelector<HTMLButtonElement>(`p-table button .${icon}`)!.closest('button')!);
+                expect(document.activeElement).toBe(scanInput());
+            }
+            userClick(buttonOf('fa-trash'));
+            expect(component.cart().length).toBe(0);
+            expect(document.activeElement).toBe(scanInput());
+        });
+
+        it('error al confirmar: el foco deja el botón y vuelve al scanner', () => {
+            (TestBed.inject(SalesService) as unknown as { createSale: jasmine.Spy }).createSale.and.returnValue(
+                throwError(() => ({ code: 'functions/failed-precondition', message: 'x' })),
+            );
+            component.cart.set(oneLine());
+            component.cashReceivedBs.set(10);
+            fixture.detectChanges();
+            buttonOf('fa-print').focus(); // cualquier botón enfocado al confirmar
+            component.confirmSale();
+            expect(document.activeElement).toBe(scanInput());
+        });
+
+        it('vaciar carrito: cancelar el diálogo devuelve el foco al scanner; aceptar también', () => {
+            const spy = spyOn(TestBed.inject(ConfirmationService), 'confirm');
+            component.cart.set(oneLine());
+
+            buttonOf('fa-print').focus();
+            component.onClearCart();
+            (spy.calls.mostRecent().args[0] as { reject: () => void }).reject();
+            expect(document.activeElement).toBe(scanInput());
+
+            buttonOf('fa-print').focus();
+            component.onClearCart();
+            (spy.calls.mostRecent().args[0] as { accept: () => void }).accept();
+            expect(component.cart().length).toBe(0);
+            expect(document.activeElement).toBe(scanInput());
+        });
+
+        it('nueva venta tras imprimir: el scanner agrega el producto y no reabre el comprobante', () => {
+            lookup.and.returnValue(
+                of({ id: 'A', code: '7772830181398', name: 'Pudin 2', priceCents: 8500, stock: 9, isActive: true }),
+            );
+            userClick(printButton());
+            hidScan('7772830181398');
+            expect(component.cart().map((l) => l.productId)).toEqual(['A']);
+            expect(print).toHaveBeenCalledTimes(1);
+        });
+
+        it('no afecta pago, cliente ni rebaja', () => {
+            component.cart.set([{ ...oneLine()[0], unitPriceCents: 10000 }]);
+            component.customerName.set('María');
+            component.onDiscountChange(1000);
+            component.setPaymentMethod('qr');
+            userClick(printButton());
+            expect(component.customerName()).toBe('María');
+            expect(component.discountCents()).toBe(1000);
+            expect(component.paymentMethod()).toBe('qr');
+            expect(component.cart().length).toBe(1);
+        });
+
+        it('teclado manual: escribir un código y Enter en el input sigue funcionando', () => {
+            lookup.and.returnValue(of({ id: 'B', code: '123', name: 'B', priceCents: 100, stock: 1, isActive: true }));
+            scanInput().focus();
+            hidScan('123');
+            expect(component.cart().length).toBe(1);
         });
     });
 });
