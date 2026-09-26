@@ -10,6 +10,7 @@ import { GiftCard } from '../../../gift-cards/gift-card.model';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { ProductsService } from '../../../products/products.service';
 import { SaleReceiptService } from '../../sale-receipt.service';
+import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
 import { SaleCartLine } from '../../sale.model';
 import { SalesService } from '../../sales.service';
 import { SalesPosComponent } from './sales-pos.component';
@@ -84,7 +85,7 @@ describe('SalesPosComponent — rebaja', () => {
         fixture.detectChanges();
     });
 
-    it('sin rebaja: el total es el subtotal (Bs 400 → Bs 400) y no se envía discountCents', () => {
+    it('sin rebaja: el total es el subtotal (Bs 400 → Bs 400) y se envía discountCents = 0', () => {
         component.cart.set([line(40000)]);
         component.cashReceivedBs.set(400);
 
@@ -94,7 +95,7 @@ describe('SalesPosComponent — rebaja', () => {
 
         component.confirmSale();
         const payload = createSale.calls.mostRecent().args[0];
-        expect(payload.discountCents).toBeUndefined();
+        expect(payload.discountCents).toBe(0); // 0 explícito: undefined viajaría como null y createSale lo rechaza
         expect(payload.payments).toEqual([{ method: 'cash', amountCents: 40000 }]);
     });
 
@@ -507,6 +508,235 @@ describe('SalesPosComponent — rebaja', () => {
 
                 expect(attachVoucher).not.toHaveBeenCalled();
             });
+        });
+    });
+    /**
+     * Bug «Sin rebaja»: el POS mandaba `discountCents: undefined` y el SDK de
+     * callable serializa esa clave como `null`, que `createSale` rechaza
+     * (`parseDiscountCents`). `wire()` reproduce esa serialización para que la
+     * prueba falle si vuelve a enviarse `undefined`.
+     */
+    describe('«Sin rebaja» viaja como 0 (nunca null/undefined)', () => {
+        const payloadOf = () => createSale.calls.mostRecent().args[0];
+        const wire = (payload: Record<string, unknown>) =>
+            Object.fromEntries(Object.entries(payload).map(([k, v]) => [k, v === undefined ? null : v]));
+        const expectValidNoDiscount = () => {
+            const sent = wire(payloadOf());
+            expect(sent['discountCents']).toBe(0);
+            expect(SALE_DISCOUNT_OPTIONS_CENTS).toContain(sent['discountCents'] as number);
+        };
+
+        it('1. Efectivo: total 340, recibido 350, cambio 10 → confirma', () => {
+            component.cart.set([line(8500, 4)]); // PUDIN 2 ×4 = Bs 340
+            component.cashReceivedBs.set(350);
+            expect(component.totalCents()).toBe(34000);
+            expect(component.changeCents()).toBe(1000);
+            expect(component.canConfirm()).toBeTrue();
+
+            component.confirmSale();
+            expect(createSale).toHaveBeenCalledTimes(1);
+            expect(payloadOf().payments).toEqual([{ method: 'cash', amountCents: 34000 }]);
+            expectValidNoDiscount();
+        });
+
+        it('2. QR: total 340 → confirma', () => {
+            component.cart.set([line(8500, 4)]);
+            component.setPaymentMethod('qr');
+            component.confirmSale();
+            expect(payloadOf().payments).toEqual([{ method: 'qr', amountCents: 34000 }]);
+            expectValidNoDiscount();
+        });
+
+        it('3. Efectivo + QR: QR 100, efectivo aplicado 240, recibido 250, cambio 10 → confirma', () => {
+            component.cart.set([line(8500, 4)]);
+            component.setPaymentMethod('cashqr');
+            component.qrPartBs.set(100);
+            component.cashReceivedBs.set(250);
+            expect(component.mixedCashCents()).toBe(24000);
+            expect(component.changeCents()).toBe(1000);
+
+            component.confirmSale();
+            expect(payloadOf().payments).toEqual([
+                { method: 'cash', amountCents: 24000 },
+                { method: 'qr', amountCents: 10000 },
+            ]);
+            expectValidNoDiscount();
+        });
+
+        it('4. Gift Card compatible → sigue funcionando', () => {
+            component.cart.set([line(8500, 4)]);
+            component.setPaymentMethod('giftcard');
+            component.foundGiftCard.set(giftCard(34000));
+            component.confirmSale();
+            expect(payloadOf().payments).toEqual([
+                { method: 'giftcard', amountCents: 34000, giftCardId: 'GC1000-001', giftCardCycleId: 'cycle-1' },
+            ]);
+            expectValidNoDiscount();
+        });
+
+        it('5–10. Rebajas Bs 5, 10, 15, 20, 25 y 30: subtotal − rebaja = total, Σ pagos = total', () => {
+            for (const discount of [500, 1000, 1500, 2000, 2500, 3000]) {
+                createSale.calls.reset();
+                component.cart.set([line(8500, 4)]);
+                component.onDiscountChange(discount);
+                component.cashReceivedBs.set(400);
+                const expectedTotal = 34000 - discount;
+                expect(component.totalCents()).toBe(expectedTotal);
+
+                component.confirmSale();
+                const payload = payloadOf();
+                expect(wire(payload)['discountCents']).toBe(discount);
+                expect(payload.payments.reduce((s: number, p: { amountCents: number }) => s + p.amountCents, 0)).toBe(
+                    expectedTotal,
+                );
+            }
+        });
+
+        it('11–13. Inválidas (fuera de lista, decimal, ≥ subtotal): la UI no las aplica; el rechazo real lo prueba test:functions', () => {
+            component.cart.set([line(8500, 4)]);
+            for (const bad of [3500, 1234, 1000.5, -500]) {
+                component.onDiscountChange(bad);
+                expect(component.appliedDiscountCents()).toBe(0);
+                expect(component.totalCents()).toBe(34000);
+            }
+            component.cart.set([line(2000)]); // subtotal Bs 20
+            component.onDiscountChange(2000); // rebaja == subtotal
+            expect(component.appliedDiscountCents()).toBe(0);
+            expect(isDiscountApplicable(2000, 2000)).toBeFalse();
+        });
+    });
+
+    /**
+     * Bug «estado residual»: el efectivo recibido (y el resto del estado propio
+     * de un método) sobrevivía al cambio de método de pago.
+     */
+    describe('cambio de método de pago — sin estado residual', () => {
+        type Method = 'cash' | 'qr' | 'cashqr' | 'giftcard';
+        const METHODS: Method[] = ['cash', 'qr', 'cashqr', 'giftcard'];
+        const blob = () => new Blob(['x'], { type: 'image/webp' });
+        const payloadOf = () => createSale.calls.mostRecent().args[0];
+
+        /** Deja el POS a mitad de una venta con TODO el estado propio de `method` ya tecleado. */
+        const dirtyStateOf = (method: Method) => {
+            component.cart.set([line(8500, 4)]);
+            component.customerName.set('María');
+            component.onDiscountChange(1000);
+            component.setPaymentMethod(method);
+            component.cashReceivedBs.set(350);
+            if (method === 'cashqr') component.qrPartBs.set(100);
+            if (method === 'qr' || method === 'cashqr') {
+                component.voucherImage.set(blob());
+                component.voucherPreviewUrl.set('blob:preview');
+            }
+            if (method === 'giftcard') {
+                component.foundGiftCard.set(giftCard(50000));
+                component.giftCardCodeValue.set('GC1000-001');
+                component.giftCardDifferenceMethod.set('qr');
+            }
+        };
+
+        for (const from of METHODS) {
+            for (const to of METHODS.filter((m) => m !== from)) {
+                it(`${from} → ${to}: limpia el estado de pago y conserva carrito, cliente y rebaja`, () => {
+                    dirtyStateOf(from);
+                    component.setPaymentMethod(to);
+
+                    expect(component.paymentMethod()).toBe(to);
+                    // limpiado
+                    expect(component.cashReceivedBs()).toBeNull();
+                    expect(component.changeCents()).toBeNull();
+                    expect(component.qrPartBs()).toBeNull();
+                    expect(component.mixedQrCents()).toBe(0);
+                    expect(component.voucherImage()).toBeNull();
+                    expect(component.voucherPreviewUrl()).toBeNull();
+                    expect(component.foundGiftCard()).toBeNull();
+                    expect(component.giftCardCodeValue()).toBe('');
+                    expect(component.giftCardDifferenceMethod()).toBe('cash');
+                    // conservado
+                    expect(component.cart().length).toBe(1);
+                    expect(component.cart()[0].quantity).toBe(4);
+                    expect(component.customerName()).toBe('María');
+                    expect(component.discountCents()).toBe(1000);
+                    expect(component.subtotalCents()).toBe(34000);
+                    expect(component.totalCents()).toBe(33000);
+                });
+            }
+        }
+
+        it('volver a elegir el MISMO método no borra lo tecleado', () => {
+            dirtyStateOf('cashqr');
+            component.setPaymentMethod('cashqr');
+            expect(component.cashReceivedBs()).toBe(350);
+            expect(component.qrPartBs()).toBe(100);
+            expect(component.voucherImage()).not.toBeNull();
+        });
+
+        it('Efectivo 350 → QR → Efectivo + QR → QR 100, recibido 250: el payload solo lleva cash restante + qr 100', () => {
+            component.cart.set([line(8500, 4)]);
+            component.setPaymentMethod('cash');
+            component.cashReceivedBs.set(350);
+            component.setPaymentMethod('qr');
+            component.setPaymentMethod('cashqr');
+            expect(component.cashReceivedBs()).toBeNull(); // el 350 NO se heredó
+            expect(component.qrPartBs()).toBeNull();
+            expect(component.canConfirm()).toBeFalse(); // hay que completar el flujo mixto otra vez
+
+            component.qrPartBs.set(100);
+            component.cashReceivedBs.set(250);
+            expect(component.changeCents()).toBe(1000);
+
+            component.confirmSale();
+            const payload = payloadOf();
+            expect(payload.payments).toEqual([
+                { method: 'cash', amountCents: 24000 },
+                { method: 'qr', amountCents: 10000 },
+            ]);
+            expect(payload.discountCents).toBe(0);
+            expect(payload.items).toEqual([{ productId: 'p1', quantity: 4 }]);
+            expect(attachVoucher).not.toHaveBeenCalled();
+        });
+
+        it('Efectivo + QR → Efectivo → confirma solo con efectivo (sin QR heredado) tras teclear el recibido otra vez', () => {
+            component.cart.set([line(8500, 4)]);
+            component.setPaymentMethod('cashqr');
+            component.qrPartBs.set(100);
+            component.cashReceivedBs.set(250);
+            component.setPaymentMethod('cash');
+
+            expect(component.canConfirm()).toBeFalse(); // el recibido se pide de nuevo
+            component.cashReceivedBs.set(340);
+            component.confirmSale();
+            expect(payloadOf().payments).toEqual([{ method: 'cash', amountCents: 34000 }]);
+        });
+
+        it('QR con foto → Efectivo: la foto no se asocia a una venta que ya no es QR', () => {
+            component.cart.set([line(8500, 4)]);
+            component.setPaymentMethod('qr');
+            component.voucherImage.set(blob());
+            component.setPaymentMethod('cash');
+            component.cashReceivedBs.set(340);
+            component.confirmSale();
+
+            expect(payloadOf().payments).toEqual([{ method: 'cash', amountCents: 34000 }]);
+            expect(attachVoucher).not.toHaveBeenCalled();
+        });
+
+        it('Gift Card → Efectivo + QR → Gift Card: la tarjeta buscada no reaparece', () => {
+            dirtyStateOf('giftcard');
+            component.setPaymentMethod('cashqr');
+            component.setPaymentMethod('giftcard');
+            expect(component.foundGiftCard()).toBeNull();
+            expect(component.canConfirm()).toBeFalse();
+        });
+
+        it('la rebaja se mantiene al cambiar de método y el total sigue siendo subtotal − rebaja', () => {
+            component.cart.set([line(8500, 4)]);
+            component.onDiscountChange(2000);
+            for (const method of METHODS) {
+                component.setPaymentMethod(method);
+                expect(component.discountCents()).toBe(2000);
+                expect(component.totalCents()).toBe(34000 - 2000);
+            }
         });
     });
 });

@@ -387,18 +387,30 @@ export class SalesPosComponent implements AfterViewInit {
         this.cart.update((lines) => lines.filter((l) => l.productId !== line.productId));
     }
 
-    /** Cambiar de método limpia lo que no le pertenece (voucher QR / búsqueda de gift card / monto QR mixto). */
+    /**
+     * Cambiar de método limpia TODO el estado propio del pago anterior, para
+     * que ninguno sobreviva a un cambio de radio y llegue a la pantalla o al
+     * payload:
+     *
+     * - `cashReceivedBs` (efectivo recibido): pertenece al cálculo de cambio
+     *   del método anterior (contra otro efectivo aplicado). Se vuelve a pedir.
+     * - `qrPartBs` (monto QR de «Efectivo + QR»): empieza vacío en el mixto.
+     * - voucher QR: la foto era del pago QR anterior (otro monto); no se
+     *   arrastra ni siquiera entre «QR» y «Efectivo + QR».
+     * - gift card buscada + método de diferencia.
+     *
+     * Se CONSERVA lo que no es de pago: carrito, cliente y rebaja (esta última
+     * cambia el total, no el método). Volver a elegir el mismo método no hace
+     * nada (no borra lo tecleado).
+     */
     setPaymentMethod(method: PosPaymentMethod): void {
+        if (method === this.paymentMethod()) return;
+
         this.paymentMethod.set(method);
-        if (method !== 'qr' && method !== 'cashqr') {
-            this.clearVoucherSelection();
-        }
-        if (method !== 'giftcard') {
-            this.clearGiftCardSelection();
-        }
-        if (method !== 'cashqr') {
-            this.qrPartBs.set(null);
-        }
+        this.cashReceivedBs.set(null);
+        this.qrPartBs.set(null);
+        this.clearVoucherSelection();
+        this.clearGiftCardSelection();
     }
 
     onGiftCardCodeSubmit(): void {
@@ -557,7 +569,10 @@ export class SalesPosComponent implements AfterViewInit {
         const payments: CreateSalePaymentInput[] = this.buildPayments();
         const customerName = this.customerName().trim() || undefined;
         // Solo se envía la intención; el servidor recalcula subtotal y total.
-        const discountCents = this.appliedDiscountCents() || undefined;
+        // SIEMPRE un número (0 = «Sin rebaja»). Con `undefined` el SDK de
+        // callable serializa la clave como `null` y `createSale` rechaza `null`
+        // con «La rebaja no es válida» (el rechazo es correcto; el bug era enviar null).
+        const discountCents = this.appliedDiscountCents();
 
         this.salesService
             .createSale({ saleId, items, payments, customerName, discountCents })

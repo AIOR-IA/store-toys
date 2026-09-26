@@ -155,6 +155,21 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
         check('resumen sin rebaja: discountCents = 0', summary().discountCents === 0);
     }
 
+    // B2. «Sin rebaja» como lo envía el frontend corregido: discountCents = 0 EXPLÍCITO.
+    // (El SDK de callable serializa `undefined` como `null`, que se rechaza: ver D.)
+    console.log('\nB2. «Sin rebaja»: discountCents = 0 explícito (efectivo, QR, Efectivo + QR)');
+    for (const [id, payments] of [
+        ['B2a', [{ method: 'cash', amountCents: 15000 }]],
+        ['B2b', [{ method: 'qr', amountCents: 15000 }]],
+        ['B2c', [{ method: 'cash', amountCents: 5000 }, { method: 'qr', amountCents: 10000 }]],
+    ]) {
+        reset();
+        r = await outcome(call(createSale, 'seller', { saleId: id, items: bear2, payments, discountCents: 0 }));
+        console.log(`  ${id}:`, r.ok ? 'OK' : `${r.code}: ${r.message}`);
+        check(`${id}: acepta discountCents=0 → subtotal 15000, rebaja 0, total 15000`, r.ok && sale(id).subtotalCents === 15000 && sale(id).discountCents === 0 && sale(id).totalCents === 15000, r.message);
+        if (r.ok) check(`${id}: resumen sin rebaja (0) y Σ pagos = total`, summary().discountCents === 0 && sale(id).payments.reduce((s, p) => s + p.amountCents, 0) === 15000);
+    }
+
     // C. cobrar el subtotal ignorando la rebaja
     console.log('\nC. Rebaja Bs 10 pero pago por el subtotal (Bs 150) — debe rechazarse');
     reset();
