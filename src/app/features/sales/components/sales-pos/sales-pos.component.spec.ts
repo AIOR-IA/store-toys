@@ -4,7 +4,7 @@ import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { provideRouter } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { ConfirmationService } from 'primeng/api';
-import { of } from 'rxjs';
+import { Subject, of } from 'rxjs';
 import { ImageCompressorService, ToastService } from '@core/services';
 import { GiftCard } from '../../../gift-cards/gift-card.model';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
@@ -777,22 +777,25 @@ describe('SalesPosComponent — rebaja', () => {
         });
         afterEach(() => jasmine.clock().uninstall());
 
-        it('la constante inicial es 350 ms', () => {
-            expect(SAME_BARCODE_DEBOUNCE_MS).toBe(350);
+        // Los tiempos dependen de la constante: se ajusta con el lector físico sin tocar estos tests.
+        const D = SAME_BARCODE_DEBOUNCE_MS;
+
+        it('la ventana es un entero positivo (valor a afinar con el lector físico)', () => {
+            expect(Number.isInteger(D) && D > 0).toBeTrue();
         });
 
-        it('1–2. A en t=0 se acepta; A en t=100 se ignora', () => {
+        it('1–2. A en t=0 se acepta; A poco después (dentro de la ventana) se ignora', () => {
             scan('A', 0);
             expect(qtyOf('A')).toBe(1);
-            scan('A', 100);
+            scan('A', Math.floor(D / 4));
             expect(qtyOf('A')).toBe(1);
         });
 
-        it('3–4. A en t=349 se ignora; en t=350 se acepta y sube a 2', () => {
+        it('3–4. A en t=D−1 se ignora; en t=D se acepta y sube a 2', () => {
             scan('A', 0);
-            scan('A', 349);
+            scan('A', D - 1);
             expect(qtyOf('A')).toBe(1);
-            scan('A', 350);
+            scan('A', D);
             expect(qtyOf('A')).toBe(2);
         });
 
@@ -803,7 +806,7 @@ describe('SalesPosComponent — rebaja', () => {
             expect(qtyOf('B')).toBe(1);
         });
 
-        it('6. A t=0, B t=50, A t=100 → el segundo A es rebote (A se aceptó hace 100 ms)', () => {
+        it('6. A t=0, B t=50, A t=100 → el segundo A es rebote (A se aceptó hace < D)', () => {
             scan('A', 0);
             scan('B', 50);
             scan('A', 100);
@@ -811,22 +814,22 @@ describe('SalesPosComponent — rebaja', () => {
             expect(qtyOf('B')).toBe(1);
         });
 
-        it('7. A t=0, B t=50, A t=400 → el segundo A se acepta', () => {
+        it('7. A t=0, B t=50, A t=D+50 → el segundo A se acepta', () => {
             scan('A', 0);
             scan('B', 50);
-            scan('A', 400);
+            scan('A', D + 50);
             expect(qtyOf('A')).toBe(2);
             expect(qtyOf('B')).toBe(1);
         });
 
-        it('8. Varias unidades legítimas con el MISMO barcode (t=0, 400, 800, 1200) → cantidad 4', () => {
-            for (const t of [0, 400, 800, 1200]) scan('A', t);
+        it('8. Varias unidades legítimas con el MISMO barcode (una cada D+50 ms) → cantidad 4', () => {
+            for (const t of [0, 1, 2, 3].map((n) => n * (D + 50))) scan('A', t);
             expect(qtyOf('A')).toBe(4);
             expect(lookup).toHaveBeenCalledTimes(4);
         });
 
-        it('9. Rebote real (t=0, 40, 90, 160) → una sola unidad', () => {
-            for (const t of [0, 40, 90, 160]) scan('A', t);
+        it('9. Rebote real (lecturas repetidas dentro de la ventana) → una sola unidad', () => {
+            for (const t of [0, 0.1, 0.25, 0.45].map((f) => Math.floor(f * D))) scan('A', t);
             expect(qtyOf('A')).toBe(1);
         });
 
@@ -884,6 +887,87 @@ describe('SalesPosComponent — rebaja', () => {
             component.onScanSubmit();
             expect(qtyOf('B')).toBe(1);
             expect(lookup).toHaveBeenCalledOnceWith(CATALOG['B'].code);
+        });
+
+        /**
+         * Bug reportado: una 2.ª lectura llegaba MIENTRAS el lookup de la 1.ª seguía
+         * en curso → se concatenaba al código anterior, la limpieza tardía borraba
+         * a medias lo tecleado y salía «código no encontrado» con un código corrupto.
+         */
+        describe('lecturas que llegan durante un lookup en curso', () => {
+            let pending: Record<string, Subject<unknown>>;
+            const toast = () => TestBed.inject(ToastService) as unknown as Record<string, jasmine.Spy>;
+            /** Simula teclear: el lector añade los caracteres al contenido actual del input. */
+            const type = (text: string) => component.scanValue.set(component.scanValue() + text);
+
+            beforeEach(() => {
+                pending = { A: new Subject(), B: new Subject() };
+                lookup.and.callFake((code: string) => {
+                    const key = Object.keys(CATALOG).find((k) => CATALOG[k].code === code);
+                    return key ? pending[key] : of(null);
+                });
+            });
+
+            it('el input se vacía al LEER, antes de que termine el lookup', () => {
+                jasmine.clock().mockDate(new Date(0));
+                type(CATALOG['A'].code);
+                component.onScanSubmit();
+                expect(component.scanValue()).toBe('');
+                expect(component.scanning()).toBeTrue();
+            });
+
+            it('una 2.ª lectura durante el lookup NO se concatena: cada lookup recibe su código exacto', () => {
+                jasmine.clock().mockDate(new Date(0));
+                type(CATALOG['A'].code);
+                component.onScanSubmit(); // lookup de A en curso
+
+                jasmine.clock().mockDate(new Date(40));
+                type(CATALOG['B'].code); // llega la siguiente lectura
+                expect(component.scanValue()).toBe(CATALOG['B'].code); // sin restos de A
+                component.onScanSubmit();
+
+                expect(lookup.calls.allArgs()).toEqual([[CATALOG['A'].code], [CATALOG['B'].code]]);
+                pending['A'].next(CATALOG['A']);
+                pending['A'].complete();
+                pending['B'].next(CATALOG['B']);
+                pending['B'].complete();
+
+                expect(qtyOf('A')).toBe(1);
+                expect(qtyOf('B')).toBe(1);
+                expect(toast()['error']).not.toHaveBeenCalled();
+                expect(component.scanning()).toBeFalse();
+            });
+
+            it('terminar el lookup NO borra la lectura siguiente que ya se está tecleando', () => {
+                jasmine.clock().mockDate(new Date(0));
+                type(CATALOG['A'].code);
+                component.onScanSubmit();
+
+                type('77728'); // lectura siguiente, a medias
+                pending['A'].next(CATALOG['A']);
+                pending['A'].complete();
+
+                expect(component.scanValue()).toBe('77728');
+                expect(qtyOf('A')).toBe(1);
+                expect(toast()['error']).not.toHaveBeenCalled();
+            });
+
+            it('el MISMO código otra vez durante el lookup (rebote): se ignora, sin lookup ni toast ni restos en el input', () => {
+                jasmine.clock().mockDate(new Date(0));
+                type(CATALOG['A'].code);
+                component.onScanSubmit();
+
+                jasmine.clock().mockDate(new Date(60));
+                type(CATALOG['A'].code);
+                component.onScanSubmit();
+
+                expect(lookup).toHaveBeenCalledTimes(1);
+                expect(component.scanValue()).toBe('');
+                pending['A'].next(CATALOG['A']);
+                pending['A'].complete();
+                expect(qtyOf('A')).toBe(1);
+                expect(toast()['error']).not.toHaveBeenCalled();
+            });
         });
     });
 });

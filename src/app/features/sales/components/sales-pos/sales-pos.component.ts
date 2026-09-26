@@ -96,6 +96,7 @@ export class SalesPosComponent implements AfterViewInit {
      * `resetCart()`, sin timers de limpieza.
      */
     private readonly lastAcceptedScanAt = new Map<string, number>();
+    private pendingScanLookups = 0;
     cart = signal<SaleCartLine[]>([]);
     customerName = signal('');
     paymentMethod = signal<PosPaymentMethod>('cash');
@@ -312,39 +313,57 @@ export class SalesPosComponent implements AfterViewInit {
         this.scanInputRef?.nativeElement.focus();
     }
 
+    /**
+     * Lector HID → Enter → aquí. El input se VACÍA en el acto (síncrono), antes
+     * del lookup asíncrono, y no se bloquea mientras hay un lookup en curso:
+     *
+     * - Si el input se vaciara al TERMINAR el lookup (como antes), una segunda
+     *   lectura que ya estuviera llegando se concatenaba al código anterior
+     *   (el Enter se ignoraba por `scanning`) y luego la limpieza borraba a
+     *   medias lo tecleado: quedaba un código parcial/corrupto → «código no
+     *   encontrado».
+     * - Cada lectura es independiente; `scanning` es solo el indicador de
+     *   carga (hay lookups pendientes).
+     */
     onScanSubmit(): void {
         const code = this.scanValue().trim();
-        if (!code || this.scanning()) return;
+        this.scanValue.set('');
+        if (!code) return;
 
         // Rebote del lector: el mismo código otra vez dentro de la ventana se
-        // descarta ANTES de cualquier lookup, toast o incremento. Se vacía el
-        // input (si no, la lectura siguiente se concatenaría a esta). Un código
+        // descarta ANTES de cualquier lookup, toast o incremento. Un código
         // distinto nunca entra aquí: solo se compara contra SU propia última lectura.
         const now = Date.now();
         const lastAt = this.lastAcceptedScanAt.get(code);
         if (lastAt !== undefined && now - lastAt < SAME_BARCODE_DEBOUNCE_MS) {
-            this.scanValue.set('');
             this.focusScan();
             return;
         }
         this.lastAcceptedScanAt.set(code, now);
 
+        this.pendingScanLookups += 1;
         this.scanning.set(true);
         this.productsService.lookupByCode(code).subscribe({
-            next: (product) => this.onLookupResult(product),
+            next: (product) => {
+                this.finishScanLookup();
+                this.onLookupResult(product);
+            },
             error: () => {
-                this.scanning.set(false);
-                this.scanValue.set('');
+                this.finishScanLookup();
                 this.toast.error('app.common.errors.general');
                 this.focusScan();
             },
         });
     }
 
-    private onLookupResult(product: Product | null): void {
-        this.scanning.set(false);
-        this.scanValue.set('');
+    private finishScanLookup(): void {
+        this.pendingScanLookups = Math.max(0, this.pendingScanLookups - 1);
+        this.scanning.set(this.pendingScanLookups > 0);
+    }
 
+    private onLookupResult(product: Product | null): void {
+        // NO se toca `scanValue`: ya se vació al leer y ahora puede contener
+        // la lectura SIGUIENTE a medio teclear.
         if (!product) {
             this.toast.error('app.sales.messages.codeNotFound');
             this.focusScan();
