@@ -17,11 +17,12 @@ import {
     SpinnerComponent,
     TitleBarComponent,
 } from '@shared/components/ui';
-import { MoneyPipe } from '@shared/pipes';
+import { MoneyPipe, ProductNamePipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { SettingsService, ToastService } from '@core/services';
 import { looksLikeCode } from '@core/utils';
+import { formatProductName } from '@shared/utils';
 import { ProductFormDialogComponent } from '../product-form-dialog/product-form-dialog.component';
 import { ProductLabelDialogComponent } from '../product-label-dialog/product-label-dialog.component';
 import { ProductChangeCodeDialogComponent } from '../product-change-code-dialog/product-change-code-dialog.component';
@@ -52,6 +53,7 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 3;
         ButtonModule,
         TranslateModule,
         MoneyPipe,
+        ProductNamePipe,
         TitleBarComponent,
         SearchBarComponent,
         FilterTabComponent,
@@ -227,7 +229,7 @@ export class ProductListComponent implements OnInit {
                 activating
                     ? 'app.products.messages.confirmActivate'
                     : 'app.products.messages.confirmDeactivate',
-                { name: product.name },
+                { name: formatProductName(product.name) },
             ),
             icon: activating
                 ? 'fas fa-circle-check'

@@ -53,7 +53,7 @@
                 @for (item of sale.items; track item.productId) {
                 <tr class="border-b border-gray-100">
                     <td class="py-1 font-mono">{{ item.code }}</td>
-                    <td>{{ item.name }}</td>
+                    <td>{{ item.name | productName }}</td>
                     <td class="text-center">{{ item.quantity }}</td>
                     <td class="text-right">{{ item.unitPriceCents | money }}</td>
                     <td class="text-right">{{ item.subtotalCents | money }}</td>

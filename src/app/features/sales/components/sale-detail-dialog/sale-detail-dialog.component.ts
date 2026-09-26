@@ -6,7 +6,7 @@ import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { InputTextareaModule } from 'primeng/inputtextarea';
 import { TagModule } from 'primeng/tag';
-import { MoneyPipe } from '@shared/pipes';
+import { MoneyPipe, ProductNamePipe } from '@shared/pipes';
 import { ImageCompressorService, SettingsService, ToastService } from '@core/services';
 import { formatInStoreTimezone } from '@core/utils/date.util';
 import { AppSettings } from '@core/models';
@@ -35,6 +35,7 @@ interface IndexedPayment extends Payment {
         InputTextareaModule,
         TranslateModule,
         MoneyPipe,
+        ProductNamePipe,
     ],
     templateUrl: './sale-detail-dialog.component.html',
 })

@@ -17,7 +17,7 @@ import {
     SpinnerComponent,
     TitleBarComponent,
 } from '@shared/components/ui';
-import { MoneyPipe } from '@shared/pipes';
+import { MoneyPipe, ProductNamePipe } from '@shared/pipes';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import {
@@ -73,6 +73,7 @@ const OPEN_LIABILITY_STATUSES: GiftCardStatus[] = ['ACTIVE', 'SUSPENDED'];
         TooltipModule,
         TranslateModule,
         MoneyPipe,
+        ProductNamePipe,
         TitleBarComponent,
         ItemsNotFoundComponent,
         SpinnerComponent,

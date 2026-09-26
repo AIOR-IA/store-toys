@@ -38,7 +38,7 @@
         />
         <span
             class="min-w-0 basis-40 grow text-base font-medium whitespace-normal break-words sm:grow-0 sm:basis-auto sm:w-64"
-            >{{ product.name }}</span
+            >{{ product.name | productName }}</span
         >
         <p-inputNumber
             [ngModel]="quantityOf(product)"

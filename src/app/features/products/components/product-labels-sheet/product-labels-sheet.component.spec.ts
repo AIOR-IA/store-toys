@@ -199,13 +199,22 @@ describe('ProductLabelsSheetComponent — paginación y selección global', () =
             .map((cell) => (cell as { stack?: { text: string }[] }).stack?.[2]?.text)
             .filter((t): t is string => !!t);
         expect(names).toEqual([
-            'Producto 1',
-            'Producto 1',
-            'Producto 1',
-            'Producto 12',
-            'Producto 12',
-            'Producto 21',
+            'PRODUCTO 1',
+            'PRODUCTO 1',
+            'PRODUCTO 1',
+            'PRODUCTO 12',
+            'PRODUCTO 12',
+            'PRODUCTO 21',
         ]);
+    });
+
+    it('muestra el nombre en MAYÚSCULAS sin alterar el dato del producto', () => {
+        const el = fixture.nativeElement as HTMLElement;
+        const names = [...el.querySelectorAll('p-checkbox')].map((c) =>
+            c.closest('div.flex')!.children[2].textContent!.trim(),
+        );
+        expect(names[0]).toBe('PRODUCTO 1');
+        expect(component.rows()[0].name).toBe('Producto 1');
     });
 
     describe('visor de imagen', () => {

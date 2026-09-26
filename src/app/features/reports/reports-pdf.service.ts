@@ -4,6 +4,7 @@ import { TranslateService } from '@ngx-translate/core';
 import { firstValueFrom } from 'rxjs';
 import { SettingsService } from '@core/services';
 import { fromCents } from '@core/utils';
+import { formatProductName } from '@shared/utils';
 import { RECEIPT_LOGO_BASE64 } from '../sales/receipt-logo.const';
 import { GiftCardStatus } from '../gift-cards/gift-card.model';
 import { RangeTotals, SalesAggregateTotals } from './reports.service';
@@ -215,7 +216,7 @@ export class ReportsPdfService {
                                           .slice(0, 20)
                                           .map((p) => [
                                               p.code,
-                                              p.name,
+                                              formatProductName(p.name),
                                               { text: String(p.qty), alignment: 'center' },
                                               { text: this.money(p.totalCents), alignment: 'right' },
                                           ]),

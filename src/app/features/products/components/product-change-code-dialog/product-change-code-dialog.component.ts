@@ -19,6 +19,7 @@ import {
     ResolvedCode,
 } from '../product-code-picker/product-code-picker.component';
 import { ProductsService, ProductsServiceError } from '../../products.service';
+import { ProductNamePipe } from '@shared/pipes';
 import { Product } from '../../product.model';
 
 /**
@@ -31,7 +32,7 @@ import { Product } from '../../product.model';
 @Component({
     selector: 'app-product-change-code-dialog',
     standalone: true,
-    imports: [CommonModule, DialogModule, ButtonModule, TranslateModule, ProductCodePickerComponent],
+    imports: [CommonModule, DialogModule, ButtonModule, TranslateModule, ProductCodePickerComponent, ProductNamePipe],
     templateUrl: './product-change-code-dialog.component.html',
 })
 export class ProductChangeCodeDialogComponent {

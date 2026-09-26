@@ -5,7 +5,8 @@ import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { BarcodeSvgComponent } from '@shared/components/ui';
 import { LABEL_SIZE_MM } from '@shared/constants';
-import { printBarcodeLabel } from '@shared/utils';
+import { ProductNamePipe } from '@shared/pipes';
+import { formatProductName, printBarcodeLabel } from '@shared/utils';
 import { ToastService } from '@core/services';
 import { Product } from '../../product.model';
 
@@ -22,7 +23,7 @@ import { Product } from '../../product.model';
 @Component({
     selector: 'app-product-label-dialog',
     standalone: true,
-    imports: [CommonModule, DialogModule, ButtonModule, TranslateModule, BarcodeSvgComponent],
+    imports: [CommonModule, DialogModule, ButtonModule, TranslateModule, BarcodeSvgComponent, ProductNamePipe],
     templateUrl: './product-label-dialog.component.html',
 })
 export class ProductLabelDialogComponent {
@@ -46,7 +47,7 @@ export class ProductLabelDialogComponent {
             code: product.code,
             format: product.barcodeFormat,
             primaryText: product.code,
-            secondaryText: product.name,
+            secondaryText: formatProductName(product.name),
         });
         if (!ok) {
             this.toast.error('app.common.errors.general');

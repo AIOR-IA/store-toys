@@ -15,7 +15,7 @@
                 [format]="product()!.barcodeFormat"
             ></app-barcode-svg>
         </div>
-        <p class="text-sm font-medium text-center">{{ product()!.name }}</p>
+        <p class="text-sm font-medium text-center">{{ product()!.name | productName }}</p>
         <p class="text-xs text-gray-500">
             {{ labelSize.width }}×{{ labelSize.height }} mm
         </p>

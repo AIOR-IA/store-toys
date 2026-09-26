@@ -311,7 +311,7 @@
         <ng-template pTemplate="body" let-product>
             <tr>
                 <td class="font-mono text-sm">{{ product.code }}</td>
-                <td>{{ product.name }}</td>
+                <td>{{ product.name | productName }}</td>
                 <td class="text-center">{{ product.qty }}</td>
                 <td class="text-right">{{ product.totalCents | money }}</td>
             </tr>

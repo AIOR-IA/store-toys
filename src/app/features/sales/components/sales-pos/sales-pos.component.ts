@@ -22,9 +22,10 @@ import { InputTextModule } from 'primeng/inputtext';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { TableModule } from 'primeng/table';
 import { TooltipModule } from 'primeng/tooltip';
-import { MoneyPipe } from '@shared/pipes';
+import { MoneyPipe, ProductNamePipe } from '@shared/pipes';
 import { ImageCompressorService, ToastService } from '@core/services';
 import { toCents } from '@core/utils';
+import { formatProductName } from '@shared/utils';
 import { GiftCard, GiftCardIssuePaymentMethod } from '../../../gift-cards/gift-card.model';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { Product } from '../../../products/product.model';
@@ -70,6 +71,7 @@ type GiftCardDifferenceMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
         TooltipModule,
         TranslateModule,
         MoneyPipe,
+        ProductNamePipe,
     ],
     templateUrl: './sales-pos.component.html',
 })
@@ -330,7 +332,7 @@ export class SalesPosComponent implements AfterViewInit {
         }
         if (!product.isActive) {
             this.translate
-                .get('app.sales.messages.productInactive', { name: product.name })
+                .get('app.sales.messages.productInactive', { name: formatProductName(product.name) })
                 .subscribe((message) => this.toast.errorMessage(message));
             this.focusScan();
             return;

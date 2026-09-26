@@ -102,7 +102,7 @@
                     <tr>
                         <td class="font-mono text-sm">{{ line.code }}</td>
                         <td>
-                            {{ line.name }}
+                            {{ line.name | productName }}
                             @if (line.quantity > line.stockReference) {
                             <div class="text-xs text-danger">
                                 {{ "app.sales.cart.willGoNegative" | translate }}

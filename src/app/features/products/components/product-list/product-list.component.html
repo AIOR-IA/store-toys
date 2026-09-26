@@ -60,7 +60,7 @@
                     (click)="product.imageUrl && viewerSrc.set(product.imageUrl)"
                 />
             </td>
-            <td>{{ product.name }}</td>
+            <td>{{ product.name | productName }}</td>
             <td class="font-mono text-sm">{{ product.code }}</td>
             <td>
                 <p-tag

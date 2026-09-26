@@ -16,6 +16,8 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { BarcodeFormat, toJsBarcodeFormat } from '@core/utils';
 import { LABEL_SIZE_MM } from '@shared/constants';
+import { ProductNamePipe } from '@shared/pipes';
+import { formatProductName } from '@shared/utils';
 import { ProductsService } from '../../products.service';
 import { Product } from '../../product.model';
 
@@ -69,6 +71,7 @@ export function sanitizeQuantity(value: number | null): number {
         ItemsNotFoundComponent,
         CardsPaginatorComponent,
         ImageViewerComponent,
+        ProductNamePipe,
     ],
     templateUrl: './product-labels-sheet.component.html',
 })
@@ -298,7 +301,7 @@ export class ProductLabelsSheetComponent implements OnInit {
                     margin: [0, 4, 0, 2],
                 },
                 { text: product.code, fontSize: 7, alignment: 'center' },
-                { text: product.name, fontSize: 6, alignment: 'center' },
+                { text: formatProductName(product.name), fontSize: 6, alignment: 'center' },
             ],
             margin: [2, 2, 2, 2],
             border: [false, false, false, false],

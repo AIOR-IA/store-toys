@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { SettingsService } from '@core/services';
 import { AppSettings } from '@core/models';
 import { fromCents } from '@core/utils';
+import { formatProductName } from '@shared/utils';
 import { formatInStoreTimezone } from '@core/utils/date.util';
 import { RECEIPT_LOGO_BASE64 } from './receipt-logo.const';
 import { Sale } from './sale.model';
@@ -199,7 +200,7 @@ export class SaleReceiptService {
                             ],
                             ...sale.items.map((item) => [
                                 item.code,
-                                item.name,
+                                formatProductName(item.name),
                                 { text: String(item.quantity), alignment: 'center' },
                                 { text: this.money(item.unitPriceCents), alignment: 'right' },
                                 { text: this.money(item.subtotalCents), alignment: 'right' },
