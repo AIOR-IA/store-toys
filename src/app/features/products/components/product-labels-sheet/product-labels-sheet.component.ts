@@ -1,11 +1,17 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { CheckboxModule } from 'primeng/checkbox';
-import { ItemsNotFoundComponent, SpinnerComponent, TitleBarComponent } from '@shared/components/ui';
+import {
+    CardsPaginatorComponent,
+    ItemsNotFoundComponent,
+    SpinnerComponent,
+    TitleBarComponent,
+} from '@shared/components/ui';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { BarcodeFormat, toJsBarcodeFormat } from '@core/utils';
 import { LABEL_SIZE_MM } from '@shared/constants';
@@ -17,16 +23,31 @@ const PAGE_MARGIN_MM = 10;
 /** Carta/Letter en mm — pdfmake mide en puntos, la conversión vive solo aquí. */
 const PAGE_SIZE_MM = { width: 215.9, height: 279.4 };
 
-interface SheetRow {
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 999;
+
+/** Un producto elegido para la hoja, con cuántas etiquetas se imprimirán. */
+interface SelectionEntry {
     product: Product;
-    selected: boolean;
     quantity: number;
+}
+
+/** Entero entre 1 y 999; `null`/`NaN`/decimales/negativos caen al mínimo válido. */
+export function sanitizeQuantity(value: number | null): number {
+    if (value === null || !Number.isFinite(value)) return MIN_QUANTITY;
+    return Math.min(MAX_QUANTITY, Math.max(MIN_QUANTITY, Math.floor(value)));
 }
 
 /**
  * Hoja de etiquetas (plan §14.2, alcance Fase 3): se seleccionan productos
  * del listado, se indica cuántas etiquetas por producto y se genera un PDF
  * en hoja carta con `jsbarcode` (Code 128/EAN → PNG) + `pdfmake`.
+ *
+ * El listado se pagina por cursores (mismo `CursorPager` que Productos), pero
+ * la SELECCIÓN vive aparte de la página visible: un `Map` por id de producto
+ * con su cantidad, solo en memoria de esta pantalla (no se guarda en
+ * Firestore). Así cambiar de página o de tamaño de página no pierde nada, y
+ * "Generar PDF" toma la selección completa, no solo lo que se ve.
  *
  * Ambas librerías se cargan con `import()` dinámico: solo esta pantalla las
  * usa, así que no tiene sentido pagarlas en el bundle inicial de toda la app
@@ -45,6 +66,7 @@ interface SheetRow {
         TitleBarComponent,
         SpinnerComponent,
         ItemsNotFoundComponent,
+        CardsPaginatorComponent,
     ],
     templateUrl: './product-labels-sheet.component.html',
 })
@@ -52,45 +74,136 @@ export class ProductLabelsSheetComponent implements OnInit {
     private readonly productsService = inject(ProductsService);
     private readonly toast = inject(ToastService);
 
-    loading = signal(true);
-    generating = signal(false);
-    rows = signal<SheetRow[]>([]);
+    readonly pageSizeOptions: PageSize[] = PAGE_SIZE_OPTIONS;
+    readonly minQuantity = MIN_QUANTITY;
+    readonly maxQuantity = MAX_QUANTITY;
 
-    readonly hasSelection = () => this.rows().some((r) => r.selected && r.quantity > 0);
+    loading = signal(true);
+    /** Evita montar el paginador antes de la primera carga (ver template). */
+    hasLoadedOnce = signal(false);
+    generating = signal(false);
+
+    pageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
+    rows = signal<Product[]>([]);
+    total = signal(0);
+    hasNext = signal(false);
+    hasPrev = signal(false);
+
+    /** Selección global (todas las páginas), por `product.id`. */
+    selection = signal<ReadonlyMap<string, SelectionEntry>>(new Map());
+
+    readonly hasSelection = computed(() => this.selection().size > 0);
+    readonly selectedCount = computed(() => this.selection().size);
+    readonly labelsCount = computed(() => {
+        let sum = 0;
+        for (const entry of this.selection().values()) sum += entry.quantity;
+        return sum;
+    });
+
+    private pager = this.createPager();
 
     ngOnInit(): void {
-        this.productsService.listForLabelSheet().subscribe({
-            next: (products) => {
-                this.rows.set(
-                    products.map((product) => ({ product, selected: false, quantity: 1 })),
-                );
-                this.loading.set(false);
-            },
-            error: () => {
-                this.loading.set(false);
-                this.toast.error('app.common.errors.general');
-            },
+        this.loadFirstPage();
+    }
+
+    isSelected(product: Product): boolean {
+        return this.selection().has(product.id);
+    }
+
+    quantityOf(product: Product): number {
+        return this.selection().get(product.id)?.quantity ?? MIN_QUANTITY;
+    }
+
+    toggleSelected(product: Product, selected: boolean): void {
+        const next = new Map(this.selection());
+        if (selected) {
+            // Si ya estaba seleccionado no se pisa su cantidad.
+            if (!next.has(product.id)) {
+                next.set(product.id, { product, quantity: MIN_QUANTITY });
+            }
+        } else {
+            next.delete(product.id);
+        }
+        this.selection.set(next);
+    }
+
+    setQuantity(product: Product, quantity: number | null): void {
+        const current = this.selection().get(product.id);
+        if (!current) return;
+
+        const next = new Map(this.selection());
+        next.set(product.id, {
+            product: current.product,
+            quantity: sanitizeQuantity(quantity),
         });
+        this.selection.set(next);
     }
 
-    toggleSelected(row: SheetRow, selected: boolean): void {
-        this.rows.update((rows) =>
-            rows.map((r) => (r === row ? { ...r, selected } : r)),
-        );
+    /** Cambiar el tamaño reinicia solo el cursor de la lista: la selección se conserva. */
+    onPageSizeChange(pageSize: number): void {
+        this.pageSize.set(pageSize as PageSize);
+        this.loadFirstPage();
     }
 
-    setQuantity(row: SheetRow, quantity: number): void {
-        this.rows.update((rows) =>
-            rows.map((r) => (r === row ? { ...r, quantity } : r)),
-        );
+    goToFirstPage(): void {
+        this.loadFirstPage();
+    }
+
+    onNextPage(): void {
+        this.loading.set(true);
+        this.pager
+            .next()
+            .then((result) => this.applyResult(result))
+            .catch(() => this.onLoadError());
+    }
+
+    onPrevPage(): void {
+        this.loading.set(true);
+        this.pager
+            .prev()
+            .then((result) => this.applyResult(result))
+            .catch(() => this.onLoadError());
+    }
+
+    private createPager() {
+        // Productos activos por nombre: misma consulta (y mismo índice) que el
+        // filtro "Activos" del listado. El umbral de stock bajo no aplica aquí.
+        return this.productsService.createPager('active', '', this.pageSize(), 0);
+    }
+
+    private loadFirstPage(): void {
+        this.loading.set(true);
+        this.pager = this.createPager();
+        this.pager
+            .first()
+            .then((result) => this.applyResult(result))
+            .catch(() => this.onLoadError());
+    }
+
+    private applyResult(result: {
+        rows: Product[];
+        hasNext: boolean;
+        hasPrev: boolean;
+        total: number;
+    }): void {
+        this.rows.set(result.rows);
+        this.hasNext.set(result.hasNext);
+        this.hasPrev.set(result.hasPrev);
+        this.total.set(result.total);
+        this.loading.set(false);
+        this.hasLoadedOnce.set(true);
+    }
+
+    private onLoadError(): void {
+        this.loading.set(false);
+        this.hasLoadedOnce.set(true);
+        this.toast.error('app.common.errors.general');
     }
 
     async generatePdf(): Promise<void> {
         const instances: Product[] = [];
-        for (const row of this.rows()) {
-            if (row.selected && row.quantity > 0) {
-                for (let i = 0; i < row.quantity; i++) instances.push(row.product);
-            }
+        for (const { product, quantity } of this.selection().values()) {
+            for (let i = 0; i < quantity; i++) instances.push(product);
         }
         if (!instances.length) return;
 

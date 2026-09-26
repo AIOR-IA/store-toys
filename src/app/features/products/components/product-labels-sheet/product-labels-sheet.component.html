@@ -12,41 +12,83 @@
     {{ "app.products.labels.selectProducts" | translate }}
 </p>
 
-<div class="flex flex-col gap-2 mb-4">
-    @for (row of rows(); track row.product.id) {
-    <div class="flex items-center gap-3 border-b border-gray-100 py-2">
+<!--
+  Fila: checkbox · imagen · nombre · cantidad · código. El nombre tiene un
+  ancho acotado (`sm:w-64`) y se parte por palabras (`break-words` solo corta
+  una palabra si ella sola no cabe): la fila crece a lo alto, nada se
+  trunca. Cantidad y código van pegados al nombre, no empujados al borde.
+  `flex-wrap` evita cualquier scroll horizontal en pantallas angostas.
+-->
+<div class="flex flex-col mb-4">
+    @for (product of rows(); track product.id) {
+    <div
+        class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-gray-100 py-2"
+    >
         <p-checkbox
             [binary]="true"
-            [ngModel]="row.selected"
-            (ngModelChange)="toggleSelected(row, $event)"
+            [ngModel]="isSelected(product)"
+            (ngModelChange)="toggleSelected(product, $event)"
         ></p-checkbox>
         <img
-            [src]="row.product.imageUrl"
+            [src]="product.imageUrl"
             alt=""
-            class="w-8 h-8 object-cover rounded"
+            class="w-8 h-8 shrink-0 object-cover rounded"
         />
-        <span class="flex-1 text-sm">{{ row.product.name }}</span>
-        <span class="text-xs text-gray-400 font-mono">{{ row.product.code }}</span>
+        <span
+            class="min-w-0 basis-40 grow text-sm whitespace-normal break-words sm:grow-0 sm:basis-auto sm:w-64"
+            >{{ product.name }}</span
+        >
         <p-inputNumber
-            [ngModel]="row.quantity"
-            (ngModelChange)="setQuantity(row, $event)"
-            [min]="1"
-            [max]="999"
+            [ngModel]="quantityOf(product)"
+            (ngModelChange)="setQuantity(product, $event)"
+            [min]="minQuantity"
+            [max]="maxQuantity"
             [showButtons]="true"
-            [disabled]="!row.selected"
-            styleClass="w-24"
+            [disabled]="!isSelected(product)"
+            styleClass="w-28 shrink-0"
+            inputStyleClass="w-full min-w-0"
         ></p-inputNumber>
+        <span class="min-w-0 text-xs text-gray-400 font-mono break-all">{{
+            product.code
+        }}</span>
     </div>
     }
 </div>
+}
 
-<button
-    pButton
-    type="button"
-    icon="fas fa-file-pdf"
-    [label]="'app.products.labels.generatePdf' | translate"
-    [loading]="generating()"
-    [disabled]="!hasSelection()"
-    (click)="generatePdf()"
-></button>
+<!--
+  Fuera del bloque de arriba a propósito, igual que en el listado de
+  Productos: montar/desmontar el paginador en cada carga dispara un evento
+  espurio del `p-dropdown` de tamaño de página que reintroduce el loop de
+  Firestore.
+-->
+@if (hasLoadedOnce()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+
+<div class="flex flex-wrap items-center gap-3 mt-4">
+    <button
+        pButton
+        type="button"
+        icon="fas fa-file-pdf"
+        [label]="'app.products.labels.generatePdf' | translate"
+        [loading]="generating()"
+        [disabled]="!hasSelection()"
+        (click)="generatePdf()"
+    ></button>
+    <span class="text-sm text-gray-500">{{
+        "app.products.labels.selectedSummary"
+            | translate : { products: selectedCount(), labels: labelsCount() }
+    }}</span>
+</div>
 }

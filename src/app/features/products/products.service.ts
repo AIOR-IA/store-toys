@@ -9,8 +9,6 @@ import {
     doc,
     endAt,
     getDoc,
-    getDocs,
-    limit,
     orderBy,
     query,
     runTransaction,
@@ -144,26 +142,6 @@ export class ProductsService {
             (extra) => query(this.productsCollection, ...baseConstraints(), ...extra),
             () => query(this.productsCollection, ...baseConstraints()),
             pageSize,
-        );
-    }
-
-    /**
-     * Lista acotada para la hoja de etiquetas (plan §14.2): a la escala de
-     * la tienda (500–1 000 productos, ~10% sin código de fábrica) 200
-     * productos activos cubren con margen cualquier selección real para una
-     * hoja. Sigue siendo una consulta con `limit()` — nunca la colección
-     * completa (CLAUDE.md, "Datos").
-     */
-    listForLabelSheet(): Observable<Product[]> {
-        return from(
-            getDocs(
-                query(
-                    this.productsCollection,
-                    where('isActive', '==', true),
-                    orderBy('nameLower'),
-                    limit(200),
-                ),
-            ).then((snap) => snap.docs.map((d) => d.data())),
         );
     }
 

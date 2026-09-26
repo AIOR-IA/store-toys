@@ -201,6 +201,7 @@
         "selectProducts": "Selecciona los productos",
         "quantity": "Cantidad",
         "generatePdf": "Generar PDF",
+        "selectedSummary": "Seleccionados: {{products}} · Etiquetas: {{labels}}",
         "close": "Cerrar"
       },
       "chips": {
