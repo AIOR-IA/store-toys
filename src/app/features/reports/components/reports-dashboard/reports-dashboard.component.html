@@ -95,12 +95,19 @@
         <div class="text-2xl font-semibold">{{ qrReceivedCents() | money }}</div>
     </p-card>
     <p-card>
+        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.moneyReceived" | translate }}</div>
+        <div class="text-2xl font-semibold">{{ moneyReceivedCents() | money }}</div>
+        <div class="text-xs text-gray-500">{{ "app.reports.kpis.moneyReceivedHint" | translate }}</div>
+    </p-card>
+    <p-card>
         <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.giftCardRedeemed" | translate }}</div>
         <div class="text-2xl font-semibold">{{ rangeTotals().giftCardCents | money }}</div>
+        <div class="text-xs text-gray-500">{{ "app.reports.kpis.giftCardRedeemedHint" | translate }}</div>
     </p-card>
     <p-card>
         <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.giftCardsIssued" | translate }}</div>
         <div class="text-2xl font-semibold">{{ rangeTotals().giftCardsIssuedCents | money }}</div>
+        <div class="text-xs text-gray-500">{{ "app.reports.kpis.giftCardsIssuedHint" | translate }}</div>
     </p-card>
     <p-card>
         <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.salesCount" | translate }}</div>
@@ -109,10 +116,6 @@
     <p-card>
         <div class="text-xs text-gray-500 uppercase">{{ "app.reports.kpis.itemsCount" | translate }}</div>
         <div class="text-2xl font-semibold">{{ rangeTotals().itemsCount }}</div>
-    </p-card>
-    <p-card>
-        <div class="text-xs text-gray-500 uppercase">{{ "app.reports.breakdown.forfeited" | translate }}</div>
-        <div class="text-2xl font-semibold">{{ rangeTotals().giftCardForfeitedCents | money }}</div>
     </p-card>
 </div>
 
@@ -328,13 +331,25 @@
     @if (!selectedSellerId()) {
     <span class="text-sm text-gray-500">{{ "app.reports.bySeller.empty" | translate }}</span>
     } @else {
-    @if (sellerTotals(); as st) {
+    @if (sellerBreakdown(); as sb) {
     <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-        <div><div class="text-gray-500">{{ "app.reports.bySeller.salesCount" | translate }}</div><div class="font-semibold">{{ st.salesCount }}</div></div>
-        <div><div class="text-gray-500">{{ "app.reports.bySeller.merchandiseSales" | translate }}</div><div class="font-semibold">{{ st.totalCents | money }}</div></div>
-        <div><div class="text-gray-500">{{ "app.reports.bySeller.cash" | translate }}</div><div class="font-semibold">{{ st.cashCents | money }}</div></div>
-        <div><div class="text-gray-500">{{ "app.reports.bySeller.qr" | translate }}</div><div class="font-semibold">{{ st.qrCents | money }}</div></div>
-        <div><div class="text-gray-500">{{ "app.reports.bySeller.giftCard" | translate }}</div><div class="font-semibold">{{ st.giftCardCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.salesCount" | translate }}</div><div class="font-semibold">{{ sb.salesCount }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.merchandiseSales" | translate }}</div><div class="font-semibold">{{ sb.merchandiseCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.cash" | translate }}</div><div class="font-semibold">{{ sb.salesCashCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.qr" | translate }}</div><div class="font-semibold">{{ sb.salesQrCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.giftCard" | translate }}</div><div class="font-semibold">{{ sb.giftCardAppliedCents | money }}</div></div>
+    </div>
+    <p-divider></p-divider>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.giftCardsSold" | translate }}</div><div class="font-semibold">{{ sb.giftCardsSoldCents | money }} <span class="text-xs text-gray-500">({{ sb.giftCardsSoldCount }})</span></div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.issuesCash" | translate }}</div><div class="font-semibold">{{ sb.issuesCashCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.bySeller.issuesQr" | translate }}</div><div class="font-semibold">{{ sb.issuesQrCents | money }}</div></div>
+    </div>
+    <p-divider></p-divider>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+        <div><div class="text-gray-500">{{ "app.reports.kpis.cashReceived" | translate }}</div><div class="font-semibold">{{ sb.cashReceivedCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.kpis.qrReceived" | translate }}</div><div class="font-semibold">{{ sb.qrReceivedCents | money }}</div></div>
+        <div><div class="text-gray-500">{{ "app.reports.kpis.moneyReceived" | translate }}</div><div class="font-semibold">{{ sb.moneyReceivedCents | money }}</div></div>
     </div>
     }
     }

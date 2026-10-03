@@ -481,8 +481,12 @@
         "merchandiseSales": "Ventas de mercadería",
         "cashReceived": "Efectivo recibido",
         "qrReceived": "QR recibido",
+        "moneyReceived": "Cobros recibidos",
+        "moneyReceivedHint": "Efectivo + QR recibidos (incluye Gift Cards vendidas)",
         "giftCardRedeemed": "Gift Card aplicada",
+        "giftCardRedeemedHint": "Usada como pago de mercadería: no es dinero nuevo",
         "giftCardsIssued": "Gift Cards vendidas/emitidas",
+        "giftCardsIssuedHint": "Valor nominal vendido: ya cobrado al venderse",
         "salesCount": "N.º de ventas",
         "itemsCount": "Artículos vendidos",
         "discountApplied": "Rebajas aplicadas",
@@ -515,8 +519,7 @@
         "grossMerchandise": "Mercadería a precio de lista (bruta)",
         "totalNominal": "Total nominal",
         "collectedCash": "Cobrado en efectivo",
-        "collectedQr": "Cobrado en QR",
-        "forfeited": "Sobrante perdido (forfeited)"
+        "collectedQr": "Cobrado en QR"
       },
       "giftCards": {
         "title": "Gift Cards",
@@ -563,9 +566,12 @@
         "selectSeller": "Elige un vendedor",
         "salesCount": "N.º de ventas",
         "merchandiseSales": "Mercadería vendida",
-        "cash": "Efectivo",
-        "qr": "QR",
+        "cash": "Efectivo (mercadería)",
+        "qr": "QR (mercadería)",
         "giftCard": "Gift Card aplicada",
+        "giftCardsSold": "Gift Cards vendidas",
+        "issuesCash": "Efectivo de Gift Cards vendidas",
+        "issuesQr": "QR de Gift Cards vendidas",
         "empty": "Elige un vendedor para ver su desglose."
       },
       "dailyDetail": {

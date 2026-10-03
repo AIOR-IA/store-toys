@@ -94,6 +94,14 @@
       ]
     },
     {
+      "collectionGroup": "giftCardIssues",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "activatedBy", "order": "ASCENDING" },
+        { "fieldPath": "dateKey", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "giftCardMovements",
       "queryScope": "COLLECTION",
       "fields": [

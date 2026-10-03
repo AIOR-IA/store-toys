@@ -78,28 +78,138 @@ function buildPrintHtml(input: Required<Pick<PrintBarcodeLabelInput, 'code' | 'p
     </body></html>`;
 }
 
-/** `null` si el navegador bloqueó la ventana emergente (el caller decide cómo avisar). */
+/**
+ * Lifecycle de UN popup de impresión: lo que `cleanupPrintWindow` necesita
+ * para deshacer exactamente lo que `printBarcodeLabel` dejó registrado. Vive
+ * fuera de la función (no en un closure por llamada) para que una llamada
+ * nueva pueda cerrar el popup de la llamada ANTERIOR antes de abrir el suyo
+ * (§5: una sola ventana de impresión activa a la vez).
+ */
+interface PrintWindowState {
+    popup: Window;
+    handleAfterPrint: (() => void) | null;
+    handleOpenerFocus: (() => void) | null;
+    /** `true` una vez limpiado — hace que `cleanupPrintWindow` sea idempotente. */
+    done: boolean;
+}
+
+/** El popup de impresión actualmente abierto (si lo hay). Una sola instancia para toda la app. */
+let activePrintWindow: PrintWindowState | null = null;
+
+/**
+ * Cierra el popup y retira AMBOS listeners, sin importar desde cuál de las
+ * tres rutas se llegue (`afterprint`, foco de vuelta en la ventana principal,
+ * o un error antes de imprimir) ni cuántas veces se invoque: la segunda
+ * llamada sobre el mismo estado no hace nada (`state.done`). Nunca opera
+ * sobre un popup ya cerrado por el usuario (`popup.closed`).
+ */
+function cleanupPrintWindow(state: PrintWindowState): void {
+    if (state.done) return;
+    state.done = true;
+
+    if (state.handleOpenerFocus) {
+        window.removeEventListener('focus', state.handleOpenerFocus);
+        state.handleOpenerFocus = null;
+    }
+    if (state.handleAfterPrint) {
+        try {
+            state.popup.removeEventListener('afterprint', state.handleAfterPrint);
+        } catch {
+            // El popup es siempre mismo-origen (nosotros escribimos su documento),
+            // así que esto no debería fallar — defensivo nada más.
+        }
+        state.handleAfterPrint = null;
+    }
+    try {
+        if (!state.popup.closed) state.popup.close();
+    } catch {
+        // Idem: defensivo.
+    }
+
+    if (activePrintWindow === state) activePrintWindow = null;
+}
+
+/**
+ * `null` si el navegador bloqueó la ventana emergente (el caller decide cómo
+ * avisar). `true` en cuanto el popup queda abierto y el cierre programado —
+ * NO espera a que el usuario termine de imprimir.
+ *
+ * Lifecycle del popup (la causa raíz del bloqueo que esto corrige: nunca se
+ * cerraba, así que el `about:blank` quedaba huérfano y, al compartir proceso
+ * de renderizado con la app por ser mismo-origen, el siguiente `print()`
+ * volvía a congelarla):
+ *
+ * 1. Si ya hay un popup de una impresión anterior sin cerrar (otra etiqueta,
+ *    o un doble click sobre el mismo botón), se cierra primero — nunca se
+ *    acumulan ventanas.
+ * 2. `window.open` + `document.write` + `document.close`, igual que antes.
+ * 3. En `onload`, ANTES de `print()`: se registra `afterprint` en el popup
+ *    (`{ once: true }`, se dispara en cuanto el usuario imprime o cancela) y
+ *    un `focus` en la ventana principal (también una sola vez) como
+ *    respaldo, por si Chromium no disparara `afterprint` para un documento
+ *    escrito con `document.write` — exactamente la inconsistencia que motivó
+ *    este ajuste. Registrar el respaldo aquí, y no en el momento de abrir el
+ *    popup, importa: si se registrara antes, cualquier cambio de foco
+ *    mientras el popup todavía se está preparando cerraría la ventana antes
+ *    de que el usuario llegara a ver el Print Preview.
+ * 4. Cualquiera de los dos eventos llama al mismo `cleanupPrintWindow`, que
+ *    cierra el popup y retira el listener que no haya disparado.
+ * 5. Un error en cualquier paso antes de `print()` (incluida la carga de
+ *    `jsbarcode`) también limpia el popup — nunca queda un `about:blank`
+ *    vacío por una excepción.
+ */
 export async function printBarcodeLabel(input: PrintBarcodeLabelInput): Promise<boolean> {
+    if (activePrintWindow) cleanupPrintWindow(activePrintWindow);
+
     const printWindow = window.open('', '_blank', 'width=400,height=300');
     if (!printWindow) return false;
 
-    const format = input.format ?? 'CODE128';
-    const sizeMm = input.sizeMm ?? LABEL_SIZE_MM;
-    const svgMarkup = await renderBarcodeSvg(input.code, format);
-
-    printWindow.document.write(
-        buildPrintHtml({
-            code: input.code,
-            primaryText: input.primaryText,
-            secondaryText: input.secondaryText,
-            sizeMm,
-            svgMarkup,
-        }),
-    );
-    printWindow.document.close();
-    printWindow.onload = () => {
-        printWindow.focus();
-        printWindow.print();
+    const state: PrintWindowState = {
+        popup: printWindow,
+        handleAfterPrint: null,
+        handleOpenerFocus: null,
+        done: false,
     };
-    return true;
+    activePrintWindow = state;
+    const cleanup = () => cleanupPrintWindow(state);
+
+    try {
+        const format = input.format ?? 'CODE128';
+        const sizeMm = input.sizeMm ?? LABEL_SIZE_MM;
+        const svgMarkup = await renderBarcodeSvg(input.code, format);
+
+        printWindow.document.write(
+            buildPrintHtml({
+                code: input.code,
+                primaryText: input.primaryText,
+                secondaryText: input.secondaryText,
+                sizeMm,
+                svgMarkup,
+            }),
+        );
+        printWindow.document.close();
+
+        printWindow.onload = () => {
+            try {
+                state.handleAfterPrint = () => cleanup();
+                printWindow.addEventListener('afterprint', state.handleAfterPrint, { once: true });
+
+                // Respaldo: si el usuario vuelve a la ventana principal (imprimió,
+                // canceló, o cerró el popup a mano) y `afterprint` no disparó.
+                state.handleOpenerFocus = () => {
+                    if (!printWindow.closed) cleanup();
+                };
+                window.addEventListener('focus', state.handleOpenerFocus, { once: true });
+
+                printWindow.focus();
+                printWindow.print();
+            } catch {
+                cleanup();
+            }
+        };
+        return true;
+    } catch {
+        cleanup();
+        return false;
+    }
 }

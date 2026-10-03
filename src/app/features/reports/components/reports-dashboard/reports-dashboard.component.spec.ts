@@ -1,5 +1,5 @@
 import { CurrencyPipe } from '@angular/common';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { TranslateModule } from '@ngx-translate/core';
 import { of } from 'rxjs';
@@ -10,6 +10,7 @@ import { PaymentMethod, Sale } from '../../../sales/sale.model';
 import { SalesHistoryFilter, SalesService } from '../../../sales/sales.service';
 import { ReportsPdfService } from '../../reports-pdf.service';
 import { ReportsService } from '../../reports.service';
+import { DailySummary } from '../../daily-summary.model';
 import { ReportsDashboardComponent } from './reports-dashboard.component';
 
 /**
@@ -40,6 +41,7 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
     let created: FakePager[];
     let data: Sale[];
     let component: ReportsDashboardComponent;
+    let fixture: ComponentFixture<ReportsDashboardComponent>;
     let reports: Record<string, jasmine.Spy>;
     let toastError: jasmine.Spy;
     /** Para simular respuestas lentas: por método, una promesa que se resuelve a mano. */
@@ -59,6 +61,9 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
                 .createSpy('getSalesIntegrity')
                 .and.returnValue(of({ salesCount: 0, totalCents: 0, cashCents: 0, qrCents: 0, giftCardCents: 0 })),
             getSellerTotals: jasmine.createSpy('getSellerTotals').and.returnValue(of(null)),
+            getSellerIssuesTotals: jasmine
+                .createSpy('getSellerIssuesTotals')
+                .and.returnValue(of({ issuesCount: 0, nominalCents: 0, cashCents: 0, qrCents: 0 })),
             getIssuesCountInRange: jasmine.createSpy('getIssuesCountInRange').and.returnValue(of(0)),
             getRedemptionsCountInRange: jasmine.createSpy('getRedemptionsCountInRange').and.returnValue(of(0)),
             createIssuesPager: jasmine.createSpy('createIssuesPager').and.callFake(() => ({
@@ -117,7 +122,7 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
             ],
         }).compileComponents();
 
-        const fixture = TestBed.createComponent(ReportsDashboardComponent);
+        fixture = TestBed.createComponent(ReportsDashboardComponent);
         component = fixture.componentInstance;
         fixture.detectChanges();
         await fixture.whenStable();
@@ -320,5 +325,88 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
         expect(component.dailyTotal()).toBe(0);
         expect(component.dailyHasNext()).toBeFalse();
         expect(toastError).toHaveBeenCalledWith('app.common.errors.general');
+    });
+
+    /**
+     * KPIs de Gift Cards (regla: la Gift Card es ingreso al VENDERSE). Día mixto del
+     * negocio: mercadería 2.880, efectivo 3.580, QR 1.800, cobros 5.380, Gift Cards
+     * vendidas 4.500, Gift Card aplicada 2.000.
+     */
+    describe('KPIs de cobros y Gift Cards', () => {
+        const bs = (n: number) => n * 100;
+        const day = {
+            dateKey: '2026-09-01', monthKey: '2026-09', year: 2026, salesCount: 4, itemsCount: 4,
+            totalCents: bs(2880), discountCents: 0, cashCents: bs(580), qrCents: bs(300), giftCardCents: bs(2000),
+            giftCardsIssuedCents: bs(4500), giftCardForfeitedCents: bs(300),
+            giftCardIssuesCashCents: bs(3000), giftCardIssuesQrCents: bs(1500), products: {},
+        } as DailySummary;
+
+        const kpi = (labelKey: string): string => {
+            const card = [...(fixture.nativeElement as HTMLElement).querySelectorAll('p-card')].find((c) =>
+                c.textContent?.includes(labelKey),
+            );
+            return card?.textContent?.replace(/s+/g, ' ').trim() ?? '';
+        };
+
+        beforeEach(() => {
+            component.dailyRows.set([]); // las ventas falsas de arriba no tienen items[]: no se renderizan aquí
+            component.summaries.set([day]);
+            fixture.detectChanges();
+        });
+
+        it('los cobros salen de la fórmula única: emisiones incluidas, Gift Card aplicada y sobrante fuera', () => {
+            expect(component.cashReceivedCents()).toBe(bs(3580));
+            expect(component.qrReceivedCents()).toBe(bs(1800));
+            expect(component.moneyReceivedCents()).toBe(bs(5380));
+            expect(component.identityMerchandiseOk()).toBeTrue();
+            expect(component.identityReceivedOk()).toBeTrue();
+        });
+
+        it('la pantalla muestra «Cobros recibidos» y ya NO muestra «Sobrante perdido» como KPI', () => {
+            const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+            expect(kpi('app.reports.kpis.moneyReceived')).toContain('5');
+            expect(text).toContain('app.reports.kpis.giftCardRedeemed');
+            expect(text).toContain('app.reports.kpis.giftCardsIssued');
+            expect(text).not.toContain('forfeited');
+        });
+    });
+
+    describe('filtro por vendedor: ventas + Gift Cards que vendió', () => {
+        const bs = (n: number) => n * 100;
+        let exportSpy: jasmine.Spy;
+
+        beforeEach(() => {
+            exportSpy = jasmine.createSpy('export').and.returnValue(Promise.resolve());
+            (TestBed.inject(ReportsPdfService) as unknown as { export: jasmine.Spy }).export = exportSpy;
+            component.dailyRows.set([]);
+            component.selectedSellerId.set('u1');
+            // Vendedor u1: mercadería 500 en efectivo + canje 1.080 (GC 1.000 + 80 en efectivo) y una GC vendida de 1.000 en efectivo.
+            component.sellerTotals.set({ salesCount: 2, totalCents: bs(1580), cashCents: bs(580), qrCents: 0, giftCardCents: bs(1000) });
+            component.sellerIssues.set({ issuesCount: 1, nominalCents: bs(1000), cashCents: bs(1000), qrCents: 0 });
+            fixture.detectChanges();
+        });
+
+        it('la pantalla del vendedor muestra sus cobros: 500 + 1.000 + 80 = 1.580 de efectivo', () => {
+            const b = component.sellerBreakdown()!;
+            expect(b.cashReceivedCents).toBe(bs(1580));
+            expect(b.moneyReceivedCents).toBe(bs(1580));
+            expect(b.giftCardAppliedCents).toBe(bs(1000));
+            const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+            expect(text).toContain('app.reports.bySeller.giftCardsSold');
+            expect(text).toContain('app.reports.bySeller.issuesCash');
+        });
+
+        it('el PDF del vendedor recibe EXACTAMENTE el mismo desglose que la pantalla (sin fórmula paralela)', async () => {
+            await component.exportPdf();
+            const scope = exportSpy.calls.mostRecent().args[0].sellerScope;
+            expect(scope.breakdown).toEqual(component.sellerBreakdown()!);
+            expect(scope.breakdown.moneyReceivedCents).toBe(bs(1580));
+        });
+
+        it('el reporte GENERAL no cambia: sus totales salen de dailySummaries, no del filtro de vendedor', () => {
+            expect(component.moneyReceivedCents()).toBe(component.cashReceivedCents() + component.qrReceivedCents());
+            component.summaries.set([]);
+            expect(component.moneyReceivedCents()).toBe(0);
+        });
     });
 });

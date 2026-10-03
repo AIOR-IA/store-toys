@@ -7,7 +7,7 @@ import { fromCents } from '@core/utils';
 import { formatProductName } from '@shared/utils';
 import { RECEIPT_LOGO_BASE64 } from '../sales/receipt-logo.const';
 import { GiftCardStatus } from '../gift-cards/gift-card.model';
-import { RangeTotals, SalesAggregateTotals } from './reports.service';
+import { RangeTotals, SalesAggregateTotals, SellerBreakdown } from './reports.service';
 
 type PdfMake = {
     createPdf: (doc: unknown) => { print: () => void; download: (name: string) => void };
@@ -29,7 +29,7 @@ export interface ReportPdfData {
     issuesCountInRange: number;
     redemptionsCountInRange: number;
     topProducts: { code: string; name: string; qty: number; totalCents: number }[];
-    sellerScope: { name: string; totals: SalesAggregateTotals } | null;
+    sellerScope: { name: string; breakdown: SellerBreakdown } | null;
 }
 
 /**
@@ -118,11 +118,14 @@ export class ReportsPdfService {
                 this.row(this.t('kpis.discountApplied'), this.money(t.discountCents)),
                 this.row(this.t('kpis.cashReceived'), this.money(data.cashReceivedCents)),
                 this.row(this.t('kpis.qrReceived'), this.money(data.qrReceivedCents)),
+                this.row(this.t('kpis.moneyReceived'), this.money(data.moneyReceivedCents), true),
+                { text: this.t('kpis.moneyReceivedHint'), fontSize: 8, color: 'gray' },
                 this.row(this.t('kpis.giftCardRedeemed'), this.money(t.giftCardCents)),
+                { text: this.t('kpis.giftCardRedeemedHint'), fontSize: 8, color: 'gray' },
                 this.row(this.t('kpis.giftCardsIssued'), this.money(t.giftCardsIssuedCents)),
+                { text: this.t('kpis.giftCardsIssuedHint'), fontSize: 8, color: 'gray' },
                 this.row(this.t('kpis.salesCount'), String(t.salesCount)),
                 this.row(this.t('kpis.itemsCount'), String(t.itemsCount)),
-                this.row(this.t('breakdown.forfeited'), this.money(t.giftCardForfeitedCents)),
 
                 { ...line, margin: [0, 10, 0, 6] },
                 { text: this.t('breakdown.merchandiseTitle'), bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
@@ -183,11 +186,20 @@ export class ReportsPdfService {
                               bold: true,
                               margin: [0, 0, 0, 4] as [number, number, number, number],
                           },
-                          this.row(this.t('bySeller.salesCount'), String(data.sellerScope.totals.salesCount)),
-                          this.row(this.t('bySeller.merchandiseSales'), this.money(data.sellerScope.totals.totalCents)),
-                          this.row(this.t('bySeller.cash'), this.money(data.sellerScope.totals.cashCents)),
-                          this.row(this.t('bySeller.qr'), this.money(data.sellerScope.totals.qrCents)),
-                          this.row(this.t('bySeller.giftCard'), this.money(data.sellerScope.totals.giftCardCents)),
+                          this.row(this.t('bySeller.salesCount'), String(data.sellerScope.breakdown.salesCount)),
+                          this.row(this.t('bySeller.merchandiseSales'), this.money(data.sellerScope.breakdown.merchandiseCents)),
+                          this.row(this.t('bySeller.cash'), this.money(data.sellerScope.breakdown.salesCashCents)),
+                          this.row(this.t('bySeller.qr'), this.money(data.sellerScope.breakdown.salesQrCents)),
+                          this.row(this.t('bySeller.giftCard'), this.money(data.sellerScope.breakdown.giftCardAppliedCents)),
+                          this.row(
+                              this.t('bySeller.giftCardsSold'),
+                              `${this.money(data.sellerScope.breakdown.giftCardsSoldCents)} (${data.sellerScope.breakdown.giftCardsSoldCount})`,
+                          ),
+                          this.row(this.t('bySeller.issuesCash'), this.money(data.sellerScope.breakdown.issuesCashCents)),
+                          this.row(this.t('bySeller.issuesQr'), this.money(data.sellerScope.breakdown.issuesQrCents)),
+                          this.row(this.t('kpis.cashReceived'), this.money(data.sellerScope.breakdown.cashReceivedCents)),
+                          this.row(this.t('kpis.qrReceived'), this.money(data.sellerScope.breakdown.qrReceivedCents)),
+                          this.row(this.t('kpis.moneyReceived'), this.money(data.sellerScope.breakdown.moneyReceivedCents), true),
                       ]
                     : []),
 

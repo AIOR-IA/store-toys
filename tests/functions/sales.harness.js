@@ -91,6 +91,7 @@ inject('guards.js', {
     },
 });
 const { createSale, cancelSale } = require(path.join(libDir, 'sales.js'));
+const { activateGiftCard, cancelGiftCard, suspendGiftCard, reactivateGiftCard } = require(path.join(libDir, 'giftcards.js'));
 
 // ---------- datos base ----------
 const todayKey = new Date(Date.now() - 4 * 3600e3).toISOString().slice(0, 10);
@@ -317,6 +318,146 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     let rc2 = await outcome(call(cancelSale, 'admin', { saleId: 'X1', reason: 'otra vez' }));
     check('anular X1 dos veces se rechaza y no revierte de nuevo', !rc2.ok && summary().totalCents === 15000 && summary().qrCents === 4000 && store.get('products/bear').stock === 8);
     check('X1 conserva sus pagos y sus importes tras anularse', sale('X1').status === 'cancelled' && sale('X1').cashCents === 10000 && sale('X1').qrCents === 4000 && sale('X1').payments.length === 2);
+
+
+    // ---- Regla: la Gift Card es ingreso al VENDERSE; el canje no es dinero nuevo ----
+    console.log('\nI. Canjes de Gift Card: qué entra (y qué NO) en cashCents / qrCents del resumen');
+    const gcPay = (amount) => ({ method: 'giftcard', amountCents: amount, giftCardId: 'GC-1', giftCardCycleId: 'cy1' });
+    const seedProducts = () => {
+        store.set('products/p1000', { isActive: true, stock: 10, priceCents: 100000, code: 'MP000101', name: 'Mil' });
+        store.set('products/p700', { isActive: true, stock: 10, priceCents: 70000, code: 'MP000102', name: 'Setecientos' });
+        store.set('products/p1080', { isActive: true, stock: 10, priceCents: 108000, code: 'MP000103', name: 'Mil ochenta' });
+        store.set('products/p800', { isActive: true, stock: 10, priceCents: 80000, code: 'MP000104', name: 'Ochocientos' });
+    };
+    // Cobros reales del resumen (misma fórmula que Reportes: ventas + emisiones).
+    const received = (d) => ({ cash: d.cashCents + (d.giftCardIssuesCashCents ?? 0), qr: d.qrCents + (d.giftCardIssuesQrCents ?? 0) });
+    const scenario = async (id, product, payments, discountCents) => {
+        reset(); seedProducts(); seedGiftCard(100000);
+        const r = await outcome(call(createSale, 'seller', { saleId: id, items: [{ productId: product, quantity: 1 }], payments, ...(discountCents ? { discountCents } : { discountCents: 0 }) }));
+        return { r, s: sale(id), d: summary() };
+    };
+    const idsHold = (d) => d.totalCents === d.cashCents + d.qrCents + d.giftCardCents;
+
+    let sc = await scenario('I3', 'p1000', [gcPay(100000)]);
+    check('3. canje exacto: mercadería 1000, GC aplicada 1000, efectivo 0, QR 0, sobrante 0',
+        sc.r.ok && sc.d.totalCents === 100000 && sc.d.giftCardCents === 100000 && sc.d.cashCents === 0 && sc.d.qrCents === 0 && sc.d.giftCardForfeitedCents === 0, sc.r.message);
+    check('3. entrada nueva = 0 (cash+qr de ventas)', received(sc.d).cash === 0 && received(sc.d).qr === 0);
+
+    sc = await scenario('I4', 'p700', [gcPay(70000)]);
+    check('4. canje menor: mercadería 700, GC aplicada 700, sobrante 300 SOLO como dato (nunca en cash/qr)',
+        sc.r.ok && sc.d.totalCents === 70000 && sc.d.giftCardCents === 70000 && sc.d.giftCardForfeitedCents === 30000 && sc.d.cashCents === 0 && sc.d.qrCents === 0, sc.r.message);
+    check('4. entrada nueva = 0 y cash+qr+gc == total (el sobrante no entra en la identidad)', received(sc.d).cash === 0 && received(sc.d).qr === 0 && idsHold(sc.d));
+
+    sc = await scenario('I5', 'p1080', [gcPay(100000), { method: 'cash', amountCents: 8000 }]);
+    check('5. mayor + efectivo: mercadería 1080, GC 1000, efectivo nuevo 80, QR 0',
+        sc.r.ok && sc.d.totalCents === 108000 && sc.d.giftCardCents === 100000 && sc.d.cashCents === 8000 && sc.d.qrCents === 0 && idsHold(sc.d), sc.r.message);
+
+    sc = await scenario('I6', 'p1080', [gcPay(100000), { method: 'qr', amountCents: 8000 }]);
+    check('6. mayor + QR: mercadería 1080, GC 1000, QR nuevo 80, efectivo 0',
+        sc.r.ok && sc.d.totalCents === 108000 && sc.d.giftCardCents === 100000 && sc.d.qrCents === 8000 && sc.d.cashCents === 0 && idsHold(sc.d), sc.r.message);
+
+    sc = await scenario('I7', 'p1080', [gcPay(100000), { method: 'cash', amountCents: 5000 }], 3000);
+    check('7. subtotal 1080, rebaja 30, total 1050 = GC 1000 + efectivo 50',
+        sc.r.ok && sc.s.subtotalCents === 108000 && sc.s.discountCents === 3000 && sc.s.totalCents === 105000 && sc.s.cashCents === 5000 && sc.s.giftCardCents === 100000 && sc.d.discountCents === 3000 && idsHold(sc.d), sc.r.message);
+    check('7. entrada nueva del día = 50 (no 1000)', received(sc.d).cash === 5000 && received(sc.d).qr === 0);
+
+    // (El negocio dijo «rebaja 100», pero el máximo vigente es Bs 30 — createSale rechaza 100. Mismo principio con la rebaja máxima.)
+    sc = await scenario('I8', 'p800', [gcPay(77000)], 3000);
+    check('8. subtotal 800, rebaja 30, total 770, GC 1000: aplica 770, sobrante 230, efectivo/QR 0',
+        sc.r.ok && sc.s.totalCents === 77000 && sc.d.giftCardCents === 77000 && sc.d.giftCardForfeitedCents === 23000 && sc.d.cashCents === 0 && sc.d.qrCents === 0 && idsHold(sc.d), sc.r.message);
+    check('8. entrada nueva = 0', received(sc.d).cash === 0 && received(sc.d).qr === 0);
+    sc = await scenario('I8b', 'p800', [gcPay(70000)], 10000);
+    check('8b. rebaja Bs 100 (fuera de la lista) sigue rechazada', !sc.r.ok && !sale('I8b'), sc.r.message);
+
+    console.log('\nJ. cancelSale de una venta pagada con Gift Card NO toca el ingreso de la EMISIÓN');
+    reset(); seedProducts(); seedGiftCard(100000);
+    // La emisión (activateGiftCard) ya dejó su rastro en el resumen del día: 1000 cobrados en efectivo.
+    store.set(`dailySummaries/${todayKey}`, { dateKey: todayKey, monthKey: 'x', year: 2026, salesCount: 0, itemsCount: 0, totalCents: 0, discountCents: 0, cashCents: 0, qrCents: 0,
+        giftCardCents: 0, giftCardsIssuedCents: 100000, giftCardForfeitedCents: 0, giftCardIssuesCashCents: 100000, giftCardIssuesQrCents: 0, products: {} });
+    r = await outcome(call(createSale, 'seller', { saleId: 'J1', items: [{ productId: 'p700', quantity: 1 }], payments: [gcPay(70000)], discountCents: 0 }));
+    d = summary();
+    check('canje menor sobre un día con emisión: cobros = solo la emisión (1000), no 1700', r.ok && received(d).cash === 100000 && received(d).qr === 0 && d.giftCardCents === 70000, r.message + JSON.stringify(d));
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'J1', reason: 'prueba' }));
+    d = summary();
+    check('anular: la GC aplicada y el sobrante se revierten', r.ok && d.giftCardCents === 0 && d.giftCardForfeitedCents === 0 && d.totalCents === 0, r.message + JSON.stringify(d));
+    check('anular: la emisión sigue INTACTA (emitidas 1000, efectivo de emisión 1000, cobros 1000)',
+        d.giftCardsIssuedCents === 100000 && d.giftCardIssuesCashCents === 100000 && d.giftCardIssuesQrCents === 0 && received(d).cash === 100000, JSON.stringify(d));
+
+
+    // ---- Gift Card: la venta es ingreso definitivo; cancelar la tarjeta NO es devolución ----
+    console.log('\nK. cancelGiftCard / suspender / reactivar / canjear NO tocan el ingreso de la emisión');
+    const gcCard = (code, status = 'AVAILABLE', amountCents = 100000) =>
+        store.set(`giftCards/${code}`, { status, amountCents, cycleNumber: 0, activeCycleId: null, currentBuyerName: null });
+    const issuesOf = (d) => ({ issued: d.giftCardsIssuedCents, cash: d.giftCardIssuesCashCents, qr: d.giftCardIssuesQrCents });
+    const freezeSummary = () => JSON.stringify(Object.fromEntries(Object.entries(summary() ?? {}).filter(([k]) => k !== 'updatedAt')));
+    const movs = (type) => [...store].filter(([k, v]) => k.startsWith('giftCardMovements/') && v.type === type).length;
+    const base = () => { reset(); seedProducts(); store.set('users/seller2', { isActive: true, role: 'user', firstName: 'Otro', lastName: 'Vendedor' }); };
+
+    // A. AVAILABLE nunca vendida
+    base(); gcCard('GCA00001');
+    r = await outcome(call(cancelGiftCard, 'admin', { code: 'GCA00001', reason: 'dañada' }));
+    check('A. AVAILABLE nunca vendida: cancelar → CANCELLED y no existe ningún ingreso que afectar',
+        r.ok && store.get('giftCards/GCA00001').status === 'CANCELLED' && !summary() && movs('CANCELLED') === 1, r.message);
+
+    // B. ACTIVE vendida en efectivo
+    base(); gcCard('GCB00001');
+    r = await outcome(call(activateGiftCard, 'seller', { code: 'GCB00001', buyerName: 'Ana', payments: [{ method: 'cash', amountCents: 100000 }] }));
+    check('B. emisión: +1000 emitidas, +1000 efectivo de emisión', r.ok && JSON.stringify(issuesOf(summary())) === JSON.stringify({ issued: 100000, cash: 100000, qr: 0 }), r.message);
+    let before = freezeSummary();
+    r = await outcome(call(cancelGiftCard, 'admin', { code: 'GCB00001', reason: 'baja administrativa' }));
+    check('B. ACTIVE vendida: cancelar → tarjeta CANCELLED, ciclo cancelled, movimiento CANCELLED',
+        r.ok && store.get('giftCards/GCB00001').status === 'CANCELLED' && [...store].some(([k, v]) => k.startsWith('giftCardIssues/') && v.cardCode === 'GCB00001' && v.status === 'cancelled') && movs('CANCELLED') === 1, r.message);
+    check('B. la emisión histórica PERMANECE: emitidas 1000, efectivo 1000 (dailySummary idéntico)', freezeSummary() === before && issuesOf(summary()).issued === 100000 && issuesOf(summary()).cash === 100000);
+
+    // C. ACTIVE vendida por QR
+    base(); gcCard('GCC00001', 'AVAILABLE', 50000);
+    await call(activateGiftCard, 'seller', { code: 'GCC00001', payments: [{ method: 'qr', amountCents: 50000 }] });
+    before = freezeSummary();
+    r = await outcome(call(cancelGiftCard, 'admin', { code: 'GCC00001', reason: 'x' }));
+    check('C. ACTIVE vendida por QR: cancelar → el QR de la emisión permanece', r.ok && freezeSummary() === before && issuesOf(summary()).qr === 50000 && issuesOf(summary()).issued === 50000, r.message);
+
+    // D. SUSPENDED previamente vendida
+    base(); gcCard('GCD00001');
+    await call(activateGiftCard, 'seller', { code: 'GCD00001', payments: [{ method: 'cash', amountCents: 60000 }, { method: 'qr', amountCents: 40000 }] });
+    r = await outcome(call(suspendGiftCard, 'seller', { code: 'GCD00001', reason: 'perdida' }));
+    check('D. suspender: no toca los ingresos', r.ok && store.get('giftCards/GCD00001').status === 'SUSPENDED' && JSON.stringify(issuesOf(summary())) === JSON.stringify({ issued: 100000, cash: 60000, qr: 40000 }), r.message);
+    before = freezeSummary();
+    r = await outcome(call(cancelGiftCard, 'admin', { code: 'GCD00001', reason: 'no apareció' }));
+    check('D. SUSPENDED vendida: cancelar mantiene el ingreso original (1000 = 600 efectivo + 400 QR)', r.ok && store.get('giftCards/GCD00001').status === 'CANCELLED' && freezeSummary() === before, r.message);
+
+    // E. suspender / reactivar
+    base(); gcCard('GCE00001');
+    await call(activateGiftCard, 'seller', { code: 'GCE00001', payments: [{ method: 'cash', amountCents: 100000 }] });
+    before = freezeSummary();
+    await call(suspendGiftCard, 'seller', { code: 'GCE00001', reason: 'x' });
+    r = await outcome(call(reactivateGiftCard, 'seller', { code: 'GCE00001' }));
+    check('E. suspender + reactivar: ACTIVE de nuevo, mismo ciclo, ingresos intactos', r.ok && store.get('giftCards/GCE00001').status === 'ACTIVE' && store.get('giftCards/GCE00001').cycleNumber === 1 && freezeSummary() === before, r.message);
+
+    // F. canjear no genera ingreso nuevo (y la emisión queda intacta)
+    base(); gcCard('GCF00001');
+    await call(activateGiftCard, 'seller', { code: 'GCF00001', payments: [{ method: 'cash', amountCents: 100000 }] });
+    const cycleF = store.get('giftCards/GCF00001').activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'K-F', items: [{ productId: 'p700', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 70000, giftCardId: 'GCF00001', giftCardCycleId: cycleF }] }));
+    d = summary();
+    check('F. canjear: cobros del día siguen siendo SOLO la emisión (1000); la GC aplicada no es dinero nuevo',
+        r.ok && received(d).cash === 100000 && received(d).qr === 0 && d.giftCardCents === 70000 && issuesOf(d).issued === 100000, r.message + JSON.stringify(d));
+
+    // G. cancelar la venta de mercadería pagada con GC no toca la emisión
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'K-F', reason: 'prueba' }));
+    d = summary();
+    check('G. cancelSale de una venta pagada con GC: emisión intacta (1000) y la GC aplicada vuelve a 0',
+        r.ok && issuesOf(d).issued === 100000 && issuesOf(d).cash === 100000 && d.giftCardCents === 0 && received(d).cash === 100000, r.message + JSON.stringify(d));
+
+    // H. atribución: cada emisión guarda quién la hizo (activatedBy) — base del filtro por vendedor
+    base(); gcCard('GCH00001'); gcCard('GCH00002', 'AVAILABLE', 50000);
+    await call(activateGiftCard, 'seller', { code: 'GCH00001', payments: [{ method: 'cash', amountCents: 100000 }] });
+    await call(activateGiftCard, 'seller2', { code: 'GCH00002', payments: [{ method: 'qr', amountCents: 50000 }] });
+    const byCode = (c) => [...store].find(([k, v]) => k.startsWith('giftCardIssues/') && v.cardCode === c)[1];
+    check('H. emisiones atribuidas: GCH00001 → seller, GCH00002 → seller2 (activatedBy + dateKey + payments)',
+        byCode('GCH00001').activatedBy === 'seller' && byCode('GCH00002').activatedBy === 'seller2' && byCode('GCH00001').dateKey === todayKey
+        && byCode('GCH00002').payments[0].method === 'qr', JSON.stringify([byCode('GCH00001'), byCode('GCH00002')]));
+    check('H. general = 1500 (1000 efectivo + 500 QR)', JSON.stringify(issuesOf(summary())) === JSON.stringify({ issued: 150000, cash: 100000, qr: 50000 }), JSON.stringify(summary()));
 
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);

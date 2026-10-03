@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import {
     Firestore,
+    QueryDocumentSnapshot,
     Timestamp,
     collection,
     count,
@@ -9,6 +10,7 @@ import {
     limit,
     orderBy,
     query,
+    startAfter,
     sum,
     where,
 } from '@angular/fire/firestore';
@@ -71,6 +73,155 @@ function emptyRangeTotals(): RangeTotals {
         products: {},
         daysWithData: 0,
     };
+}
+
+/**
+ * Cobros REALES del rango (regla de negocio: una Gift Card es ingreso cuando
+ * SE VENDE, no cuando se canjea). ÚNICA fórmula — pantalla y PDF la comparten:
+ *
+ * - efectivo recibido = efectivo de ventas + efectivo de emisiones de Gift Card
+ * - QR recibido       = QR de ventas + QR de emisiones de Gift Card
+ * - cobros totales    = efectivo recibido + QR recibido
+ *
+ * `giftCardCents` (Gift Card APLICADA como pago) y `giftCardForfeitedCents`
+ * (sobrante de un canje menor al nominal) NO entran: ese dinero ya se cobró al
+ * vender la tarjeta. La diferencia que se paga en efectivo/QR durante un canje
+ * sí entra, porque ya está dentro de `cashCents`/`qrCents` de la venta.
+ */
+export function receivedTotals(
+    t: Pick<RangeTotals, 'cashCents' | 'qrCents' | 'giftCardIssuesCashCents' | 'giftCardIssuesQrCents'>,
+): { cashCents: number; qrCents: number; totalCents: number } {
+    const cashCents = t.cashCents + t.giftCardIssuesCashCents;
+    const qrCents = t.qrCents + t.giftCardIssuesQrCents;
+    return { cashCents, qrCents, totalCents: cashCents + qrCents };
+}
+
+/**
+ * Gift Cards VENDIDAS (emitidas) por un vendedor en un rango, sumadas de sus
+ * `giftCardIssues` — atribución por `activatedBy`, el campo real que guarda
+ * quién hizo la venta de la tarjeta. Incluye TODOS los estados, también los
+ * ciclos `cancelled`: una baja administrativa no es devolución, el ingreso
+ * de la venta permanece.
+ */
+export interface SellerIssuesTotals {
+    issuesCount: number;
+    nominalCents: number;
+    cashCents: number;
+    qrCents: number;
+}
+
+/** Suma nominal y cobro (efectivo/QR) de una lista de ciclos. Pura: la comparten consulta y tests. */
+export function sumIssues(issues: Pick<GiftCardIssue, 'amountCents' | 'payments'>[]): SellerIssuesTotals {
+    const totals: SellerIssuesTotals = { issuesCount: issues.length, nominalCents: 0, cashCents: 0, qrCents: 0 };
+    for (const issue of issues) {
+        totals.nominalCents += issue.amountCents;
+        for (const payment of issue.payments ?? []) {
+            if (payment.method === 'cash') totals.cashCents += payment.amountCents;
+            else if (payment.method === 'qr') totals.qrCents += payment.amountCents;
+        }
+    }
+    return totals;
+}
+
+/**
+ * Desglose de UN vendedor: sus ventas de mercadería + las Gift Cards que vendió.
+ * Pantalla y PDF muestran EXACTAMENTE este objeto (una sola fórmula, la misma
+ * `receivedTotals` del reporte general):
+ *
+ * - efectivo recibido = efectivo de sus ventas (incluye la diferencia de un
+ *   canje) + efectivo de las tarjetas que vendió
+ * - QR recibido       = ídem con QR
+ * - cobros recibidos  = efectivo + QR recibidos
+ *
+ * `giftCardCents` (Gift Card APLICADA en sus ventas) no es dinero nuevo y no suma.
+ */
+export interface SellerBreakdown {
+    salesCount: number;
+    merchandiseCents: number;
+    salesCashCents: number;
+    salesQrCents: number;
+    giftCardAppliedCents: number;
+    giftCardsSoldCount: number;
+    giftCardsSoldCents: number;
+    issuesCashCents: number;
+    issuesQrCents: number;
+    cashReceivedCents: number;
+    qrReceivedCents: number;
+    moneyReceivedCents: number;
+}
+
+export function buildSellerBreakdown(sales: SalesAggregateTotals, issues: SellerIssuesTotals): SellerBreakdown {
+    const received = receivedTotals({
+        cashCents: sales.cashCents,
+        qrCents: sales.qrCents,
+        giftCardIssuesCashCents: issues.cashCents,
+        giftCardIssuesQrCents: issues.qrCents,
+    });
+    return {
+        salesCount: sales.salesCount,
+        merchandiseCents: sales.totalCents,
+        salesCashCents: sales.cashCents,
+        salesQrCents: sales.qrCents,
+        giftCardAppliedCents: sales.giftCardCents,
+        giftCardsSoldCount: issues.issuesCount,
+        giftCardsSoldCents: issues.nominalCents,
+        issuesCashCents: issues.cashCents,
+        issuesQrCents: issues.qrCents,
+        cashReceivedCents: received.cashCents,
+        qrReceivedCents: received.qrCents,
+        moneyReceivedCents: received.totalCents,
+    };
+}
+
+/**
+ * Tamaño de cada página INTERNA de la consulta por vendedor. No es un tope: el
+ * recorrido sigue hasta agotar los resultados (ver `sumAllIssuePages`). Solo
+ * acota lo que se descarga por petición.
+ */
+export const SELLER_ISSUES_PAGE_SIZE = 500;
+
+/** Un ciclo tal como lo necesita la suma: identidad (para no contar dos veces), monto y cobro. */
+export type IssueForTotals = Pick<GiftCardIssue, 'id' | 'amountCents' | 'payments'>;
+
+export interface IssuesPage<Cursor> {
+    items: IssueForTotals[];
+    /** Cursor del ÚLTIMO documento de la página (`null` si la página está vacía). */
+    last: Cursor | null;
+}
+
+/**
+ * Recorre TODAS las páginas de una consulta con cursor y acumula el resultado,
+ * sin ningún tope oculto: se detiene solo cuando una página viene incompleta
+ * (`items.length < pageSize`, incluida la vacía). Una página EXACTAMENTE del
+ * tamaño pedido obliga a pedir la siguiente, que vendrá vacía y cierra el
+ * recorrido. Defensa: un ciclo se cuenta UNA sola vez por `id` aunque una
+ * página repitiera documentos, y si una página no aporta nada nuevo se corta
+ * (nunca un bucle infinito). Incluye ciclos de cualquier estado, también los
+ * `cancelled`: una baja administrativa no es devolución.
+ *
+ * Genérica en el cursor para poder probarla sin Firestore.
+ */
+export async function sumAllIssuePages<Cursor>(
+    fetchPage: (after: Cursor | null) => Promise<IssuesPage<Cursor>>,
+    pageSize: number = SELLER_ISSUES_PAGE_SIZE,
+): Promise<SellerIssuesTotals> {
+    const seen = new Set<string>();
+    const unique: IssueForTotals[] = [];
+    let after: Cursor | null = null;
+
+    for (;;) {
+        const page: IssuesPage<Cursor> = await fetchPage(after);
+        let added = 0;
+        for (const item of page.items) {
+            if (seen.has(item.id)) continue;
+            seen.add(item.id);
+            unique.push(item);
+            added += 1;
+        }
+        if (page.items.length < pageSize || page.last === null || added === 0) break;
+        after = page.last;
+    }
+    return sumIssues(unique);
 }
 
 /**
@@ -219,6 +370,47 @@ export class ReportsService {
                 giftCardCents: sum('giftCardCents'),
             }),
         ).pipe(map((snap) => snap.data()));
+    }
+
+    /**
+     * Gift Cards que UN vendedor vendió en el rango: consulta en servidor por
+     * `activatedBy` + rango de `dateKey` (índice compuesto
+     * `giftCardIssues(activatedBy, dateKey)`) recorrida por PÁGINAS INTERNAS con
+     * cursor (`SELLER_ISSUES_PAGE_SIZE`) hasta agotar los resultados: sin tope
+     * oculto, así un rango con miles de emisiones nunca se muestra incompleto.
+     * Cash/QR salen de `payments[]` (un array: `sum()` de servidor no aplica),
+     * por eso se leen los ciclos del vendedor y se suman con `sumAllIssuePages`.
+     */
+    getSellerIssuesTotals(sellerId: string, fromKey: string, toKey: string): Observable<SellerIssuesTotals> {
+        return from(
+            sumAllIssuePages<QueryDocumentSnapshot<GiftCardIssue>>(async (after) => {
+                const snap = await getDocs(this.sellerIssuesQuery(sellerId, fromKey, toKey, after));
+                return { items: snap.docs.map((d) => d.data()), last: snap.docs.at(-1) ?? null };
+            }),
+        );
+    }
+
+    /**
+     * Una página de la consulta de arriba, expuesta para poder verificar su forma
+     * (y el índice que exige) sin red. `orderBy('dateKey')` es el mismo orden del
+     * índice `(activatedBy, dateKey)`; `startAfter(snapshot)` desempata por id de
+     * documento, así que no hay huecos ni repetidos entre páginas.
+     */
+    sellerIssuesQuery(
+        sellerId: string,
+        fromKey: string,
+        toKey: string,
+        after: QueryDocumentSnapshot<GiftCardIssue> | null = null,
+    ) {
+        return query(
+            this.giftCardIssuesCollection,
+            where('activatedBy', '==', sellerId),
+            where('dateKey', '>=', fromKey),
+            where('dateKey', '<=', toKey),
+            orderBy('dateKey'),
+            ...(after ? [startAfter(after)] : []),
+            limit(SELLER_ISSUES_PAGE_SIZE),
+        );
     }
 
     /**

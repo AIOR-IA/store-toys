@@ -1,3 +1,4 @@
+import { forkJoin } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -35,7 +36,16 @@ import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { GiftCard, GiftCardIssue, GiftCardStatus } from '../../../gift-cards/gift-card.model';
 import { DailySummary } from '../../daily-summary.model';
 import { ReportPdfData, ReportsPdfService } from '../../reports-pdf.service';
-import { RangeTotals, ReportsService, SalesAggregateTotals, mergeDailySummaries } from '../../reports.service';
+import {
+    RangeTotals,
+    ReportsService,
+    SalesAggregateTotals,
+    SellerBreakdown,
+    SellerIssuesTotals,
+    buildSellerBreakdown,
+    mergeDailySummaries,
+    receivedTotals,
+} from '../../reports.service';
 
 type RangePreset = 'today' | 'yesterday' | 'last7' | 'thisMonth' | 'custom';
 
@@ -112,13 +122,11 @@ export class ReportsDashboardComponent implements OnInit {
         Object.values(this.rangeTotals().products).sort((a, b) => b.totalCents - a.totalCents),
     );
 
-    readonly cashReceivedCents = computed(
-        () => this.rangeTotals().cashCents + this.rangeTotals().giftCardIssuesCashCents,
-    );
-    readonly qrReceivedCents = computed(
-        () => this.rangeTotals().qrCents + this.rangeTotals().giftCardIssuesQrCents,
-    );
-    readonly moneyReceivedCents = computed(() => this.cashReceivedCents() + this.qrReceivedCents());
+    // Cobros reales: ventas + emisiones de Gift Card (fórmula única, `receivedTotals`).
+    private readonly received = computed(() => receivedTotals(this.rangeTotals()));
+    readonly cashReceivedCents = computed(() => this.received().cashCents);
+    readonly qrReceivedCents = computed(() => this.received().qrCents);
+    readonly moneyReceivedCents = computed(() => this.received().totalCents);
 
     readonly identityMerchandiseOk = computed(() => {
         const t = this.rangeTotals();
@@ -194,6 +202,13 @@ export class ReportsDashboardComponent implements OnInit {
     readonly sellers = signal<{ uid: string; name: string }[]>([]);
     readonly selectedSellerId = signal<string | null>(null);
     readonly sellerTotals = signal<SalesAggregateTotals | null>(null);
+    readonly sellerIssues = signal<SellerIssuesTotals | null>(null);
+    /** Sus ventas + las Gift Cards que vendió (misma fórmula `receivedTotals` que el general). */
+    readonly sellerBreakdown = computed<SellerBreakdown | null>(() => {
+        const sales = this.sellerTotals();
+        const issues = this.sellerIssues();
+        return sales && issues ? buildSellerBreakdown(sales, issues) : null;
+    });
     readonly loadingSellerTotals = signal(false);
 
     // ---- Detalle de ventas del día (solo si el rango es un único día) ----
@@ -313,12 +328,17 @@ export class ReportsDashboardComponent implements OnInit {
         const uid = this.selectedSellerId();
         if (!uid) {
             this.sellerTotals.set(null);
+            this.sellerIssues.set(null);
             return;
         }
         this.loadingSellerTotals.set(true);
-        this.reportsService.getSellerTotals(uid, this.fromKey(), this.toKey()).subscribe({
-            next: (totals) => {
-                this.sellerTotals.set(totals);
+        forkJoin({
+            sales: this.reportsService.getSellerTotals(uid, this.fromKey(), this.toKey()),
+            issues: this.reportsService.getSellerIssuesTotals(uid, this.fromKey(), this.toKey()),
+        }).subscribe({
+            next: ({ sales, issues }) => {
+                this.sellerTotals.set(sales);
+                this.sellerIssues.set(issues);
                 this.loadingSellerTotals.set(false);
             },
             error: () => {
@@ -551,7 +571,7 @@ export class ReportsDashboardComponent implements OnInit {
         const sellerId = this.selectedSellerId();
         const sellerName = sellerId ? this.sellers().find((s) => s.uid === sellerId)?.name ?? '' : '';
         const sellerScope: ReportPdfData['sellerScope'] =
-            sellerId && this.sellerTotals() ? { name: sellerName, totals: this.sellerTotals()! } : null;
+            sellerId && this.sellerBreakdown() ? { name: sellerName, breakdown: this.sellerBreakdown()! } : null;
 
         try {
             await this.reportsPdfService.export({

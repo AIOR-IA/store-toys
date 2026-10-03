@@ -811,12 +811,17 @@ export const reactivateGiftCard = onCall<ReactivateGiftCardData>({ region: REGIO
 /**
  * Baja definitiva de la tarjeta FÍSICA (solo admin, prompt §12: política
  * conservadora al no existir una decisión previa distinta). Terminal: nunca
- * vuelve a AVAILABLE. Si había un ciclo abierto (ACTIVE o SUSPENDED) con
- * dinero ya cobrado por la venta de la tarjeta, ese ciclo se cierra como
- * `cancelled` (mismo patrón que `cancelGiftCardIssue` ya aprobado en el plan,
- * §16.6: "el reporte descuenta esa emisión del total de tarjetas vendidas
- * del día") y el resumen diario del día en que se activó se corrige — nunca
- * el de hoy, porque la activación pudo ser cualquier día anterior.
+ * vuelve a AVAILABLE. Si había un ciclo abierto (ACTIVE o SUSPENDED), ese
+ * ciclo se cierra como `cancelled`.
+ *
+ * REGLA DE NEGOCIO (confirmada por el cliente): la venta de una Gift Card es
+ * INGRESO RECONOCIDO al momento de venderse, y el negocio NO ofrece
+ * devoluciones. Cancelar la tarjeta es inutilizarla, NO devolver el dinero:
+ * por eso esta función NUNCA toca `dailySummaries` — ni resta
+ * `giftCardsIssuedCents` ni el desglose `giftCardIssuesCashCents`/
+ * `giftCardIssuesQrCents` del día en que se vendió. (Antes los restaba; ver
+ * plan §16.11.) Si algún día hubiera una devolución real, sería otra operación
+ * explícita (`refundGiftCard`) con sus propios movimientos, no esta.
  */
 export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, async (request) => {
     const adminSnap = await assertAdmin(request.auth);
@@ -843,17 +848,10 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
 
         let issueRef: FirebaseFirestore.DocumentReference | null = null;
         let issueSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-        let summaryRef: FirebaseFirestore.DocumentReference | null = null;
-        let summarySnap: FirebaseFirestore.DocumentSnapshot | null = null;
 
         if (hadOpenCycle && cycleId) {
             issueRef = db.doc(`giftCardIssues/${cycleId}`);
             issueSnap = await tx.get(issueRef);
-            if (issueSnap.exists) {
-                const issueDateKey = issueSnap.get('dateKey') as string;
-                summaryRef = db.doc(`dailySummaries/${issueDateKey}`);
-                summarySnap = await tx.get(summaryRef);
-            }
         }
 
         // Solo escrituras de aquí en adelante.
@@ -883,37 +881,6 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
                 cancelReason: reason,
                 closedAt: FieldValue.serverTimestamp(),
             });
-
-            if (summaryRef && summarySnap && summarySnap.exists) {
-                const amountCents = issueSnap.get('amountCents') as number;
-                const payments =
-                    (issueSnap.get('payments') as { method: string; amountCents: number }[]) ?? [];
-                const cashCents = payments
-                    .filter((p) => p.method === 'cash')
-                    .reduce((sum, p) => sum + p.amountCents, 0);
-                const qrCents = payments
-                    .filter((p) => p.method === 'qr')
-                    .reduce((sum, p) => sum + p.amountCents, 0);
-
-                const newIssuedCents = Math.max(
-                    0,
-                    ((summarySnap.get('giftCardsIssuedCents') as number) ?? 0) - amountCents,
-                );
-                const newIssuesCashCents = Math.max(
-                    0,
-                    ((summarySnap.get('giftCardIssuesCashCents') as number) ?? 0) - cashCents,
-                );
-                const newIssuesQrCents = Math.max(
-                    0,
-                    ((summarySnap.get('giftCardIssuesQrCents') as number) ?? 0) - qrCents,
-                );
-                tx.update(summaryRef, {
-                    giftCardsIssuedCents: newIssuedCents,
-                    giftCardIssuesCashCents: newIssuesCashCents,
-                    giftCardIssuesQrCents: newIssuesQrCents,
-                    updatedAt: FieldValue.serverTimestamp(),
-                });
-            }
         }
 
         tx.create(db.collection('giftCardMovements').doc(), {

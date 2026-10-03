@@ -1138,7 +1138,7 @@ en propagarse al token, y una operación privilegiada no puede depender de eso.
 | `activateGiftCard` | staff | Vende/activa una tarjeta AVAILABLE: abre un ciclo nuevo. §16 |
 | `suspendGiftCard` | staff | Pérdida/robo: ACTIVE → SUSPENDED, mismo ciclo. §16 |
 | `reactivateGiftCard` | staff | La tarjeta apareció: SUSPENDED → ACTIVE, mismo ciclo. §16 |
-| `cancelGiftCard` | admin | Baja definitiva de la tarjeta física. Terminal. §16 |
+| `cancelGiftCard` | admin | Baja definitiva de la tarjeta física. Terminal. NO revierte el ingreso de su venta. §16.11 |
 
 ### 7.4 `createUser`: el orden importa
 
@@ -2707,16 +2707,27 @@ del lote — verificado en vivo con ambos casos. Cada tarjeta nace individual (n
 "denominación=100, cantidad=6" como un solo documento): seis códigos registrados son seis
 documentos `giftCards`, cada uno con su propio movimiento `REGISTERED`.
 
-### 16.11 Baja definitiva (`cancelGiftCard`) con dinero ya cobrado
+### 16.11 Baja definitiva (`cancelGiftCard`) — NO es devolución
 
-Cancelar una tarjeta que está `ACTIVE`/`SUSPENDED` (ya vendida, con dinero cobrado) cierra
-también su ciclo abierto como `'cancelled'` — mismo patrón que ya usaba el diseño original
-para "anular una emisión" (§16.6 original) — y **corrige** `dailySummaries` del día en que
-esa tarjeta se activó (no el de hoy, que puede ser cualquier día anterior):
-`giftCardsIssuedCents` y el desglose cash/qr bajan por el monto de esa tarjeta, porque la
-obligación de entregar mercancía por ese valor ya no existe. Verificado en vivo: activar una
-tarjeta de Bs 500 pagada en efectivo (`dailySummaries.giftCardsIssuedCents` +500,
-`giftCardIssuesCashCents` +500), cancelarla, y confirmar que ambos vuelven a 0.
+**Regla de negocio (confirmada por el cliente):** la venta de una gift card es **ingreso
+reconocido en el momento de venderse**, y el negocio **no ofrece devoluciones**. Dar de baja
+una tarjeta es **inutilizarla**, no devolver el dinero.
+
+`cancelGiftCard` (solo admin) pone la tarjeta en `CANCELLED` (terminal), cierra su ciclo
+abierto —si estaba `ACTIVE`/`SUSPENDED`— como `cancelled` y registra el movimiento
+`CANCELLED`. **No toca `dailySummaries`**: ni `giftCardsIssuedCents` ni el desglose
+`giftCardIssuesCashCents`/`giftCardIssuesQrCents` del día en que se vendió. Una tarjeta
+`AVAILABLE` que nunca se vendió no tiene ingreso que preservar.
+
+> **Cambio respecto a la Fase 6:** antes, la baja de una tarjeta vendida **restaba** esos
+> importes del resumen del día de la venta ("porque la obligación de entregar mercancía ya no
+> existe"). Esa lectura trataba la baja como una devolución contable; el cliente aclaró que no
+> lo es. Si algún día hubiera una devolución real, sería **otra operación explícita**
+> (`refundGiftCard`) con sus propios movimientos y reglas — no esta.
+
+Efectos colaterales: la tarjeta cancelada deja de contar en el *pasivo pendiente* (§18.2,
+solo `ACTIVE`/`SUSPENDED`); el ciclo `cancelled` **sigue** contando en las gift cards
+vendidas de su vendedor y del rango.
 
 ### 16.12 Código GENERADO por el sistema — ajuste posterior a la Fase 6
 
@@ -2867,8 +2878,9 @@ diseño, en lugar de depender de que cada consulta recuerde aplicar un filtro.
 | Saldo de gift card consumido | `sales` | `Σ giftCardCents` — **no es dinero nuevo** |
 | **Nuevas gift cards vendidas** | `dailySummaries` (§8.7) | `Σ giftCardsIssuedCents` del rango — ya acumulado por `activateGiftCard`, sin leer `giftCardIssues` |
 | Efectivo/QR recibido por emisiones | `dailySummaries` | `Σ giftCardIssuesCashCents` / `Σ giftCardIssuesQrCents` (nuevos en Fase 6, §8.7) |
-| Saldo no reclamado (*breakage*) | `dailySummaries` | `Σ giftCardForfeitedCents` del rango |
-| **Dinero que entró hoy a la caja** | `dailySummaries` | (cashCents + qrCents) + (giftCardIssuesCashCents + giftCardIssuesQrCents) |
+| Saldo no reclamado (*breakage*) | `dailySummaries` | `Σ giftCardForfeitedCents` del rango — **dato operativo/de auditoría; Reportes ya NO lo muestra** (no es ingreso: la tarjeta se cobró completa al venderse, y mostrarlo como KPI se leía como dinero adicional) |
+| **Dinero que entró hoy a la caja** (KPI «Cobros recibidos») | `dailySummaries` | (cashCents + qrCents) + (giftCardIssuesCashCents + giftCardIssuesQrCents) — una sola fórmula (`receivedTotals`) para pantalla y PDF. La Gift Card **aplicada** y el sobrante nunca suman: la Gift Card es ingreso al **venderse**, no al canjearse |
+| **Por vendedor** (filtro de Reportes) | `sales` (agregado por `sellerId`) + `giftCardIssues` (por `activatedBy` + rango de `dateKey`, índice `(activatedBy, dateKey)`) | Mismas fórmulas que el general (`receivedTotals`): efectivo recibido = efectivo de sus ventas + efectivo de las tarjetas que **vendió**; ídem QR. Los ciclos `cancelled` **cuentan** (no hay devolución). La gift card **aplicada** en sus ventas no suma |
 | Pasivo pendiente (tarjetas activas con dinero cobrado, sin canjear) | `giftCards` | `count()`/lectura de `where('status','in',['ACTIVE','SUSPENDED'])` × su `amountCents` — **queda pendiente de diseñar en la Fase 7**: no es un acumulado diario, exige recorrer `giftCards` completo (≤ unas decenas de documentos, tramo aceptable a esta escala) |
 
 **Ejemplo resuelto.** Un día con Bs 500 de mercancía vendida (Bs 300 efectivo, Bs 100 QR,
