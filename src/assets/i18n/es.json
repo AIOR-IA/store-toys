@@ -151,6 +151,22 @@
         "deactivated": "Usuario desactivado correctamente."
       }
     },
+    "camera": {
+        "title": "Tomar fotografía",
+        "loading": "Iniciando cámara…",
+        "retake": "Repetir",
+        "usePhoto": "Usar foto",
+        "errors": {
+            "permissionDenied": "No se concedió permiso para usar la cámara.",
+            "notFound": "No se encontró una cámara disponible.",
+            "notReadable": "La cámara está siendo utilizada por otra aplicación.",
+            "insecure": "La cámara requiere una conexión segura (HTTPS).",
+            "unsupported": "La cámara no está disponible en este navegador. Puedes seleccionar una imagen desde tu dispositivo.",
+            "notReady": "La cámara todavía no está lista. Intenta de nuevo.",
+            "capture": "No se pudo capturar la fotografía.",
+            "unknown": "No se pudo iniciar la cámara."
+        }
+    },
     "products": {
       "title": "Productos",
       "list": "Catálogo de productos",
@@ -188,6 +204,7 @@
         "codeGenerated": "Código interno generado: {{code}}",
         "changePicture": "Cambiar imagen",
         "takePicture": "Tomar foto",
+        "useCamera": "Usar cámara",
         "chooseFile": "Elegir archivo",
         "createAndNext": "Guardar y cargar otro"
       },

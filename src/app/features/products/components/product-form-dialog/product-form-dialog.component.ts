@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import {
     Component,
     ElementRef,
+    OnDestroy,
     ViewChild,
     computed,
     effect,
@@ -19,7 +20,10 @@ import {
     ReactiveFormsModule,
     Validators,
 } from '@angular/forms';
-import { ImageViewerComponent } from '@shared/components/ui/image-viewer/image-viewer.component';
+import {
+    CameraCaptureDialogComponent,
+    ImageViewerComponent,
+} from '@shared/components/ui';
 import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -71,10 +75,11 @@ function integerValidator(control: AbstractControl): ValidationErrors | null {
         TranslateModule,
         ProductCodePickerComponent,
         ImageViewerComponent,
+        CameraCaptureDialogComponent,
     ],
     templateUrl: './product-form-dialog.component.html',
 })
-export class ProductFormDialogComponent {
+export class ProductFormDialogComponent implements OnDestroy {
     private readonly formBuilder = inject(FormBuilder);
     private readonly productsService = inject(ProductsService);
     private readonly imageCompressor = inject(ImageCompressorService);
@@ -104,6 +109,9 @@ export class ProductFormDialogComponent {
     viewerSrc = signal<string | null>(null);
     pendingImage = signal<Blob | null>(null);
     compressingImage = signal(false);
+    cameraVisible = signal(false);
+    /** URL de objeto creada por esta vista previa; la remota de Storage nunca se revoca. */
+    private previewObjectUrl: string | null = null;
 
     constructor() {
         // Reconstruye el formulario cada vez que el diálogo se abre para
@@ -132,6 +140,7 @@ export class ProductFormDialogComponent {
                     this.resetForCreate();
                 } else if (visible && isEdit) {
                     this.form = this.buildForm(product);
+                    this.revokePreview();
                     this.imagePreviewUrl.set(product?.imageUrl ?? null);
                     this.pendingImage.set(null);
                     if (!isAdmin) {
@@ -147,17 +156,51 @@ export class ProductFormDialogComponent {
         const file = fileInput.files?.[0];
         if (!file) return;
 
+        try {
+            await this.processImage(file);
+        } finally {
+            fileInput.value = '';
+        }
+    }
+
+    openCamera(): void {
+        this.cameraVisible.set(true);
+    }
+
+    onCameraCaptured(file: File): void {
+        void this.processImage(file);
+    }
+
+    ngOnDestroy(): void {
+        this.revokePreview();
+    }
+
+    /** Un único pipeline para archivo seleccionado y cámara: compresión, pendingImage y preview. */
+    private async processImage(file: File): Promise<void> {
+        if (this.compressingImage()) return;
+
         this.compressingImage.set(true);
         try {
             const blob = await this.imageCompressor.compressProductImage(file);
             this.pendingImage.set(blob);
-            this.imagePreviewUrl.set(URL.createObjectURL(blob));
+            this.replacePreview(blob);
         } catch {
             this.toast.error('app.common.errors.general');
         } finally {
             this.compressingImage.set(false);
-            fileInput.value = '';
         }
+    }
+
+    private replacePreview(blob: Blob): void {
+        this.revokePreview();
+        this.previewObjectUrl = URL.createObjectURL(blob);
+        this.imagePreviewUrl.set(this.previewObjectUrl);
+    }
+
+    private revokePreview(): void {
+        if (!this.previewObjectUrl) return;
+        URL.revokeObjectURL(this.previewObjectUrl);
+        this.previewObjectUrl = null;
     }
 
     submit(): void {
@@ -273,6 +316,7 @@ export class ProductFormDialogComponent {
     private resetForCreate(): void {
         this.form = this.buildForm(null);
         this.resolvedCode.set(null);
+        this.revokePreview();
         this.imagePreviewUrl.set(null);
         this.pendingImage.set(null);
         this.codePicker?.reset();

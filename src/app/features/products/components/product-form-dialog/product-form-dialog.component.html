@@ -96,7 +96,7 @@
             <label class="text-sm font-medium">{{
                 "app.products.form.imageInfo" | translate
             }}</label>
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3">
                 @if (imagePreviewUrl()) {
                 <img
                     [src]="imagePreviewUrl()"
@@ -123,6 +123,15 @@
                         (change)="onImageSelected($event)"
                     />
                 </label>
+                <button
+                    pButton
+                    type="button"
+                    class="p-button-outlined text-sm"
+                    icon="fas fa-video"
+                    [label]="'app.products.form.useCamera' | translate"
+                    [disabled]="compressingImage()"
+                    (click)="openCamera()"
+                ></button>
                 @if (compressingImage()) {
                 <i class="fas fa-spinner fa-spin"></i>
                 }
@@ -163,3 +172,8 @@
 </p-dialog>
 
 <app-image-viewer [src]="viewerSrc()" (closed)="viewerSrc.set(null)"></app-image-viewer>
+<app-camera-capture-dialog
+    [visible]="cameraVisible()"
+    (visibleChange)="cameraVisible.set($event)"
+    (captured)="onCameraCaptured($event)"
+></app-camera-capture-dialog>
