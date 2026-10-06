@@ -190,6 +190,12 @@ export class GiftCardRegisterDialogComponent {
         this.registered.emit();
     }
 
+    /** Enter del lector: cierra la lectura sin registrar; el texto queda seleccionado para que la siguiente lectura lo reemplace. */
+    onCodeEnter(event: Event, input: HTMLInputElement): void {
+        event.preventDefault();
+        input.select();
+    }
+
     openLabel(code: string): void {
         const amountCents = this.resultAmountCents();
         if (amountCents === null) return;

@@ -20,6 +20,7 @@ import { SessionService } from '@core/session';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { normalizeGiftCardCode } from '@core/utils';
+import { SAME_BARCODE_DEBOUNCE_MS } from '@shared/constants';
 import { GiftCardRegisterDialogComponent } from '../gift-card-register-dialog/gift-card-register-dialog.component';
 import { GiftCardDetailDialogComponent } from '../gift-card-detail-dialog/gift-card-detail-dialog.component';
 import { GiftCardsFilter, GiftCardsService } from '../../gift-cards.service';
@@ -139,6 +140,7 @@ export class GiftCardListComponent implements OnInit {
     });
 
     private pager = this.giftCardsService.createPager(this.filter(), this.pageSize());
+    private readonly lastLookupAt = new Map<string, number>();
 
     ngOnInit(): void {
         this.loadFirstPage();
@@ -173,6 +175,11 @@ export class GiftCardListComponent implements OnInit {
             this.loadFirstPage();
             return;
         }
+
+        const now = Date.now();
+        const lastAt = this.lastLookupAt.get(normalized);
+        if (lastAt !== undefined && now - lastAt < SAME_BARCODE_DEBOUNCE_MS) return;
+        this.lastLookupAt.set(normalized, now);
 
         this.loading.set(true);
         this.giftCardsService.lookupByCode(normalized).subscribe({

@@ -11,7 +11,7 @@ import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { ProductsService } from '../../../products/products.service';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
-import { SAME_BARCODE_DEBOUNCE_MS } from '../../sale-scan.const';
+import { SAME_BARCODE_DEBOUNCE_MS } from '@shared/constants';
 import { SaleCartLine } from '../../sale.model';
 import { SalesService } from '../../sales.service';
 import { SalesPosComponent } from './sales-pos.component';

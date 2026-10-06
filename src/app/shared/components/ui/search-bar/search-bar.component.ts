@@ -1,11 +1,13 @@
 import { CommonModule } from '@angular/common';
 import {
     Component,
+    ElementRef,
     input,
     model,
     OnChanges,
     output,
     SimpleChanges,
+    ViewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TranslateModule } from '@ngx-translate/core';
@@ -33,6 +35,10 @@ export class SearchBarComponent implements OnChanges {
     placeholder = input<string>();
     title = input<string>();
     compact = input<boolean>(false);
+    /** Tras buscar, deja el texto seleccionado: útil para lectores HID (la siguiente lectura reemplaza). */
+    selectOnSearch = input<boolean>(false);
+
+    @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
 
     ngOnChanges(changes: SimpleChanges): void {
         if(changes['query']) {
@@ -41,5 +47,6 @@ export class SearchBarComponent implements OnChanges {
     }
     search() {
         this.onSearch.emit(this.searchValue());
+        if (this.selectOnSearch()) this.searchInput?.nativeElement.select();
     }
 }

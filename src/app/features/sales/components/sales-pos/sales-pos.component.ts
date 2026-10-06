@@ -31,7 +31,7 @@ import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { Product } from '../../../products/product.model';
 import { ProductsService } from '../../../products/products.service';
 import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
-import { SAME_BARCODE_DEBOUNCE_MS } from '../../sale-scan.const';
+import { SAME_BARCODE_DEBOUNCE_MS } from '@shared/constants';
 import { SaleReceiptService } from '../../sale-receipt.service';
 import { CreateSalePaymentInput, SalesService } from '../../sales.service';
 import { PaymentMethod, Sale, SaleCartLine } from '../../sale.model';

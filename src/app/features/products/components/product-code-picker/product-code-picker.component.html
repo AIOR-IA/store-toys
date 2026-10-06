@@ -23,10 +23,12 @@
     @if (mode() === 'manufacturer') {
     <div class="flex flex-col gap-1">
         <input
+            #manufacturerInput
             pInputText
             autofocus
             [ngModel]="manufacturerCode()"
             (ngModelChange)="onManufacturerCodeInput($event)"
+            (keydown.enter)="onManufacturerEnter($event, manufacturerInput)"
             [placeholder]="'app.products.form.manufacturerCodePlaceholder' | translate"
             [disabled]="disabled()"
             class="w-full"

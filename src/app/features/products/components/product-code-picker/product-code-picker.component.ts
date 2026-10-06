@@ -82,6 +82,16 @@ export class ProductCodePickerComponent {
         this.emit();
     }
 
+    /**
+     * Enter del lector: no hace nada más que cerrar la lectura. El valor ya
+     * está en `manufacturerCode` (se actualiza en cada tecla), así que basta
+     * con seleccionar todo: la siguiente lectura reemplaza en vez de concatenar.
+     */
+    onManufacturerEnter(event: Event, input: HTMLInputElement): void {
+        event.preventDefault();
+        input.select();
+    }
+
     generateCode(): void {
         this.generating.set(true);
         this.productsService.generateInternalCode().subscribe({

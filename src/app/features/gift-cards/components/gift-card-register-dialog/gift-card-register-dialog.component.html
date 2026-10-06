@@ -89,10 +89,12 @@
                 "app.giftCards.code" | translate
             }}</label>
             <input
+                #codeInput
                 pInputText
                 id="code"
                 [ngModel]="code()"
                 (ngModelChange)="code.set($event)"
+                (keydown.enter)="onCodeEnter($event, codeInput)"
                 [name]="'code'"
                 class="w-full"
                 [placeholder]="'app.giftCards.register.codePlaceholder' | translate"
