@@ -205,6 +205,7 @@
         "changePicture": "Cambiar imagen",
         "takePicture": "Tomar foto",
         "useCamera": "Usar cámara",
+        "noImage": "Sin imagen",
         "chooseFile": "Elegir archivo",
         "createAndNext": "Guardar y cargar otro"
       },
@@ -238,7 +239,6 @@
         "deactivated": "Producto inactivado correctamente.",
         "duplicateCode": "Ese código ya pertenece a otro producto.",
         "counterNotSeeded": "El generador de códigos internos no está configurado todavía. Contacta al administrador.",
-        "imageRequired": "Debes subir una imagen del producto.",
         "codeRequired": "Escribe el código de fabricante o genera uno interno.",
         "codeChanged": "Código actualizado correctamente."
       }

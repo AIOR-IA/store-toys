@@ -42,6 +42,14 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields.toSet());
     }
 
+    // Imagen opcional (ajuste posterior a la Fase 3, a pedido del cliente):
+    // si `imagePath` viene, debe ser un string no vacío; si no viene, el
+    // producto simplemente no tiene foto todavía — nunca un string vacío.
+    function optionalImagePath(data) {
+      return !('imagePath' in data)
+          || (data.imagePath is string && data.imagePath.size() > 0);
+    }
+
     match /users/{userId} {
       // la lectura propia es el paso 2 de la cadena de sesión: no puede
       // depender de me(), porque ese documento es justo lo que decide si el
@@ -89,8 +97,7 @@ service cloud.firestore {
         && request.resource.data.priceCents is int
         && request.resource.data.priceCents > 0
         && request.resource.data.stock is int
-        && request.resource.data.imagePath is string
-        && request.resource.data.imagePath.size() > 0   // imagen obligatoria
+        && optionalImagePath(request.resource.data)
         && request.resource.data.isActive == true
         && request.resource.data.createdBySellerId == request.auth.uid;
 
@@ -99,8 +106,7 @@ service cloud.firestore {
         && request.resource.data.priceCents is int
         && request.resource.data.priceCents > 0
         && request.resource.data.stock is int
-        && request.resource.data.imagePath is string
-        && request.resource.data.imagePath.size() > 0
+        && optionalImagePath(request.resource.data)
         && untouched(['createdAt', 'createdBySellerId', 'createdBySellerName']);
 
       // el vendedor edita lo no sensible: nunca el precio, el código ni el
@@ -110,7 +116,7 @@ service cloud.firestore {
                       'isActive', 'createdAt',
                       'createdBySellerId', 'createdBySellerName'])
         && request.resource.data.stock is int
-        && request.resource.data.imagePath.size() > 0;
+        && optionalImagePath(request.resource.data);
 
       allow delete: if false;               // soft delete con isActive
     }

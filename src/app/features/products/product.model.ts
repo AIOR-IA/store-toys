@@ -29,8 +29,9 @@ export interface Product {
     codeSource: CodeSource;
     barcodeFormat: BarcodeFormat;
 
-    imageUrl: string; // obligatoria
-    imagePath: string;
+    /** Opcional (ajuste posterior a la Fase 3): el vendedor puede cargarla luego, editando. */
+    imageUrl?: string;
+    imagePath?: string;
 
     isActive: boolean; // soft delete
 

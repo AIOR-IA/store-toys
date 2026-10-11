@@ -218,8 +218,13 @@ describe('ProductLabelsSheetComponent — paginación y selección global', () =
     });
 
     describe('visor de imagen', () => {
-        const thumb = (i: number) =>
-            (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLImageElement>('img.w-8')[i];
+        // Un `app-product-image` por fila siempre (imagen real o placeholder):
+        // a diferencia de `img.w-8`, la posición no se desalinea cuando una
+        // fila sin imagen deja de ser un `<img>`.
+        const thumb = (i: number) => {
+            const host = (fixture.nativeElement as HTMLElement).querySelectorAll('app-product-image')[i];
+            return (host.querySelector('img') ?? host.querySelector('div')) as HTMLElement;
+        };
 
         it('click en la miniatura abre el visor con esa imagen, sin tocar checkbox ni cantidad', () => {
             component.toggleSelected(product(1), true);
@@ -246,6 +251,17 @@ describe('ProductLabelsSheetComponent — paginación y selección global', () =
             thumb(1).click(); // producto 2
             fixture.detectChanges();
             expect(component.viewerSrc()).toBeNull();
+        });
+
+        it('N) producto sin imagen: placeholder con icono, sin <img>, sin romper la fila', () => {
+            const hosts = (fixture.nativeElement as HTMLElement).querySelectorAll('app-product-image');
+            expect(hosts.length).toBe(10); // una por fila, también en la que no tiene foto
+
+            const placeholder = hosts[1]; // producto 2
+            expect(placeholder.querySelector('img')).toBeNull();
+            expect(placeholder.querySelector('i.fa-image')).not.toBeNull();
+
+            expect(hosts[0].querySelector('img')).not.toBeNull(); // producto 1 sí tiene foto
         });
 
         it('cerrar el visor conserva selección, cantidad y página', async () => {

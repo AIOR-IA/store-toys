@@ -15,3 +15,4 @@ export * from './view-more/view-more.component';
 export * from './barcode-svg/barcode-svg.component';
 export * from './image-viewer/image-viewer.component';
 export * from './camera-capture-dialog/camera-capture-dialog.component';
+export * from './product-image/product-image.component';

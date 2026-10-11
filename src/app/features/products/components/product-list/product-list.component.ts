@@ -8,6 +8,7 @@ import { TableModule } from 'primeng/table';
 import { TagModule } from 'primeng/tag';
 import { TooltipModule } from 'primeng/tooltip';
 import { ImageViewerComponent } from '@shared/components/ui/image-viewer/image-viewer.component';
+import { ProductImageComponent } from '@shared/components/ui/product-image/product-image.component';
 import {
     CardsPaginatorComponent,
     FilterTabComponent,
@@ -64,6 +65,7 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 3;
         ProductLabelDialogComponent,
         ProductChangeCodeDialogComponent,
         ImageViewerComponent,
+        ProductImageComponent,
     ],
     templateUrl: './product-list.component.html',
 })

@@ -12,6 +12,7 @@ import {
     TitleBarComponent,
 } from '@shared/components/ui';
 import { ImageViewerComponent } from '@shared/components/ui/image-viewer/image-viewer.component';
+import { ProductImageComponent } from '@shared/components/ui/product-image/product-image.component';
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, PageSize } from '@core/data';
 import { ToastService } from '@core/services';
 import { BarcodeFormat, toJsBarcodeFormat } from '@core/utils';
@@ -71,6 +72,7 @@ export function sanitizeQuantity(value: number | null): number {
         ItemsNotFoundComponent,
         CardsPaginatorComponent,
         ImageViewerComponent,
+        ProductImageComponent,
         ProductNamePipe,
     ],
     templateUrl: './product-labels-sheet.component.html',

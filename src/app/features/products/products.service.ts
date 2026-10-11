@@ -185,23 +185,25 @@ export class ProductsService {
 
     /**
      * Crea el producto y su índice de código en una sola transacción (plan
-     * §14.1). La imagen se sube ANTES de la transacción porque `imagePath`
-     * es obligatorio en la Rule de creación; si la transacción falla —código
-     * duplicado por una carrera real con otra pestaña, casi siempre— la
-     * imagen recién subida se borra: es un archivo que esta misma llamada
-     * acaba de crear, no el tipo de resto huérfano preexistente que exige
-     * avisar antes de borrar.
+     * §14.1). La imagen es OPCIONAL (ajuste posterior a la Fase 3, a pedido
+     * del cliente): `image` es `null` cuando el vendedor no cargó ninguna
+     * foto, y en ese caso no se toca Storage en absoluto, ni se escribe
+     * `imageUrl`/`imagePath` en el documento. Si sí hay imagen, se sube ANTES
+     * de la transacción; si la transacción falla —código duplicado por una
+     * carrera real con otra pestaña, casi siempre— la imagen recién subida se
+     * borra: es un archivo que esta misma llamada acaba de crear, no el tipo
+     * de resto huérfano preexistente que exige avisar antes de borrar.
      */
     createProduct(
         input: CreateProductInput,
-        image: Blob,
+        image: Blob | null,
     ): Observable<{ productId: string }> {
         return from(this.doCreateProduct(input, image));
     }
 
     private async doCreateProduct(
         input: CreateProductInput,
-        image: Blob,
+        image: Blob | null,
     ): Promise<{ productId: string }> {
         const session = this.sessionService.session();
         if (session.status !== 'active') {
@@ -221,11 +223,9 @@ export class ProductsService {
 
         const productsRef = collection(this.firestore, 'products');
         const productRef = doc(productsRef);
-        const imagePath = `products/${productRef.id}/${Date.now()}.webp`;
-        const imageRef = storageRef(this.storage, imagePath);
-
-        await uploadBytes(imageRef, image, { contentType: 'image/webp' });
-        const imageUrl = await getDownloadURL(imageRef);
+        const uploaded = image
+            ? await this.uploadProductImage(productRef.id, image)
+            : null;
 
         try {
             await runTransaction(this.firestore, async (tx) => {
@@ -243,8 +243,9 @@ export class ProductsService {
                     code: normalizedCode,
                     codeSource: input.codeSource,
                     barcodeFormat: detectBarcodeFormat(normalizedCode),
-                    imageUrl,
-                    imagePath,
+                    ...(uploaded
+                        ? { imageUrl: uploaded.imageUrl, imagePath: uploaded.imagePath }
+                        : {}),
                     isActive: true,
                     nameLower: normalize(input.name),
                     createdBySellerId: session.uid,
@@ -260,11 +261,27 @@ export class ProductsService {
                 });
             });
         } catch (error) {
-            await deleteObject(imageRef).catch(() => undefined);
+            if (uploaded) {
+                await deleteObject(storageRef(this.storage, uploaded.imagePath)).catch(
+                    () => undefined,
+                );
+            }
             throw error;
         }
 
         return { productId: productRef.id };
+    }
+
+    /** Sube la imagen de un producto a `products/{productId}/{timestamp}.webp` y devuelve su URL. */
+    private async uploadProductImage(
+        productId: string,
+        image: Blob,
+    ): Promise<{ imageUrl: string; imagePath: string }> {
+        const imagePath = `products/${productId}/${Date.now()}.webp`;
+        const imageRef = storageRef(this.storage, imagePath);
+        await uploadBytes(imageRef, image, { contentType: 'image/webp' });
+        const imageUrl = await getDownloadURL(imageRef);
+        return { imageUrl, imagePath };
     }
 
     /**
@@ -350,16 +367,18 @@ export class ProductsService {
         });
     }
 
-    /** Sube y comprime-ya la imagen de un producto EXISTENTE, y borra la anterior (plan §9.3). */
+    /**
+     * Sube y comprime-ya la imagen de un producto EXISTENTE, y borra la
+     * anterior si había una (plan §9.3) — un producto creado sin foto no
+     * tiene `previousImagePath` todavía, y esta es la única vía para que la
+     * consiga por primera vez.
+     */
     async replaceImage(
         productId: string,
         image: Blob,
         previousImagePath: string | undefined,
     ): Promise<{ imageUrl: string; imagePath: string }> {
-        const imagePath = `products/${productId}/${Date.now()}.webp`;
-        const imageRef = storageRef(this.storage, imagePath);
-        await uploadBytes(imageRef, image, { contentType: 'image/webp' });
-        const imageUrl = await getDownloadURL(imageRef);
+        const uploaded = await this.uploadProductImage(productId, image);
 
         // Primero la nueva, después la anterior: si el borrado fallara, el
         // producto se queda con una imagen de más en Storage, nunca sin
@@ -370,6 +389,6 @@ export class ProductsService {
             );
         }
 
-        return { imageUrl, imagePath };
+        return uploaded;
     }
 }

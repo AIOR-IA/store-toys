@@ -23,6 +23,7 @@ import {
 import {
     CameraCaptureDialogComponent,
     ImageViewerComponent,
+    ProductImageComponent,
 } from '@shared/components/ui';
 import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
@@ -76,6 +77,7 @@ function integerValidator(control: AbstractControl): ValidationErrors | null {
         ProductCodePickerComponent,
         ImageViewerComponent,
         CameraCaptureDialogComponent,
+        ProductImageComponent,
     ],
     templateUrl: './product-form-dialog.component.html',
 })
@@ -210,10 +212,6 @@ export class ProductFormDialogComponent implements OnDestroy {
         }
 
         const target = this.product();
-        if (!target && !this.pendingImage()) {
-            this.toast.error('app.products.messages.imageRequired');
-            return;
-        }
         if (!target && !this.resolvedCode()) {
             this.toast.error('app.products.messages.codeRequired');
             return;
@@ -234,7 +232,7 @@ export class ProductFormDialogComponent implements OnDestroy {
                         code: code.code,
                         codeSource: code.codeSource,
                     },
-                    this.pendingImage() as Blob,
+                    this.pendingImage(), // null si no cargó foto — createProduct ya no la exige
                 )
                 .subscribe({
                     next: () => this.onCreateSuccess(),

@@ -1,0 +1,23 @@
+@if (hasImage()) {
+<img
+    [src]="src()"
+    alt=""
+    [class]="sizeClass() + ' shrink-0 object-cover rounded cursor-zoom-in hover:opacity-80 transition-opacity'"
+    (click)="onClick()"
+/>
+} @else {
+<div
+    [class]="
+        sizeClass() +
+        ' shrink-0 flex flex-col items-center justify-center gap-0.5 rounded bg-gray-100 text-gray-400 border border-gray-200'
+    "
+    [title]="'app.products.form.noImage' | translate"
+>
+    <i class="fas fa-image text-sm" aria-hidden="true"></i>
+    @if (showLabel()) {
+    <span class="text-[9px] leading-none text-center">{{
+        "app.products.form.noImage" | translate
+    }}</span>
+    }
+</div>
+}
