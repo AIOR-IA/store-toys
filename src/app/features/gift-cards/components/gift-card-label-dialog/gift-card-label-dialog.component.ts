@@ -1,6 +1,6 @@
-import { CommonModule, CurrencyPipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { Component, computed, inject, input, output } from '@angular/core';
-import { TranslateModule, TranslateService } from '@ngx-translate/core';
+import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { BarcodeSvgComponent } from '@shared/components/ui';
@@ -8,7 +8,6 @@ import { LABEL_SIZE_MM } from '@shared/constants';
 import { MoneyPipe } from '@shared/pipes';
 import { printBarcodeLabel } from '@shared/utils';
 import { ToastService } from '@core/services';
-import { fromCents } from '@core/utils';
 
 export interface GiftCardLabelTarget {
     code: string;
@@ -29,6 +28,15 @@ export interface GiftCardLabelTarget {
  * imprenta o lo genera el propio sistema, nunca un estándar comercial
  * externo — prompt §12), así que el formato es SIEMPRE `CODE128`: a
  * diferencia de Productos, no hace falta `detectBarcodeFormat`.
+ *
+ * AJUSTE POSTERIOR (identidad ≠ monto, prompt §33, §52): la etiqueta FÍSICA
+ * ya NO imprime el monto — antes llevaba `secondaryText` con el importe
+ * (`printBarcodeLabel` lo escribe literalmente en el papel), pero una
+ * tarjeta reutilizable puede venderse por Bs 100 hoy y por Bs 500 el mes que
+ * viene: fijarlo en el plástico quedaría mal en cuanto el monto cambie. El
+ * monto sigue visible en ESTE diálogo (antes de imprimir, informativo
+ * nada más) para que el admin confirme que está imprimiendo la tarjeta
+ * correcta; solo el código (y su barcode) llegan al papel.
  */
 @Component({
     selector: 'app-gift-card-label-dialog',
@@ -38,8 +46,6 @@ export interface GiftCardLabelTarget {
 })
 export class GiftCardLabelDialogComponent {
     private readonly toast = inject(ToastService);
-    private readonly translate = inject(TranslateService);
-    private readonly currencyPipe = inject(CurrencyPipe);
 
     target = input<GiftCardLabelTarget | null>(null);
     closed = output<void>();
@@ -55,20 +61,9 @@ export class GiftCardLabelDialogComponent {
         const target = this.target();
         if (!target) return;
 
-        // Mismo formato que `MoneyPipe` (plan §17.1), pero sin instanciarlo
-        // directamente: un `@Pipe` sin `providedIn` solo se resuelve vía DI
-        // cuando Angular lo instancia para un binding de plantilla — aquí
-        // hace falta el texto ANTES de abrir la ventana de impresión, así
-        // que se replica con el mismo `CurrencyPipe` que `MoneyPipe` usa por
-        // debajo (provisto en la raíz, `app.config.ts`).
-        const amountLabel = this.translate.instant('app.giftCards.labels.amountText', {
-            amount: this.currencyPipe.transform(fromCents(target.amountCents), 'BOB', 'Bs', '1.2-2') ?? '',
-        });
-
         const ok = await printBarcodeLabel({
             code: target.code,
             primaryText: target.code,
-            secondaryText: amountLabel,
         });
         if (!ok) {
             this.toast.error('app.common.errors.general');

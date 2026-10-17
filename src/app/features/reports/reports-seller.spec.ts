@@ -59,6 +59,11 @@ describe('Reportes por vendedor — fórmulas', () => {
         amountCents: amount,
         payments: payments.map(([method, amountCents]) => ({ method, amountCents })),
     });
+    const replacementIssue = (amount: number) => ({
+        amountCents: amount,
+        payments: [],
+        origin: 'replacement' as const,
+    });
     const sales = (o: Partial<SalesAggregateTotals>): SalesAggregateTotals => ({
         salesCount: 0,
         totalCents: 0,
@@ -77,6 +82,19 @@ describe('Reportes por vendedor — fórmulas', () => {
             qrCents: bs(400),
         });
         expect(sumIssues([])).toEqual(noIssues);
+    });
+
+    it('sumIssues excluye ciclos origin: "replacement" (no es una venta, no es ingreso nuevo)', () => {
+        // Un reemplazo abre un ciclo real (para poder canjearse después),
+        // pero nunca debe sumarse como "Gift Card vendida" de ningún
+        // vendedor (ajuste posterior, plan §16.13, prompt §28).
+        expect(sumIssues([issue(bs(1000), ['cash', bs(1000)]), replacementIssue(bs(500))])).toEqual({
+            issuesCount: 1,
+            nominalCents: bs(1000),
+            cashCents: bs(1000),
+            qrCents: 0,
+        });
+        expect(sumIssues([replacementIssue(bs(500))])).toEqual(noIssues);
     });
 
     it('mercadería 500 efectivo + Gift Card 1.000 efectivo + diferencia de canje 80 → efectivo recibido 1.580', () => {

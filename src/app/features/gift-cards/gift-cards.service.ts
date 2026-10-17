@@ -126,9 +126,9 @@ export class GiftCardsService {
 
     /**
      * `registerGiftCard` en modo `'generated'` (Function, admin — ajuste
-     * posterior a la Fase 6): el servidor decide el código
-     * (`GC{denominación}-{secuencia}`), atómico dentro de la misma
-     * transacción que crea la tarjeta. No toca `registerGiftCard(code, ...)`
+     * posterior a la Fase 6): el servidor decide el código (`GC-{secuencia
+     * global}`, independiente del monto — plan §16.13), atómico dentro de la
+     * misma transacción que crea la tarjeta. No toca `registerGiftCard(code, ...)`
      * de arriba — ese sigue siendo exactamente el modo manual de siempre.
      */
     generateGiftCard(amountCents: number): Observable<{ cardCode: string }> {
@@ -192,6 +192,38 @@ export class GiftCardsService {
             this.functions,
             'cancelGiftCard',
         );
+        return from(callable({ code, reason })).pipe(map((r) => r.data));
+    }
+
+    /**
+     * `updateGiftCardAmount` (Function, solo admin — ajuste posterior,
+     * identidad ≠ monto): cambia el monto configurado, solo mientras la
+     * tarjeta está `AVAILABLE`.
+     */
+    updateGiftCardAmount(
+        code: string,
+        amountCents: number,
+    ): Observable<{ cardCode: string; amountCents: number }> {
+        const callable = httpsCallable<
+            { code: string; amountCents: number },
+            { cardCode: string; amountCents: number }
+        >(this.functions, 'updateGiftCardAmount');
+        return from(callable({ code, amountCents })).pipe(map((r) => r.data));
+    }
+
+    /**
+     * `replaceGiftCard` (Function, solo admin — ajuste posterior): reemplaza
+     * el plástico de una tarjeta dañada/perdida, transfiriendo su valor ya
+     * pagado a un código nuevo generado por el sistema, sin volver a cobrar.
+     */
+    replaceGiftCard(
+        code: string,
+        reason?: string,
+    ): Observable<{ cardCode: string; newCardCode: string; amountCents: number }> {
+        const callable = httpsCallable<
+            { code: string; reason?: string },
+            { cardCode: string; newCardCode: string; amountCents: number }
+        >(this.functions, 'replaceGiftCard');
         return from(callable({ code, reason })).pipe(map((r) => r.data));
     }
 }

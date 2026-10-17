@@ -12,7 +12,9 @@
         <div class="bg-white p-3 rounded border border-gray-200">
             <app-barcode-svg [code]="target()!.code"></app-barcode-svg>
         </div>
-        <p class="text-sm font-medium text-center">{{ target()!.amountCents | money }}</p>
+        <p class="text-xs text-gray-500 text-center">
+            {{ "app.giftCards.labels.amountNotPrinted" | translate: { amount: (target()!.amountCents | money) } }}
+        </p>
         <p class="text-xs text-gray-500">
             {{ labelSize.width }}×{{ labelSize.height }} mm
         </p>

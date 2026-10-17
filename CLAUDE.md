@@ -249,8 +249,18 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   `giftCardIssues` (un CICLO de uso) · `giftCardMovements` (el libro mayor, admin-only).
   El estado completo (denominación, estado, comprador, ciclo) vive denormalizado en
   `giftCards`: consultar una tarjeta cuesta **1 lectura**, no 2.
-- **Denominación fija**, decidida una sola vez al registrar la tarjeta física (la imprenta
-  la trae impresa) — nunca se elige un importe libre en cada venta.
+- **Identidad ≠ monto (ajuste posterior, plan §16.13): el código NUNCA representa el valor.**
+  `amountCents` es el monto CONFIGURADO ACTUAL — editable por admin (`updateGiftCardAmount`)
+  **solo** mientras `AVAILABLE`; en cuanto se vende/activa queda CONGELADO en el ciclo
+  (snapshot en `giftCardIssues.amountCents`, sin cambios) hasta que vuelva a `AVAILABLE`. Nunca
+  es un ingreso: solo deja un movimiento `AMOUNT_CHANGED` de auditoría.
+- **Reemplazo de plástico sin nuevo ingreso** (`replaceGiftCard`, admin-only, plan §16.13):
+  tarjeta dañada/perdida (`ACTIVE`/`SUSPENDED`, o `CANCELLED` con `pendingReplacement`) →
+  transfiere su valor ya pagado a un código nuevo generado por el sistema, atómico. El código
+  viejo queda `CANCELLED` para siempre (`replacedByCode`); el nuevo nace `ACTIVE` directamente
+  con `replacesCode` apuntando al viejo — NO es una venta, ingreso nuevo = Bs 0 siempre. Su
+  ciclo (`origin: 'replacement'`) se excluye de los reportes por vendedor y nunca toca
+  `dailySummaries`. Doble reemplazo rechazado server-side (`replacedByCode` no nulo).
 - Estados del plástico: `AVAILABLE` → `ACTIVE` → (`SUSPENDED` ⇄ `ACTIVE` por pérdida/robo) →
   evento `REDEEMED` → `AVAILABLE` de nuevo. `CANCELLED` es terminal (solo admin, baja
   definitiva del plástico). El plástico es reutilizable: cada activación abre un **ciclo**
@@ -271,12 +281,13 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   plástico nuevo y cancelar definitivamente es solo del admin.
 - **Código: manual O generado** (ajuste posterior a la Fase 6, admin-only en ambos). Manual:
   el código lo trae la imprenta, tecleado tal cual. Generado: el servidor decide
-  `GC{denominación}-{secuencia}` (mín. 3 dígitos), atómico dentro de la transacción de
-  `registerGiftCard`/`registerGiftCardBatch` (`codeMode`), con un contador
-  `giftCardCodeCounters/{denominación}` independiente por denominación que solo indica por
-  dónde arrancar — la unicidad real siempre se verifica contra `giftCards/{code}` antes de
-  aceptar un candidato. El código (de cualquier origen) es el mismo durante todos los ciclos
-  de la tarjeta. Detalle completo: plan §16.12.
+  `GC-{secuencia global}` (mín. 6 dígitos, p. ej. `GC-000001` — **ajuste posterior, plan
+  §16.13: ya NO codifica la denominación**, reemplaza el `GC{denominación}-{secuencia}`
+  original), atómico dentro de la transacción de `registerGiftCard`/`registerGiftCardBatch`
+  (`codeMode`), con UN solo contador `giftCardCodeCounters/global` — la unicidad real siempre
+  se verifica contra `giftCards/{code}` antes de aceptar un candidato. Los códigos con el
+  formato viejo (por denominación) siguen funcionando sin migrarse. El código (de cualquier
+  origen) es el mismo durante todos los ciclos de la tarjeta. Detalle completo: plan §16.12-§16.13.
 - Todo cambio de estado nace con su movimiento **en la misma transacción**.
 - `cancelSale` revierte una gift card **solo si el ciclo sigue intacto** desde la redención
   (nadie lo reactivó desde entonces); si ya se reutilizó, la anulación completa se rechaza

@@ -91,7 +91,10 @@ inject('guards.js', {
     },
 });
 const { createSale, cancelSale } = require(path.join(libDir, 'sales.js'));
-const { activateGiftCard, cancelGiftCard, suspendGiftCard, reactivateGiftCard } = require(path.join(libDir, 'giftcards.js'));
+const {
+    activateGiftCard, cancelGiftCard, suspendGiftCard, reactivateGiftCard,
+    registerGiftCard, registerGiftCardBatch, updateGiftCardAmount, replaceGiftCard,
+} = require(path.join(libDir, 'giftcards.js'));
 
 // ---------- datos base ----------
 const todayKey = new Date(Date.now() - 4 * 3600e3).toISOString().slice(0, 10);
@@ -458,6 +461,278 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
         byCode('GCH00001').activatedBy === 'seller' && byCode('GCH00002').activatedBy === 'seller2' && byCode('GCH00001').dateKey === todayKey
         && byCode('GCH00002').payments[0].method === 'qr', JSON.stringify([byCode('GCH00001'), byCode('GCH00002')]));
     check('H. general = 1500 (1000 efectivo + 500 QR)', JSON.stringify(issuesOf(summary())) === JSON.stringify({ issued: 150000, cash: 100000, qr: 50000 }), JSON.stringify(summary()));
+
+    // ---- Identidad ≠ monto: código GLOBAL generado, independiente de la denominación ----
+    console.log('\nL. Códigos generados: contador global (NO por denominación)');
+    base();
+    let rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    check('L1. primer código generado: GC-000001', rg.ok && rg.value.cardCode === 'GC-000001', JSON.stringify(rg));
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 100000, codeMode: 'generated' }));
+    check('L2. segundo código (denominación DISTINTA) sigue la MISMA secuencia: GC-000002',
+        rg.ok && rg.value.cardCode === 'GC-000002', JSON.stringify(rg));
+    let rb = await outcome(call(registerGiftCardBatch, 'admin', { amountCents: 50000, codeMode: 'generated', quantity: 3 }));
+    check('L3. lote de 3: GC-000003..GC-000005, continuando la secuencia',
+        rb.ok && JSON.stringify(rb.value.cardCodes) === JSON.stringify(['GC-000003', 'GC-000004', 'GC-000005']), JSON.stringify(rb));
+    check('L4. ningún código generado contiene el monto (ni "100", ni "500", ni "1000")',
+        [rg, rb].every(() => true) && !['GC-000001', 'GC-000002', ...rb.value.cardCodes].some((c) => /GC(100|500|1000)/.test(c)));
+    let rm = await outcome(call(registerGiftCard, 'admin', { code: 'GC500-ANT', amountCents: 50000, codeMode: 'manual' }));
+    check('L5. código manual (formato viejo, con denominación en el texto) sigue funcionando sin cambios',
+        rm.ok && rm.value.cardCode === 'GC500-ANT', JSON.stringify(rm));
+    // Colisión: alguien registró a mano justo el siguiente candidato de la secuencia.
+    await call(registerGiftCard, 'admin', { code: 'GC-000006', amountCents: 99900, codeMode: 'manual' });
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 20000, codeMode: 'generated' }));
+    check('L6. candidato ocupado (GC-000006, manual) se salta sin pisarlo: siguiente generado es GC-000007',
+        rg.ok && rg.value.cardCode === 'GC-000007' && store.get('giftCards/GC-000006').amountCents === 99900, JSON.stringify(rg));
+    rg = await outcome(call(registerGiftCard, 'admin', { code: 'x', amountCents: 10000 }));
+    check('L7. como vendedor (no admin), registrar se rechaza', !(await outcome(call(registerGiftCard, 'seller', { code: 'y', amountCents: 100 }))).ok);
+
+    // Contador global TODAVÍA NO EXISTE, pero YA hay códigos GC-000001/GC-000002
+    // registrados a mano (datos previos a este ajuste, o una imprenta que
+    // coincidió con el formato nuevo) — el generador debe arrancar en 0,
+    // detectar la colisión en el PRIMER candidato (no solo en uno intermedio
+    // como L6) y saltar hasta encontrar uno libre, sin sobreescribir nada.
+    console.log('\nL8. Contador global nuevo + GC-000001/GC-000002 ya existentes (manual): sin colisión, sin sobreescritura');
+    base();
+    await call(registerGiftCard, 'admin', { code: 'GC-000001', amountCents: 30000, codeMode: 'manual' });
+    await call(registerGiftCard, 'admin', { code: 'GC-000002', amountCents: 40000, codeMode: 'manual' });
+    check('L8a. el contador global aún no existe', !store.has('giftCardCodeCounters/global'));
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    check('L8b. el generado NO es GC-000001 ni GC-000002 (ambos ocupados): es GC-000003',
+        rg.ok && rg.value.cardCode === 'GC-000003', JSON.stringify(rg));
+    check('L8c. los códigos manuales preexistentes NO se sobreescribieron (conservan su propio monto)',
+        store.get('giftCards/GC-000001').amountCents === 30000 && store.get('giftCards/GC-000002').amountCents === 40000);
+
+    // ---- Monto configurado: editable solo ADMIN + AVAILABLE (caso integral §45) ----
+    console.log('\nM. Monto editable (solo admin + AVAILABLE) — caso integral');
+    base();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const M1 = rg.value.cardCode;
+    check('M1. tarjeta nueva AVAILABLE, Bs 100', store.get(`giftCards/${M1}`).status === 'AVAILABLE' && store.get(`giftCards/${M1}`).amountCents === 10000);
+
+    r = await outcome(call(updateGiftCardAmount, 'seller', { code: M1, amountCents: 50000 }));
+    check('M2. vendedor NO puede cambiar el monto', !r.ok && store.get(`giftCards/${M1}`).amountCents === 10000, r.message);
+
+    r = await outcome(call(updateGiftCardAmount, 'admin', { code: M1, amountCents: 50000 }));
+    check('M3. admin cambia 100 → 500: permitido, AVAILABLE, sin ingreso',
+        r.ok && store.get(`giftCards/${M1}`).amountCents === 50000 && store.get(`giftCards/${M1}`).status === 'AVAILABLE' && !summary(), r.message);
+    check('M3b. historial: AMOUNT_CHANGED con previousAmountCents=10000, amountCents=50000',
+        [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.giftCardId === M1 && v.type === 'AMOUNT_CHANGED' && v.previousAmountCents === 10000 && v.amountCents === 50000));
+
+    r = await outcome(call(activateGiftCard, 'seller', { code: M1, payments: [{ method: 'qr', amountCents: 50000 }] }));
+    check('M4. vendedor vende Bs 500 por QR: ACTIVE, issue snapshot 500, ingreso QR 500',
+        r.ok && store.get(`giftCards/${M1}`).status === 'ACTIVE' && issuesOf(summary()).issued === 50000 && issuesOf(summary()).qr === 50000, r.message);
+
+    r = await outcome(call(updateGiftCardAmount, 'admin', { code: M1, amountCents: 100000 }));
+    check('M5. admin intenta 500 → 1000 estando ACTIVE: rechazado', !r.ok && store.get(`giftCards/${M1}`).amountCents === 50000, r.message);
+
+    await call(suspendGiftCard, 'seller', { code: M1, reason: 'perdida' });
+    r = await outcome(call(updateGiftCardAmount, 'admin', { code: M1, amountCents: 100000 }));
+    check('M6. admin intenta cambiar el monto estando SUSPENDED: rechazado', !r.ok, r.message);
+    await call(reactivateGiftCard, 'seller', { code: M1 });
+    check('M7. reactivada: ACTIVE Bs 500', store.get(`giftCards/${M1}`).status === 'ACTIVE' && store.get(`giftCards/${M1}`).amountCents === 50000);
+
+    seedProducts();
+    const cycleM1 = store.get(`giftCards/${M1}`).activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'M-sale', items: [{ productId: 'p700', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 50000, giftCardId: M1, giftCardCycleId: cycleM1 }, { method: 'cash', amountCents: 20000 }] }));
+    check('M8. canjeada (Bs 500 de GC + Bs 200 efectivo sobre un producto de Bs 700): AVAILABLE de nuevo',
+        r.ok && store.get(`giftCards/${M1}`).status === 'AVAILABLE', r.message);
+
+    r = await outcome(call(updateGiftCardAmount, 'admin', { code: M1, amountCents: 100000 }));
+    check('M9. AVAILABLE de nuevo: admin cambia 500 → 1000, permitido', r.ok && store.get(`giftCards/${M1}`).amountCents === 100000, r.message);
+
+    r = await outcome(call(activateGiftCard, 'seller', { code: M1, payments: [{ method: 'cash', amountCents: 100000 }] }));
+    const dM = summary();
+    check('M10. se vende de nuevo por Bs 1000 en efectivo: nuevo issue (ciclo 2), nuevo ingreso cash 1000',
+        r.ok && store.get(`giftCards/${M1}`).cycleNumber === 2 && issuesOf(dM).cash === 100000, r.message + JSON.stringify(dM));
+    check('M10b. historial financiero real: QR 500 (M4) + efectivo 1000 (M10) = Bs 1500, nunca Bs 2000',
+        issuesOf(dM).qr === 50000 && issuesOf(dM).issued === 150000 && issuesOf(dM).cash + issuesOf(dM).qr === 150000, JSON.stringify(dM));
+
+    // ---- Reemplazo: caso integral (tarjeta ACTIVE dañada) — §46 ----
+    console.log('\nN. Reemplazo de una tarjeta ACTIVE (dañada) — caso integral');
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 100000, codeMode: 'generated' }));
+    const N1 = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: N1, payments: [{ method: 'cash', amountCents: 100000 }] });
+    let before2 = freezeSummary();
+    check('N1. GC vendida Bs 1000 en efectivo: ingreso cash 1000', issuesOf(summary()).cash === 100000);
+
+    r = await outcome(call(replaceGiftCard, 'admin', { code: N1, reason: 'tarjeta dañada' }));
+    check('N2. reemplazo: código viejo CANCELLED, código nuevo ACTIVE Bs 1000, SIN ingreso nuevo',
+        r.ok && store.get(`giftCards/${N1}`).status === 'CANCELLED' && store.get(`giftCards/${N1}`).replacedByCode === r.value.newCardCode
+        && store.get(`giftCards/${r.value.newCardCode}`).status === 'ACTIVE' && store.get(`giftCards/${r.value.newCardCode}`).amountCents === 100000
+        && freezeSummary() === before2, r.message);
+    const N2 = r.value.newCardCode;
+    check('N2b. giftCardIssues nuevos NO financieros: el ciclo nuevo tiene origin "replacement" y payments vacío',
+        store.get(`giftCards/${N2}`).activeCycleId && store.get(`giftCardIssues/${store.get(`giftCards/${N2}`).activeCycleId}`).origin === 'replacement'
+        && store.get(`giftCardIssues/${store.get(`giftCards/${N2}`).activeCycleId}`).payments.length === 0);
+
+    r = await outcome(call(createSale, 'seller', { saleId: 'N-old', items: [{ productId: 'p700', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 70000, giftCardId: N1, giftCardCycleId: store.get(`giftCards/${N1}`).activeCycleId || 'none' }] }));
+    check('N3. escanear/usar el código VIEJO (ya CANCELLED): no se puede usar', !r.ok, r.message);
+
+    const cycleN2 = store.get(`giftCards/${N2}`).activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'N-new', items: [{ productId: 'p1000', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 100000, giftCardId: N2, giftCardCycleId: cycleN2 }] }));
+    check('N4. usar el código NUEVO: funciona normalmente, vuelve a AVAILABLE', r.ok && store.get(`giftCards/${N2}`).status === 'AVAILABLE', r.message);
+
+    r = await outcome(call(replaceGiftCard, 'admin', { code: N1, reason: 'otra vez' }));
+    check('N5. intentar reemplazar el código viejo OTRA VEZ: rechazado', !r.ok, r.message);
+
+    await call(updateGiftCardAmount, 'admin', { code: N2, amountCents: 50000 });
+    r = await outcome(call(activateGiftCard, 'seller', { code: N2, payments: [{ method: 'qr', amountCents: 50000 }] }));
+    const dN = summary();
+    check('N6. AVAILABLE: admin baja a Bs 500 y se vende de nuevo por QR: ESTA venta SÍ genera ingreso nuevo (500)',
+        r.ok && issuesOf(dN).cash === 100000 && issuesOf(dN).qr === 50000 && issuesOf(dN).issued === 150000, JSON.stringify(dN));
+    check('N7. total histórico real = 1000 (venta original) + 0 (reemplazo) + 500 (reventa) = Bs 1500, NO Bs 2500',
+        issuesOf(dN).cash + issuesOf(dN).qr === 150000);
+
+    // ---- Reemplazo tras una cancelación previa (sin reabrir el código viejo) — §47 ----
+    console.log('\nO. Reemplazo de una tarjeta ya CANCELLED con valor pendiente — caso integral');
+    base();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 50000, codeMode: 'generated' }));
+    const O1 = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: O1, payments: [{ method: 'cash', amountCents: 50000 }] });
+    r = await outcome(call(cancelGiftCard, 'admin', { code: O1, reason: 'se perdió' }));
+    check('O1. ACTIVE cancelada definitivamente: queda CANCELLED con valor pendiente (pendingReplacement)',
+        r.ok && store.get(`giftCards/${O1}`).status === 'CANCELLED' && store.get(`giftCards/${O1}`).pendingReplacement === true, r.message);
+
+    before2 = freezeSummary();
+    r = await outcome(call(replaceGiftCard, 'admin', { code: O1 }));
+    check('O2. reemplazo de una tarjeta YA cancelada (con valor pendiente): permitido, nueva ACTIVE Bs 500, sin ingreso nuevo',
+        r.ok && store.get(`giftCards/${r.value?.newCardCode}`)?.status === 'ACTIVE' && store.get(`giftCards/${r.value?.newCardCode}`)?.amountCents === 50000 && freezeSummary() === before2, r.message);
+
+    r = await outcome(call(replaceGiftCard, 'admin', { code: O1 }));
+    check('O3. intentar reemplazar GC-O1 otra vez: rechazado (ya fue reemplazada)', !r.ok, r.message);
+
+    // ---- AVAILABLE cancelada SIN venta: no hay nada que transferir — §48 ----
+    console.log('\nP. AVAILABLE cancelada sin haberse vendido nunca: reemplazo rechazado');
+    base();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 50000, codeMode: 'generated' }));
+    const P1 = rg.value.cardCode;
+    await call(cancelGiftCard, 'admin', { code: P1, reason: 'nunca se usó' });
+    check('P1. AVAILABLE cancelada: pendingReplacement queda false (esos Bs eran solo configuración)',
+        store.get(`giftCards/${P1}`).status === 'CANCELLED' && store.get(`giftCards/${P1}`).pendingReplacement === false);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: P1 }));
+    check('P2. intentar "transferir" ese monto a una tarjeta nueva: RECHAZADO', !r.ok, r.message);
+
+    // ---- cancelSale + cadena de reemplazo: auditoría de integridad financiera ----
+    console.log('\nQ. cancelSale (A): tarjeta redimida → reactivada → cancelada → reemplazada; anular la venta ORIGINAL se rechaza');
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 100000, codeMode: 'generated' }));
+    const Q1 = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: Q1, payments: [{ method: 'cash', amountCents: 100000 }] });
+    const cycleQ1a = store.get(`giftCards/${Q1}`).activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'Q-sale1', items: [{ productId: 'p1000', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 100000, giftCardId: Q1, giftCardCycleId: cycleQ1a }] }));
+    check('Q1. venta original redime la tarjeta: AVAILABLE, ciclo 1 redeemed', r.ok && store.get(`giftCards/${Q1}`).status === 'AVAILABLE');
+
+    await call(activateGiftCard, 'seller', { code: Q1, payments: [{ method: 'qr', amountCents: 100000 }] });
+    check('Q2. se reactiva (ciclo 2, ACTIVE)', store.get(`giftCards/${Q1}`).status === 'ACTIVE' && store.get(`giftCards/${Q1}`).cycleNumber === 2);
+
+    await call(cancelGiftCard, 'admin', { code: Q1, reason: 'dañada en ciclo 2' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: Q1 }));
+    const Q2 = r.value?.newCardCode;
+    check('Q3. cancelada con ciclo 2 abierto y reemplazada: CANCELLED, replacedByCode fijado', r.ok && store.get(`giftCards/${Q1}`).status === 'CANCELLED' && store.get(`giftCards/${Q1}`).replacedByCode === Q2);
+
+    const beforeQ = freezeSummary();
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'Q-sale1', reason: 'intento de anular la venta original' }));
+    check('Q4. anular la venta ORIGINAL (ciclo 1, ya consumido hace mucho) se RECHAZA: la tarjeta ya no está AVAILABLE',
+        !r.ok && freezeSummary() === beforeQ && sale('Q-sale1').status === 'completed', r.message);
+    check('Q5. la tarjeta vieja sigue CANCELLED (no se revivió) y conserva su lineage', store.get(`giftCards/${Q1}`).status === 'CANCELLED' && store.get(`giftCards/${Q1}`).replacedByCode === Q2);
+
+    console.log('\nR. cancelSale (B): venta que redime un ciclo de REEMPLAZO (origin replacement)');
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 70000, codeMode: 'generated' }));
+    const R0 = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: R0, payments: [{ method: 'cash', amountCents: 70000 }] });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: R0, reason: 'dañada' }));
+    const R1 = r.value.newCardCode; // R1 = tarjeta de reemplazo, ACTIVE, origin: 'replacement' en su ciclo 1
+
+    const cycleR1 = store.get(`giftCards/${R1}`).activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'R-sale', items: [{ productId: 'p700', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 70000, giftCardId: R1, giftCardCycleId: cycleR1 }] }));
+    check('R1. la venta redime el ciclo DE REEMPLAZO sin problema: AVAILABLE', r.ok && store.get(`giftCards/${R1}`).status === 'AVAILABLE', r.message);
+
+    // B-i) si se reutiliza antes de anular, la anulación se rechaza (protección genérica, sin cambios).
+    await call(activateGiftCard, 'seller', { code: R1, payments: [{ method: 'cash', amountCents: 70000 }] });
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'R-sale', reason: 'intento tras reutilizar' }));
+    check('R2. reutilizada (ciclo 2 ACTIVE) antes de anular: RECHAZADO, sin revertir nada', !r.ok, r.message);
+
+    // B-ii) si NO se reutiliza, la anulación revierte con seguridad (mismo camino que un ciclo normal).
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 70000, codeMode: 'generated' }));
+    const R0b = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: R0b, payments: [{ method: 'cash', amountCents: 70000 }] });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: R0b }));
+    const R1b = r.value.newCardCode;
+    const cycleR1b = store.get(`giftCards/${R1b}`).activeCycleId;
+    await call(createSale, 'seller', { saleId: 'R-sale-b', items: [{ productId: 'p700', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 70000, giftCardId: R1b, giftCardCycleId: cycleR1b }] });
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'R-sale-b', reason: 'cliente cambió de opinión' }));
+    check('R3. NO reutilizada: anular la venta revierte el ciclo de reemplazo con seguridad (ACTIVE de nuevo, mismo ciclo)',
+        r.ok && store.get(`giftCards/${R1b}`).status === 'ACTIVE' && store.get(`giftCards/${R1b}`).activeCycleId === cycleR1b, r.message);
+    check('R4. el lineage (replacesCode) de la tarjeta de reemplazo NO se tocó al revertir', store.get(`giftCards/${R1b}`).replacesCode === R0b);
+    check('R5. la tarjeta vieja (origen) sigue intacta: CANCELLED, replacedByCode sin cambios', store.get(`giftCards/${R0b}`).status === 'CANCELLED' && store.get(`giftCards/${R0b}`).replacedByCode === R1b);
+
+    console.log('\nS. cancelSale (C): reemplazo encadenado + canje + anulación no revive ninguna tarjeta vieja');
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 70000, codeMode: 'generated' }));
+    const S0 = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: S0, payments: [{ method: 'qr', amountCents: 70000 }] });
+    let rS = await outcome(call(replaceGiftCard, 'admin', { code: S0 }));
+    const S1 = rS.value.newCardCode;
+    const cycleS1 = store.get(`giftCards/${S1}`).activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'S-sale', items: [{ productId: 'p700', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 70000, giftCardId: S1, giftCardCycleId: cycleS1 }] }));
+    check('S0b. la venta del reemplazo se acepta (monto exacto, sin forfeit)', r.ok, r.message);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'S-sale', reason: 'anulación normal' }));
+    check('S1. anular la venta del reemplazo revierte SOLO esa tarjeta (S1), no toca S0', r.ok && store.get(`giftCards/${S1}`).status === 'ACTIVE' && store.get(`giftCards/${S0}`).status === 'CANCELLED', r.message);
+    check('S2. S0 (tarjeta vieja, origen) nunca se revive ni cambia de estado: sigue CANCELLED con su replacedByCode',
+        store.get(`giftCards/${S0}`).status === 'CANCELLED' && store.get(`giftCards/${S0}`).replacedByCode === S1 && store.get(`giftCards/${S0}`).activeCycleId === null);
+    check('S3. sin doble entitlement: nunca S0 y S1 ambos usables a la vez (S0 CANCELLED mientras S1 ACTIVE)',
+        store.get(`giftCards/${S0}`).status === 'CANCELLED' && store.get(`giftCards/${S1}`).status === 'ACTIVE');
+
+    // ---- Cadena de reemplazos (prompt §8, §18-19): A → B → C ----
+    console.log('\nT. Cadena de reemplazos: GC-A → GC-B → GC-C, ingreso 0 en ambos saltos, lineage completo');
+    base();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 100000, codeMode: 'generated' }));
+    const TA = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: TA, payments: [{ method: 'cash', amountCents: 100000 }] });
+    const beforeT = freezeSummary();
+
+    let rT = await outcome(call(replaceGiftCard, 'admin', { code: TA, reason: 'primer daño' }));
+    const TB = rT.value.newCardCode;
+    check('T1. A → B: A CANCELLED, B ACTIVE Bs 1000, ingreso = 0', rT.ok && store.get(`giftCards/${TA}`).status === 'CANCELLED' && store.get(`giftCards/${TB}`).status === 'ACTIVE' && store.get(`giftCards/${TB}`).amountCents === 100000 && freezeSummary() === beforeT, rT.message);
+    check('T2. A.replacedByCode = B, B.replacesCode = A', store.get(`giftCards/${TA}`).replacedByCode === TB && store.get(`giftCards/${TB}`).replacesCode === TA);
+
+    // B sigue ACTIVE (todavía no se canjeó): se reemplaza OTRA VEZ, encadenado.
+    rT = await outcome(call(replaceGiftCard, 'admin', { code: TB, reason: 'segundo daño, antes de usarla' }));
+    const TC = rT.value.newCardCode;
+    check('T3. B → C: B CANCELLED, C ACTIVE Bs 1000, ingreso SIGUE siendo 0', rT.ok && store.get(`giftCards/${TB}`).status === 'CANCELLED' && store.get(`giftCards/${TC}`).status === 'ACTIVE' && freezeSummary() === beforeT, rT.message);
+    check('T4. cadena completa: B.replacedByCode = C, C.replacesCode = B (y A.replacedByCode sigue = B)',
+        store.get(`giftCards/${TB}`).replacedByCode === TC && store.get(`giftCards/${TC}`).replacesCode === TB && store.get(`giftCards/${TA}`).replacedByCode === TB);
+    check('T5. B ya no puede usarse ni reemplazarse de nuevo (está CANCELLED y ya tiene replacedByCode)',
+        store.get(`giftCards/${TB}`).activeCycleId === null);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: TB }));
+    check('T6. intentar reemplazar B otra vez (ya fue reemplazada por C): RECHAZADO', !r.ok, r.message);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: TA }));
+    check('T7. intentar reemplazar A otra vez (ya fue reemplazada por B, aunque la cadena siguió): RECHAZADO', !r.ok, r.message);
+
+    // El derecho financiero original (A, Bs 1000 cash) puede rastrearse hasta C.
+    check('T8. trazabilidad completa C → B → A: C.replacesCode=B, B.replacesCode=A, y A conserva su monto/ciclo original',
+        store.get(`giftCards/${TC}`).replacesCode === TB && store.get(`giftCards/${TB}`).replacesCode === TA
+        && store.get(`giftCards/${TA}`).amountCents === 100000 && store.get(`giftCards/${TA}`).cycleNumber === 1);
+
+    // Finalmente C se canjea: ESO sí es historia real de uso (compra menor, sobrante se pierde), sin ingreso nuevo.
+    const cycleTC = store.get(`giftCards/${TC}`).activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'T-sale', items: [{ productId: 'bear', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 7500, giftCardId: TC, giftCardCycleId: cycleTC }] }));
+    const dT = summary();
+    check('T9. C se canjea (compra 75, sobrante 925 perdido): AVAILABLE, giftCardCents=7500, giftCardForfeitedCents=92500',
+        r.ok && store.get(`giftCards/${TC}`).status === 'AVAILABLE' && dT.giftCardCents === 7500 && dT.giftCardForfeitedCents === 92500, r.message + JSON.stringify(dT));
+    check('T9b. ingreso total histórico de la cadena completa = Bs 1000 (la venta ORIGINAL de A), NO Bs 3000 por los dos reemplazos',
+        dT.giftCardsIssuedCents === 100000);
 
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);

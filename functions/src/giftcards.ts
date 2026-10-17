@@ -64,6 +64,24 @@ import { normalizeGiftCardCode } from './normalize';
  * de cada decisión. Ninguna de las dos Functions existentes se duplicó: el
  * modo es un parámetro más, como ya sugería el propio requerimiento
  * ("preferiblemente extender, no crear Functions redundantes").
+ *
+ * SEGUNDO AJUSTE POSTERIOR (identidad ≠ monto): el código generado
+ * ya NO codifica la denominación (`GC{monto}-{secuencia}`, p. ej.
+ * `GC1000-010`) — ese formato ataba el código al valor, y el valor de una
+ * tarjeta reutilizable puede cambiar entre un ciclo y el siguiente. El
+ * formato nuevo es `GC-{secuencia global}` (`GC-000001`, `GC-000002`...),
+ * con UN solo contador (`giftCardCodeCounters/global`), independiente de
+ * cuánto valga la tarjeta. Los códigos antiguos con el formato viejo (y los
+ * manuales, de cualquier formato) siguen funcionando exactamente igual —
+ * nunca se migran (ver el comentario de `buildGeneratedCode` para el
+ * detalle completo, y plan §16.13).
+ *
+ * El mismo ajuste agrega dos operaciones nuevas, ambas admin-only y
+ * server-side (nunca solo un botón oculto en el frontend):
+ * `updateGiftCardAmount` (cambia el monto configurado, solo mientras la
+ * tarjeta está `AVAILABLE`) y `replaceGiftCard` (reemplaza el plástico de
+ * una tarjeta dañada/perdida sin volver a cobrar — ver el comentario largo
+ * de cada una más abajo).
  */
 const REGION = 'southamerica-west1';
 
@@ -107,6 +125,16 @@ interface RegisterGiftCardBatchData {
     codes?: string[];
     /** Solo en modo `'generated'`: cuántos códigos nuevos generar. */
     quantity?: number;
+}
+
+interface UpdateGiftCardAmountData {
+    code: string;
+    amountCents: number;
+}
+
+interface ReplaceGiftCardData {
+    code: string;
+    reason?: string;
 }
 
 interface ActivateGiftCardData {
@@ -177,46 +205,51 @@ function requireBatchQuantity(value: unknown): number {
 }
 
 /**
- * Denominación legible para el código generado (requerimiento §1): el monto
- * en bolivianos, sin decimales cuando es un entero — el caso real de todas
- * las denominaciones fijas del cliente (50/100/250/500/1000 Bs). Si alguna
- * vez existiera una denominación con centavos, se conserva el decimal en vez
- * de redondearlo en silencio (nunca se pierde información del monto real).
+ * Único contador para el código GENERADO (ajuste posterior: identidad ≠
+ * monto). Antes había un contador por denominación (`giftCardCodeCounters/
+ * {denominación}`, p. ej. `.../1000`); esos documentos quedan huérfanos — no
+ * se borran ni se migran, simplemente ya no los usa ningún código nuevo — y
+ * este contador global (`giftCardCodeCounters/global`) es, desde ahora, el
+ * único que `reserveGeneratedCodes()` toca.
  */
-function denominationLabel(amountCents: number): string {
-    const bs = amountCents / 100;
-    return Number.isInteger(bs) ? String(bs) : bs.toFixed(2);
-}
+const GLOBAL_CODE_COUNTER_ID = 'global';
+/**
+ * Mínimo de dígitos del código generado (`GC-000001`...`GC-001000`...), sin
+ * techo: `padStart` nunca trunca, solo rellena por la izquierda.
+ */
+const GLOBAL_CODE_MIN_DIGITS = 6;
 
-function padSequence(seq: number): string {
-    // Mínimo 3 dígitos (requerimiento §1); crece naturalmente más allá de
-    // 999 porque `padStart` nunca trunca, solo rellena por la izquierda.
-    return String(seq).padStart(3, '0');
-}
-
-function buildGeneratedCode(label: string, seq: number): string {
-    return `GC${label}-${padSequence(seq)}`;
+/**
+ * `GC-{secuencia}` — el código ya NO codifica el monto (ajuste posterior,
+ * prompt §1-§2): antes era `GC{denominación}-{secuencia}` (p. ej.
+ * `GC1000-010`), un formato que atrapaba la identidad de la tarjeta junto a
+ * su valor, imposible de sostener ahora que el valor es editable. Los
+ * códigos viejos con ese formato (manuales o generados antes de este
+ * ajuste) siguen siendo códigos válidos y funcionan exactamente igual — solo
+ * son strings opacos (§16.3) — pero su monto YA NO SE INFIERE del texto del
+ * código en ningún punto del sistema; solo cuenta `giftCards.amountCents`.
+ */
+function buildGeneratedCode(seq: number): string {
+    return `GC-${String(seq).padStart(GLOBAL_CODE_MIN_DIGITS, '0')}`;
 }
 
 /**
- * Reserva `count` código(s) NUEVOS y únicos para una denominación, dentro de
- * la MISMA transacción del caller (requerimiento §6-§9) — nunca como un paso
- * previo separado: así la generación es atómica de punta a punta y dos
- * pestañas generando a la vez para la misma denominación nunca pueden
- * terminar con el mismo código (Firestore reintenta la transacción que pierde
- * la carrera con una lectura fresca).
+ * Reserva `count` código(s) NUEVOS y únicos, dentro de la MISMA transacción
+ * del caller (requerimiento §6-§9, §16) — nunca como un paso previo separado:
+ * así la generación es atómica de punta a punta y dos llamadas simultáneas
+ * nunca pueden terminar con el mismo código (Firestore reintenta la
+ * transacción que pierde la carrera con una lectura fresca).
  *
- * El contador `giftCardCodeCounters/{denominationLabel}` (uno independiente
- * por denominación, requerimiento §7) es solo de dónde arrancar a buscar —
- * la única fuente de verdad de unicidad sigue siendo `giftCards/{code}`
- * (plan §16.3), exactamente igual que ya hace `registerGiftCard` en modo
- * manual. Por eso cada candidato se verifica contra `giftCards` antes de
- * aceptarlo: si la imprenta ya registró a mano el código que el contador
- * cree que sigue (p. ej. "GC1000-010"), el candidato se descarta sin
- * sobreescribir nada y se prueba el siguiente (requerimiento §8) — lo mismo
- * ocurre naturalmente con una tarjeta CANCELLED, porque su documento sigue
- * existiendo para siempre (nunca se borra), así que su código nunca se
- * reutiliza.
+ * El contador `giftCardCodeCounters/global` es solo de dónde arrancar a
+ * buscar — la única fuente de verdad de unicidad sigue siendo
+ * `giftCards/{code}` (plan §16.3), exactamente igual que ya hace
+ * `registerGiftCard` en modo manual. Por eso cada candidato se verifica
+ * contra `giftCards` antes de aceptarlo: si ya existe (un código manual que
+ * se adelantó, un código del formato viejo por denominación, o una tarjeta
+ * `CANCELLED` — su documento nunca se borra, así que su código nunca se
+ * reutiliza), el candidato se descarta sin sobreescribir nada y se prueba el
+ * siguiente — nunca se salta ni se repite un número solo porque el contador
+ * arrancó en 0 y ya existen tarjetas con el formato viejo.
  *
  * Todas las lecturas (`tx.get`) ocurren aquí, antes de que el caller escriba
  * nada — regla de las transacciones de Firestore: todas las lecturas antes
@@ -225,7 +258,6 @@ function buildGeneratedCode(label: string, seq: number): string {
  */
 async function reserveGeneratedCodes(
     tx: FirebaseFirestore.Transaction,
-    amountCents: number,
     count: number,
 ): Promise<{
     codes: string[];
@@ -233,8 +265,7 @@ async function reserveGeneratedCodes(
     counterExists: boolean;
     finalSeq: number;
 }> {
-    const label = denominationLabel(amountCents);
-    const counterRef = db.doc(`giftCardCodeCounters/${label}`);
+    const counterRef = db.doc(`giftCardCodeCounters/${GLOBAL_CODE_COUNTER_ID}`);
     const counterSnap = await tx.get(counterRef);
     const counterExists = counterSnap.exists;
     let seq = counterExists ? ((counterSnap.get('seq') as number) ?? 0) : 0;
@@ -246,11 +277,11 @@ async function reserveGeneratedCodes(
         if (attempts > MAX_GENERATION_ATTEMPTS) {
             throw new HttpsError(
                 'internal',
-                'No se pudo generar un código único para esta denominación. Intenta nuevamente.',
+                'No se pudo generar un código único. Intenta nuevamente.',
             );
         }
         seq++;
-        const candidate = buildGeneratedCode(label, seq);
+        const candidate = buildGeneratedCode(seq);
         const candidateSnap = await tx.get(db.doc(`giftCards/${candidate}`));
         if (!candidateSnap.exists) {
             codes.push(candidate);
@@ -285,6 +316,14 @@ function requireReason(value: unknown): string {
     if (typeof value !== 'string' || !value.trim()) {
         throw new HttpsError('invalid-argument', 'Escribe un motivo.');
     }
+    return value.trim().slice(0, MAX_REASON_LENGTH);
+}
+
+const DEFAULT_REPLACEMENT_REASON = 'Reemplazo de tarjeta física (código anterior cancelado).';
+
+/** El motivo del reemplazo es opcional (prompt §43 reutiliza `reason`, no inventa un workflow nuevo). */
+function optionalReplacementReason(value: unknown): string {
+    if (typeof value !== 'string' || !value.trim()) return DEFAULT_REPLACEMENT_REASON;
     return value.trim().slice(0, MAX_REASON_LENGTH);
 }
 
@@ -349,11 +388,7 @@ export const registerGiftCard = onCall<RegisterGiftCardData>({ region: REGION },
 
     if (codeMode === 'generated') {
         await db.runTransaction(async (tx) => {
-            const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(
-                tx,
-                amountCents,
-                1,
-            );
+            const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(tx, 1);
             const cardCode = codes[0];
             resultCardCode = cardCode;
 
@@ -417,7 +452,6 @@ export const registerGiftCardBatch = onCall<RegisterGiftCardBatchData>(
             await db.runTransaction(async (tx) => {
                 const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(
                     tx,
-                    amountCents,
                     quantity,
                 );
                 resultCodes = codes;
@@ -491,6 +525,14 @@ function buildNewCardDoc(
         status: 'AVAILABLE' as const,
         cycleNumber: 0,
         activeCycleId: null,
+        // Ajuste posterior (identidad ≠ monto, lineage de reemplazos):
+        // `lastCycleId` NUNCA se limpia una vez puesto (a diferencia de
+        // `activeCycleId`) — es lo que permite reemplazar una tarjeta que ya
+        // está `CANCELLED` sin tener que resucitar su ciclo (§16.13).
+        lastCycleId: null,
+        replacedByCode: null,
+        replacesCode: null,
+        pendingReplacement: false,
         currentBuyerName: null,
         activatedAt: null,
         activatedBy: null,
@@ -595,6 +637,8 @@ export const activateGiftCard = onCall<ActivateGiftCardData>({ region: REGION },
             status: 'ACTIVE',
             cycleNumber: newCycleNumber,
             activeCycleId: issueRef.id,
+            lastCycleId: issueRef.id,
+            pendingReplacement: false,
             currentBuyerName: buyerName,
             activatedAt: FieldValue.serverTimestamp(),
             activatedBy: uid,
@@ -611,6 +655,10 @@ export const activateGiftCard = onCall<ActivateGiftCardData>({ region: REGION },
             cycleNumber: newCycleNumber,
             amountCents,
             status: 'active',
+            // Venta real (a diferencia de `replaceGiftCard`, que abre un
+            // ciclo con `origin: 'replacement'` — nunca cuenta como venta en
+            // reportes por vendedor, ver `sumIssues` en reports.service.ts).
+            origin: 'sale',
             buyerName,
             activatedAt: FieldValue.serverTimestamp(),
             activatedBy: uid,
@@ -861,6 +909,13 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
             cancelledBy: uid,
             cancelledByName: name,
             cancelReason: reason,
+            // Ajuste posterior (prompt §11, §17, §47): si había un ciclo
+            // abierto (dinero ya pagado por el cliente), queda marcada como
+            // "reemplazable" — `replaceGiftCard` es la única forma de
+            // transferir ese valor a un código nuevo. Una tarjeta `AVAILABLE`
+            // cancelada (prompt §20, §48) nunca llega aquí con dinero
+            // pendiente: esos Bs eran solo configuración.
+            pendingReplacement: hadOpenCycle,
             activeCycleId: null,
             currentBuyerName: null,
             activatedAt: null,
@@ -900,4 +955,296 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
     });
 
     return { cardCode };
+});
+
+/**
+ * Cambia el monto configurado de una tarjeta (solo admin, ajuste posterior:
+ * identidad ≠ monto, prompt §4-§8). El código (`cardCode`) nunca cambia,
+ * solo `amountCents` — y únicamente mientras la tarjeta está `AVAILABLE`: en
+ * cuanto se vende/activa, ese monto queda CONGELADO en el ciclo (snapshot en
+ * `giftCardIssues.amountCents`, §16.8) y ya no se puede tocar hasta que la
+ * tarjeta vuelva a estar disponible (prompt §5, §6, §9).
+ *
+ * Server-side, no solo ocultando el botón en el frontend (prompt §35, §41):
+ * ni un admin puede saltarse esta regla desde la consola, porque `giftCards`
+ * tiene `allow write: if false` — la única vía de escritura es esta
+ * Function.
+ *
+ * NO es un ingreso (prompt §25, §26): solo deja constancia en
+ * `giftCardMovements` (`AMOUNT_CHANGED`, con `previousAmountCents`) para que
+ * el historial de la tarjeta sea legible — nunca toca `dailySummaries`.
+ */
+export const updateGiftCardAmount = onCall<UpdateGiftCardAmountData>({ region: REGION }, async (request) => {
+    const adminSnap = await assertAdmin(request.auth);
+    const uid = request.auth!.uid;
+    const name = staffName(adminSnap);
+
+    const cardCode = requireCode(request.data.code);
+    const amountCents = requireAmountCents(request.data.amountCents);
+
+    const cardRef = db.doc(`giftCards/${cardCode}`);
+
+    await db.runTransaction(async (tx) => {
+        const cardSnap = await tx.get(cardRef);
+        if (!cardSnap.exists) {
+            throw new HttpsError('not-found', 'Tarjeta no encontrada.');
+        }
+        if (cardSnap.get('status') !== 'AVAILABLE') {
+            throw new HttpsError(
+                'failed-precondition',
+                'Solo se puede cambiar el monto mientras la tarjeta está disponible.',
+            );
+        }
+        const previousAmountCents = cardSnap.get('amountCents') as number;
+        if (previousAmountCents === amountCents) {
+            throw new HttpsError('invalid-argument', 'El nuevo monto debe ser diferente al actual.');
+        }
+
+        tx.update(cardRef, { amountCents, updatedAt: FieldValue.serverTimestamp() });
+        tx.create(db.collection('giftCardMovements').doc(), {
+            giftCardId: cardCode,
+            codeSnapshot: cardCode,
+            amountCents,
+            previousAmountCents,
+            cycleNumber: null,
+            cycleId: null,
+            type: 'AMOUNT_CHANGED' as const,
+            createdAt: FieldValue.serverTimestamp(),
+            performedBy: uid,
+            performedByName: name,
+            buyerNameSnapshot: null,
+            saleId: null,
+            reason: null,
+            replacedByCode: null,
+            replacesCode: null,
+        });
+    });
+
+    return { cardCode, amountCents };
+});
+
+/**
+ * Reemplaza el PLÁSTICO de una tarjeta dañada/perdida, SIN cobrar de nuevo
+ * (solo admin, ajuste posterior: identidad ≠ monto, prompt §12-§22, §36-§37,
+ * §46-§48).
+ *
+ * El valor ya pagado — el monto vigente de la tarjeta al momento en que se
+ * vendió/activó, congelado desde entonces (§16.8) — se TRANSFIERE a un
+ * código nuevo generado por el sistema (siempre `codeMode: 'generated'`
+ * internamente: nadie teclea el código de un reemplazo). El código viejo
+ * queda `CANCELLED` para siempre; el nuevo nace `ACTIVE` directamente, con
+ * el mismo monto, SIN pasar por `AVAILABLE` ni por `activateGiftCard` — no
+ * es una venta (prompt §12-§13): por eso el `giftCardIssues` que abre lleva
+ * `origin: 'replacement'` y `payments: []`, y ningún `dailySummaries` se
+ * toca (prompt §14, §29). Los reportes por vendedor (`sumIssues`,
+ * `reports.service.ts`) excluyen `origin === 'replacement'` de sus totales
+ * (prompt §28).
+ *
+ * Elegibilidad, decidida enteramente con los campos ya denormalizados en
+ * `giftCards` (nunca hace falta releer `giftCardIssues` — mismo criterio de
+ * "1 lectura" que el resto de esta colección, §16.1):
+ * - `ACTIVE`/`SUSPENDED` — siempre elegible: hay un ciclo abierto y pagado
+ *   (`activeCycleId`/`cycleNumber` ya identifican exactamente cuál).
+ * - `CANCELLED` — elegible SOLO si `pendingReplacement === true`: quedó así
+ *   al cancelarse con un ciclo abierto (prompt §17, §47) y todavía no se
+ *   reemplazó. Una tarjeta `CANCELLED` que nunca tuvo ciclo abierto (prompt
+ *   §20, §48, o simplemente una tarjeta creada antes de este ajuste) no
+ *   tiene `pendingReplacement: true`, así que se rechaza: ese monto era solo
+ *   configuración, nadie pagó por él.
+ * - `AVAILABLE` — nunca elegible: no hay nada pagado pendiente que transferir.
+ * - Doble reemplazo (prompt §18): `replacedByCode` ya no nulo rechaza de
+ *   inmediato, sin mirar nada más — protegido server-side, dentro de la
+ *   misma transacción que crea el reemplazo.
+ *
+ * Atómico de punta a punta (prompt §16): todo — cancelar el código viejo,
+ * reservar y crear el nuevo, abrir su ciclo, los movimientos de auditoría —
+ * ocurre en una sola transacción. Nunca existe un instante donde el código
+ * viejo y el nuevo estén ambos operativos a la vez.
+ */
+export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, async (request) => {
+    const adminSnap = await assertAdmin(request.auth);
+    const uid = request.auth!.uid;
+    const name = staffName(adminSnap);
+
+    const oldCode = requireCode(request.data.code);
+    const reason = optionalReplacementReason(request.data.reason);
+
+    const settingsSnap = await db.doc('settings/app').get();
+    const timezone = (settingsSnap.get('timezone') as string) || 'America/La_Paz';
+    const { dateKey, monthKey, year } = dateKeys(new Date(), timezone);
+
+    const oldCardRef = db.doc(`giftCards/${oldCode}`);
+    let newCode = '';
+    let transferredAmountCents = 0;
+
+    await db.runTransaction(async (tx) => {
+        const oldCardSnap = await tx.get(oldCardRef);
+        if (!oldCardSnap.exists) {
+            throw new HttpsError('not-found', 'Tarjeta no encontrada.');
+        }
+        if (oldCardSnap.get('replacedByCode')) {
+            throw new HttpsError('failed-precondition', 'Esta tarjeta ya fue reemplazada anteriormente.');
+        }
+
+        const status = oldCardSnap.get('status') as string;
+        const hasOpenEntitlement = status === 'ACTIVE' || status === 'SUSPENDED';
+        const hasPendingCancelledEntitlement =
+            status === 'CANCELLED' && oldCardSnap.get('pendingReplacement') === true;
+        if (!hasOpenEntitlement && !hasPendingCancelledEntitlement) {
+            throw new HttpsError(
+                'failed-precondition',
+                'Esta tarjeta no tiene un valor pagado pendiente para transferir.',
+            );
+        }
+
+        const amountCents = oldCardSnap.get('amountCents') as number;
+        transferredAmountCents = amountCents;
+        const cycleNumber = oldCardSnap.get('cycleNumber') as number;
+        const cycleId = hasOpenEntitlement
+            ? (oldCardSnap.get('activeCycleId') as string | null)
+            : (oldCardSnap.get('lastCycleId') as string | null);
+
+        const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(tx, 1);
+        newCode = codes[0];
+        const newCardRef = db.doc(`giftCards/${newCode}`);
+        const newIssueRef = db.collection('giftCardIssues').doc();
+
+        // Solo escrituras de aquí en adelante.
+        writeGeneratedCodeCounter(tx, counterRef, counterExists, finalSeq);
+
+        if (hasOpenEntitlement) {
+            // La tarjeta vieja todavía estaba ACTIVE/SUSPENDED: se cierra
+            // definitivamente ahora, igual que `cancelGiftCard`, dejando
+            // constancia de hacia dónde se transfirió el valor.
+            tx.update(oldCardRef, {
+                status: 'CANCELLED',
+                cancelledAt: FieldValue.serverTimestamp(),
+                cancelledBy: uid,
+                cancelledByName: name,
+                cancelReason: reason,
+                replacedByCode: newCode,
+                pendingReplacement: false,
+                activeCycleId: null,
+                currentBuyerName: null,
+                activatedAt: null,
+                activatedBy: null,
+                activatedByName: null,
+                suspendedAt: null,
+                suspendedBy: null,
+                suspendedByName: null,
+                suspensionReason: null,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+            if (cycleId) {
+                tx.update(db.doc(`giftCardIssues/${cycleId}`), {
+                    status: 'cancelled',
+                    cancelledAt: FieldValue.serverTimestamp(),
+                    cancelledBy: uid,
+                    cancelReason: reason,
+                    closedAt: FieldValue.serverTimestamp(),
+                });
+            }
+        } else {
+            // Ya estaba CANCELLED de antes (prompt §17, §47): solo se marca
+            // hacia dónde se transfirió el valor, sin reabrir ni tocar nada
+            // de su estado terminal.
+            tx.update(oldCardRef, {
+                replacedByCode: newCode,
+                pendingReplacement: false,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        }
+
+        tx.create(newCardRef, {
+            cardCode: newCode,
+            amountCents,
+            status: 'ACTIVE' as const,
+            cycleNumber: 1,
+            activeCycleId: newIssueRef.id,
+            lastCycleId: newIssueRef.id,
+            replacedByCode: null,
+            replacesCode: oldCode,
+            pendingReplacement: false,
+            currentBuyerName: null,
+            activatedAt: FieldValue.serverTimestamp(),
+            activatedBy: uid,
+            activatedByName: name,
+            suspendedAt: null,
+            suspendedBy: null,
+            suspendedByName: null,
+            suspensionReason: null,
+            cancelledAt: null,
+            cancelledBy: null,
+            cancelledByName: null,
+            cancelReason: null,
+            createdAt: FieldValue.serverTimestamp(),
+            createdBy: uid,
+            createdByName: name,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.create(newIssueRef, {
+            cardCode: newCode,
+            cycleNumber: 1,
+            amountCents,
+            status: 'active',
+            buyerName: null,
+            activatedAt: FieldValue.serverTimestamp(),
+            activatedBy: uid,
+            activatedByName: name,
+            dateKey,
+            monthKey,
+            year,
+            payments: [],
+            origin: 'replacement',
+            suspendedAt: null,
+            suspendedBy: null,
+            suspensionReason: null,
+            reactivatedAt: null,
+            reactivatedBy: null,
+            redeemedAt: null,
+            saleId: null,
+            redeemedAmountCents: null,
+            forfeitedAmountCents: null,
+            cancelledAt: null,
+            cancelledBy: null,
+            cancelReason: null,
+            closedAt: null,
+        });
+
+        tx.create(db.collection('giftCardMovements').doc(), {
+            giftCardId: oldCode,
+            codeSnapshot: oldCode,
+            amountCents,
+            cycleNumber,
+            cycleId,
+            type: 'REPLACED' as const,
+            createdAt: FieldValue.serverTimestamp(),
+            performedBy: uid,
+            performedByName: name,
+            buyerNameSnapshot: null,
+            saleId: null,
+            reason,
+            replacedByCode: newCode,
+            replacesCode: null,
+        });
+        tx.create(db.collection('giftCardMovements').doc(), {
+            giftCardId: newCode,
+            codeSnapshot: newCode,
+            amountCents,
+            cycleNumber: 1,
+            cycleId: newIssueRef.id,
+            type: 'REPLACEMENT_CREATED' as const,
+            createdAt: FieldValue.serverTimestamp(),
+            performedBy: uid,
+            performedByName: name,
+            buyerNameSnapshot: null,
+            saleId: null,
+            reason,
+            replacedByCode: null,
+            replacesCode: oldCode,
+        });
+    });
+
+    return { cardCode: oldCode, newCardCode: newCode, amountCents: transferredAmountCents };
 });

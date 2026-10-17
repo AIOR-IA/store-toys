@@ -110,10 +110,22 @@ export interface SellerIssuesTotals {
     qrCents: number;
 }
 
-/** Suma nominal y cobro (efectivo/QR) de una lista de ciclos. Pura: la comparten consulta y tests. */
-export function sumIssues(issues: Pick<GiftCardIssue, 'amountCents' | 'payments'>[]): SellerIssuesTotals {
-    const totals: SellerIssuesTotals = { issuesCount: issues.length, nominalCents: 0, cashCents: 0, qrCents: 0 };
-    for (const issue of issues) {
+/**
+ * Suma nominal y cobro (efectivo/QR) de una lista de ciclos. Pura: la
+ * comparten consulta y tests.
+ *
+ * Excluye `origin === 'replacement'` (ajuste posterior, plan §16.13):
+ * `replaceGiftCard` abre un ciclo para transferir un valor YA pagado, sin
+ * cobrar de nuevo — no es una venta de ningún vendedor ni un ingreso nuevo
+ * (prompt §28). Un ciclo sin `origin` (anterior a este ajuste) se trata como
+ * `'sale'`, sin cambios de comportamiento.
+ */
+export function sumIssues(
+    issues: Pick<GiftCardIssue, 'amountCents' | 'payments' | 'origin'>[],
+): SellerIssuesTotals {
+    const sold = issues.filter((issue) => issue.origin !== 'replacement');
+    const totals: SellerIssuesTotals = { issuesCount: sold.length, nominalCents: 0, cashCents: 0, qrCents: 0 };
+    for (const issue of sold) {
         totals.nominalCents += issue.amountCents;
         for (const payment of issue.payments ?? []) {
             if (payment.method === 'cash') totals.cashCents += payment.amountCents;
@@ -180,8 +192,8 @@ export function buildSellerBreakdown(sales: SalesAggregateTotals, issues: Seller
  */
 export const SELLER_ISSUES_PAGE_SIZE = 500;
 
-/** Un ciclo tal como lo necesita la suma: identidad (para no contar dos veces), monto y cobro. */
-export type IssueForTotals = Pick<GiftCardIssue, 'id' | 'amountCents' | 'payments'>;
+/** Un ciclo tal como lo necesita la suma: identidad (para no contar dos veces), monto, cobro y origen. */
+export type IssueForTotals = Pick<GiftCardIssue, 'id' | 'amountCents' | 'payments' | 'origin'>;
 
 export interface IssuesPage<Cursor> {
     items: IssueForTotals[];

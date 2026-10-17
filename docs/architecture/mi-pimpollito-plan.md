@@ -2546,7 +2546,7 @@ Modelos en §8.8.
 
 | Política | Decisión | Respuesta |
 |---|---|---|
-| Importes | **⟳ Fase 6 — denominación FIJA**, decidida una sola vez al registrar la tarjeta física (la imprenta ya trae el monto impreso). Reemplaza "libres, con decimales" (E2 original) | E2 revisada en Fase 6 |
+| Importes | **⟳ Fase 6 — denominación FIJA**, decidida una sola vez al registrar la tarjeta física (la imprenta ya trae el monto impreso). Reemplaza "libres, con decimales" (E2 original). **⟳ ajuste posterior (§16.13): deja de ser verdaderamente fija** — es el monto CONFIGURADO actual, editable por admin mientras `AVAILABLE`, congelado en cuanto se vende | E2 revisada en Fase 6 y en el ajuste posterior |
 | Consumo | **Total, en una sola venta**. Sin saldo remanente — confirmado sin cambios en la Fase 6 | E3 |
 | Vuelto en efectivo | **No** | E4 |
 | Sobrante si la compra es menor | Se extingue como movimiento `FORFEITED` (§2.1 C-2) | derivado de E3+E4 |
@@ -2731,6 +2731,13 @@ vendidas de su vendedor y del rango.
 
 ### 16.12 Código GENERADO por el sistema — ajuste posterior a la Fase 6
 
+> **Superado en parte por §16.13 (ajuste posterior, identidad ≠ monto):** el formato
+> `GC{denominación}-{secuencia}` descrito abajo quedó reemplazado por `GC-{secuencia global}`,
+> independiente del monto. Esta sección se conserva porque los códigos que ya se generaron con
+> el formato viejo siguen siendo válidos y el mecanismo de `codeMode`/atomicidad no cambió —
+> solo cambió qué forma tiene el código y de qué contador sale. Ver §16.13 para el diseño
+> vigente.
+
 > **Motivo (sin abrir una fase nueva):** la primera imprenta trae 20-40 tarjetas con
 > numeración propia, pero la tienda necesita poder generar ella misma el código de una
 > tarjeta física nueva cuando fabrique más, o si cambia de imprenta. El código manual
@@ -2769,6 +2776,69 @@ vendidas de su vendedor y del rango.
   manual (reimpresión) que para uno generado, desde "Ver detalle" de la tarjeta.
 - **Rules:** `giftCardCodeCounters/{denominación}` con `allow read, write: if false` —
   cerrado por completo, solo el Admin SDK dentro de la Function lo toca.
+
+### 16.13 Identidad ≠ monto — código global, monto editable, reemplazo sin nuevo ingreso (ajuste posterior)
+
+> **Motivo (sin abrir una fase nueva):** el cliente confirmó que el código impreso en el
+> plástico (o generado por el sistema) identifica SOLO la tarjeta física — nunca su valor. La
+> misma `GC-000001` puede venderse hoy por Bs 100, canjearse, y venderse después por Bs 500: el
+> código ya no puede calcularse a partir del monto, ni el monto inferirse del código. Esto
+> **reemplaza** el formato `GC{denominación}-{secuencia}` de §16.12 (que seguía atando el
+> código al valor) y el supuesto de "denominación fija" de §16.2 (Importes).
+
+- **Código generado, formato nuevo:** `GC-{secuencia}` (`GC-000001`, `GC-000002`...; mínimo 6
+  dígitos, sin techo), con UN solo contador global `giftCardCodeCounters/global` — ya no uno
+  por denominación. Dos tarjetas de denominaciones distintas comparten la MISMA secuencia. La
+  única fuente de verdad de unicidad sigue siendo `giftCards/{code}` (§16.3): un candidato ya
+  ocupado (código manual que se adelantó, o el formato viejo por denominación) se salta sin
+  sobreescribirlo, igual que siempre.
+- **Compatibilidad histórica, sin migración:** los códigos ya registrados —manuales o con el
+  formato viejo `GC{denominación}-{secuencia}`— siguen siendo códigos válidos, se siguen
+  encontrando, escaneando, activando y canjeando exactamente igual. Sus contadores por
+  denominación (`giftCardCodeCounters/{100}`, `.../500}`...) quedan huérfanos, nunca se borran
+  ni se usan para generar nada nuevo. Lo único que cambió es que, desde ahora, NUNCA se infiere
+  el monto desde el texto de un código, ni siquiera si ese texto contiene un número.
+- **`amountCents` pasa de "denominación fija" a "monto configurado actual":** el campo no
+  cambió de nombre (no hacía falta migrar nada) — cambió la regla de negocio detrás de él.
+  Nueva Function `updateGiftCardAmount` (admin-only): cambia `amountCents` **solo** mientras
+  `status === 'AVAILABLE'`. En cuanto la tarjeta se vende/activa, ese valor queda **congelado**
+  en el ciclo (snapshot en `giftCardIssues.amountCents`, sin cambios respecto a §16.8) y no se
+  puede tocar hasta que vuelva a `AVAILABLE`. No es un ingreso: solo deja un movimiento
+  `AMOUNT_CHANGED` (con `previousAmountCents`) de auditoría — nunca toca `dailySummaries`.
+- **Reemplazo de plástico sin nuevo ingreso (`replaceGiftCard`, admin-only):** cuando una
+  tarjeta `ACTIVE`/`SUSPENDED` (o `CANCELLED` con un ciclo pagado todavía sin transferir) se
+  pierde o se daña, esta Function **transfiere** el valor ya pagado a un código nuevo generado
+  por el sistema, sin volver a cobrar — atómico de punta a punta:
+  1. el código viejo queda `CANCELLED` para siempre (`replacedByCode` apunta al nuevo);
+  2. el código nuevo nace `ACTIVE` directamente (nunca pasa por `AVAILABLE` ni por
+     `activateGiftCard`: no es una venta), con el mismo `amountCents` y `replacesCode`
+     apuntando al viejo;
+  3. su `giftCardIssues` nuevo lleva `origin: 'replacement'` y `payments: []` — necesario para
+     que createSale pueda redimirlo más adelante igual que cualquier ciclo, pero EXCLUIDO de
+     los reportes por vendedor (`sumIssues()`, `reports.service.ts`, prompt §28) y nunca escribe
+     `dailySummaries` (prompt §14, §29): ingreso nuevo = Bs 0, siempre.
+  - **Elegibilidad, sin releer `giftCardIssues`** (mismo criterio de "1 lectura" de §16.1):
+    `ACTIVE`/`SUSPENDED` siempre elegible; `CANCELLED` solo si el nuevo campo
+    `pendingReplacement` quedó en `true` al cancelarse (había un ciclo abierto, dinero ya
+    pagado, prompt §17/§47) — una `CANCELLED` que nunca se vendió (prompt §20/§48) no lo tiene,
+    así que se rechaza: esos Bs eran solo configuración. `replacedByCode` ya no nulo rechaza
+    cualquier segundo reemplazo de inmediato (prompt §18).
+  - **Lineage:** `replacedByCode`/`replacesCode` en `GiftCard` permiten seguir la cadena
+    `GC-000001 → GC-000152 → GC-000300` (prompt §19); cada tarjeta origen solo puede
+    reemplazarse una vez. El nuevo campo `lastCycleId` en `GiftCard` (nunca se limpia, a
+    diferencia de `activeCycleId`) es lo que permite calcular `pendingReplacement` y los datos
+    del reemplazo sin tener que leer `giftCardIssues`.
+  - **Etiqueta física:** ya NO imprime el monto (antes sí, vía `secondaryText` en
+    `printBarcodeLabel`) — solo el código/barcode. Reemplazar una tarjeta solo requiere
+    imprimir la etiqueta del código NUEVO; la vieja queda `CANCELLED` y nunca se reimprime.
+- **Rules:** sin cambios — `giftCards`/`giftCardIssues`/`giftCardMovements` ya tenían
+  `allow write: if false` (§16.1); las dos Functions nuevas son la única vía de escritura,
+  igual que el resto del módulo.
+- **Historial de cambios de monto y de reemplazo:** se reutiliza `giftCardMovements` (prompt
+  §23-§24: "revisa si existe ya una estructura de historial apropiada" — sí existe), con tres
+  tipos nuevos (`AMOUNT_CHANGED`, `REPLACED`, `REPLACEMENT_CREATED`) y campos opcionales
+  (`previousAmountCents`, `replacedByCode`, `replacesCode`) que solo esos tipos usan — un
+  movimiento anterior a este ajuste simplemente no los tiene.
 
 ---
 

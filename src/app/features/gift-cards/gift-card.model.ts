@@ -23,6 +23,17 @@ import { Timestamp } from '@angular/fire/firestore';
  * (100/500/1000 Bs…). `amountCents` se fija UNA VEZ al registrar la tarjeta
  * física, nunca en cada activación (reemplaza el "importes libres" del plan
  * original, §16.2 E2 — información nueva confirmada por el cliente).
+ *
+ * AJUSTE POSTERIOR (identidad ≠ monto, plan §16.13): `amountCents` dejó de
+ * ser verdaderamente fijo — ahora es el MONTO CONFIGURADO ACTUAL, editable
+ * por un admin (`updateGiftCardAmount`) mientras la tarjeta está
+ * `AVAILABLE`. El nombre del campo no cambió (nunca hubo necesidad de
+ * migrar nada): lo que cambió es la regla de negocio detrás de él. Una vez
+ * que la tarjeta se vende/activa, ese valor queda CONGELADO en el ciclo
+ * (snapshot en `GiftCardIssue.amountCents`) y ya no se puede editar hasta
+ * que vuelva a `AVAILABLE` — ver `GiftCard.pendingReplacement` y
+ * `replaceGiftCard` en `functions/src/giftcards.ts` para el mecanismo de
+ * reemplazo de plástico sin volver a cobrar.
  */
 export type GiftCardStatus = 'AVAILABLE' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
 
@@ -33,13 +44,15 @@ export type GiftCardStatus = 'AVAILABLE' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
  * `functions/src/giftcards.ts`, comentario de cabecera).
  *
  * - `'manual'` — el código viene de la imprenta, tecleado por quien registra.
- * - `'generated'` — el servidor lo decide: `GC{denominación}-{secuencia}`.
+ * - `'generated'` — el servidor lo decide: `GC-{secuencia global}` (ajuste
+ *   posterior, identidad ≠ monto: ya NO codifica la denominación — ver plan
+ *   §16.13).
  */
 export type GiftCardCodeMode = 'manual' | 'generated';
 
 export interface GiftCard {
     cardCode: string; // del ID del documento — NO se guarda en el documento
-    amountCents: number; // denominación fija, decidida al registrar (nunca cambia)
+    amountCents: number; // monto configurado ACTUAL (editable solo admin + AVAILABLE; ver comentario de cabecera)
     status: GiftCardStatus;
 
     /**
@@ -52,6 +65,26 @@ export interface GiftCard {
      */
     cycleNumber: number;
     activeCycleId: string | null;
+
+    /**
+     * El último ciclo abierto, de cualquier tarjeta — a diferencia de
+     * `activeCycleId`, NUNCA se limpia (ni al redimirse ni al cancelarse).
+     * Es lo que permite reemplazar una tarjeta que ya quedó `CANCELLED` sin
+     * tener que leer `giftCardIssues` (ajuste posterior, plan §16.13).
+     * `null` en tarjetas que nunca se activaron.
+     */
+    lastCycleId: string | null;
+    /** Si esta tarjeta ya fue reemplazada, el código de la nueva. `null` si no. */
+    replacedByCode: string | null;
+    /** Si esta tarjeta NACIÓ como reemplazo de otra, el código de la vieja. `null` si no. */
+    replacesCode: string | null;
+    /**
+     * `true` únicamente cuando esta tarjeta quedó `CANCELLED` con un ciclo
+     * abierto (dinero ya pagado) todavía sin transferir a un reemplazo — es
+     * la condición exacta que habilita `replaceGiftCard` sobre una tarjeta
+     * ya cancelada (plan §16.13). Siempre `false` en cualquier otro estado.
+     */
+    pendingReplacement: boolean;
 
     currentBuyerName: string | null;
     activatedAt: Timestamp | null;
@@ -76,6 +109,17 @@ export interface GiftCard {
 
 export type GiftCardCycleStatus = 'active' | 'suspended' | 'redeemed' | 'cancelled';
 
+/**
+ * `'sale'` — ciclo abierto por una venta real (`activateGiftCard`): cuenta
+ * en reportes por vendedor. `'replacement'` — ciclo abierto por
+ * `replaceGiftCard` (ajuste posterior, plan §16.13): transfiere un valor ya
+ * pagado, SIN cobrar de nuevo — `sumIssues()` (reports.service.ts) lo
+ * excluye de los totales por vendedor. Los ciclos anteriores a este ajuste
+ * no tienen este campo: se leen como `'sale'` (comportamiento histórico sin
+ * cambios).
+ */
+export type GiftCardIssueOrigin = 'sale' | 'replacement';
+
 export type GiftCardIssuePaymentMethod = 'cash' | 'qr';
 
 export interface GiftCardIssuePayment {
@@ -90,6 +134,8 @@ export interface GiftCardIssue {
     cycleNumber: number;
     amountCents: number; // snapshot de GiftCard.amountCents en la activación
     status: GiftCardCycleStatus;
+    /** Opcional por compatibilidad histórica: un ciclo sin este campo es `'sale'` (ver el tipo). */
+    origin?: GiftCardIssueOrigin;
     buyerName: string | null;
 
     activatedAt: Timestamp;
@@ -126,14 +172,27 @@ export type GiftCardMovementType =
     | 'REDEEMED'
     | 'FORFEITED'
     | 'CANCELLED'
-    | 'ADJUSTMENT';
+    | 'ADJUSTMENT'
+    // Ajuste posterior (identidad ≠ monto, plan §16.13):
+    | 'AMOUNT_CHANGED' // admin cambió el monto configurado (solo AVAILABLE) — NUNCA es ingreso
+    | 'REPLACED' // tarjeta vieja: quedó CANCELLED y transfirió su valor a `replacedByCode`
+    | 'REPLACEMENT_CREATED'; // tarjeta nueva: nació con el valor transferido de `replacesCode`
 
-/** `giftCardMovements/{id}` — libro mayor append-only. Solo admin (Rules). */
+/**
+ * `giftCardMovements/{id}` — libro mayor append-only. Solo admin (Rules).
+ *
+ * `previousAmountCents`/`replacedByCode`/`replacesCode` son opcionales por
+ * compatibilidad histórica — solo los escriben los movimientos nuevos
+ * (`AMOUNT_CHANGED`/`REPLACED`/`REPLACEMENT_CREATED`); un movimiento
+ * anterior a este ajuste simplemente no los tiene.
+ */
 export interface GiftCardMovement {
     id: string;
     giftCardId: string;
     codeSnapshot: string;
     amountCents: number;
+    /** Solo en `AMOUNT_CHANGED`: el monto que tenía antes del cambio. */
+    previousAmountCents?: number | null;
     cycleNumber: number | null;
     cycleId: string | null;
     type: GiftCardMovementType;
@@ -143,4 +202,8 @@ export interface GiftCardMovement {
     buyerNameSnapshot: string | null;
     saleId: string | null;
     reason: string | null;
+    /** Solo en `REPLACED` (tarjeta vieja): el código de la tarjeta nueva. */
+    replacedByCode?: string | null;
+    /** Solo en `REPLACEMENT_CREATED` (tarjeta nueva): el código de la tarjeta vieja. */
+    replacesCode?: string | null;
 }

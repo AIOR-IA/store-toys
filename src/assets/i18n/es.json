@@ -415,7 +415,9 @@
         "activate": "Vender / Activar",
         "suspend": "Reportar pérdida/robo",
         "reactivate": "Reactivar",
-        "cancel": "Cancelar definitivamente"
+        "cancel": "Cancelar definitivamente",
+        "editAmount": "Editar monto",
+        "replace": "Reemplazar tarjeta"
       },
       "activate": {
         "paymentMethod": "¿Cómo pagó el comprador la tarjeta?",
@@ -428,12 +430,28 @@
         "warning": "Esta acción es definitiva: la tarjeta física nunca vuelve a estar disponible.",
         "reasonLabel": "Motivo de la baja definitiva"
       },
+      "editAmount": {
+        "currentAmount": "Monto actual: {{amount}}",
+        "newAmountLabel": "Nuevo monto"
+      },
+      "replace": {
+        "explanation": "Este reemplazo no registra una nueva venta. El valor ya fue pagado en la emisión original.",
+        "sourceCode": "Tarjeta origen",
+        "transferAmount": "Valor a transferir",
+        "newCode": "Nueva tarjeta",
+        "newCodeHelp": "Se generará un código nuevo",
+        "charge": "Cobro",
+        "reasonLabel": "Motivo (opcional)",
+        "successTitle": "Tarjeta reemplazada. Código nuevo:",
+        "replacedByLabel": "Reemplazada por",
+        "replacesLabel": "Reemplazo de"
+      },
       "register": {
         "action": "Registrar tarjeta",
         "title": "Registrar tarjetas nuevas",
         "single": "Una tarjeta",
         "batch": "Lote (una denominación)",
-        "amountHelp": "El monto queda fijo: es el valor impreso en el plástico.",
+        "amountHelp": "El monto puede editarse luego (solo admin, mientras la tarjeta esté disponible).",
         "codePlaceholder": "Código impreso en la tarjeta",
         "codesLabel": "Códigos (uno por línea)",
         "codesPlaceholder": "GC100-001\nGC100-002\nGC100-003",
@@ -441,7 +459,7 @@
         "codeModeLabel": "Código de la tarjeta",
         "codeModeManual": "Ingresar código",
         "codeModeGenerated": "Generar automáticamente",
-        "generatedHelp": "El sistema genera el código automáticamente (ej. GC1000-010) al registrar: no hace falta calcularlo.",
+        "generatedHelp": "El sistema genera el código automáticamente (ej. GC-000001) al registrar: es solo un identificador, no incluye el monto.",
         "quantity": "Cantidad",
         "generatedResult": "Tarjeta registrada. Código generado:",
         "generatedResultBatch": "Tarjetas registradas. Códigos generados:"
@@ -457,7 +475,10 @@
           "REDEEMED": "Canjeada",
           "FORFEITED": "Sobrante perdido",
           "CANCELLED": "Baja definitiva",
-          "ADJUSTMENT": "Ajuste (anulación de venta)"
+          "ADJUSTMENT": "Ajuste (anulación de venta)",
+          "AMOUNT_CHANGED": "Monto modificado",
+          "REPLACED": "Reemplazada",
+          "REPLACEMENT_CREATED": "Creada por reemplazo"
         }
       },
       "messages": {
@@ -467,17 +488,21 @@
         "reactivated": "Tarjeta reactivada correctamente.",
         "cancelled": "Tarjeta dada de baja correctamente.",
         "amountRequired": "Indica el monto de la tarjeta.",
+        "amountUnchanged": "El nuevo monto debe ser diferente al actual.",
+        "amountUpdated": "Monto actualizado correctamente.",
+        "replaced": "Tarjeta reemplazada correctamente.",
         "codeRequired": "Escribe el código de la tarjeta.",
         "codesRequired": "Escribe al menos un código.",
         "quantityRequired": "Indica cuántas tarjetas generar.",
         "reasonRequired": "Escribe un motivo.",
         "confirmReactivate": "¿Reactivar esta tarjeta? Vuelve a estar habilitada para canjearse.",
-        "confirmCancel": "¿Dar de baja esta tarjeta de forma definitiva? No se puede deshacer."
+        "confirmCancel": "¿Dar de baja esta tarjeta de forma definitiva? No se puede deshacer.",
+        "confirmReplace": "¿Reemplazar esta tarjeta? El código anterior quedará cancelado para siempre y el valor ya pagado se transferirá a una tarjeta nueva. No se registra un nuevo cobro."
       },
       "labels": {
         "print": "Imprimir etiqueta",
         "close": "Cerrar",
-        "amountText": "Gift Card {{amount}}"
+        "amountNotPrinted": "Monto actual: {{amount}} (no se imprime en la etiqueta: puede cambiar)"
       }
     },
     "reports": {
@@ -543,7 +568,8 @@
         "inventoryTitle": "Inventario actual",
         "denominationsTitle": "Denominaciones registradas",
         "activityTitle": "Actividad del período",
-        "issuesCount": "Activaciones/ventas de tarjeta",
+        "issuesCount": "Ciclos activados (ventas + reemplazos)",
+        "issuesCountHelp": "Cuenta cualquier ciclo abierto, incluidos los reemplazos de plástico (Bs 0 de ingreso). El dinero real de Gift Cards vendidas está arriba, en \"Gift Cards vendidas/emitidas\".",
         "redemptionsCount": "Canjes",
         "liabilityTitle": "Pasivo pendiente (a hoy)",
         "liabilityHelp": "Tarjetas ACTIVE/SUSPENDED con dinero ya cobrado, aún no canjeadas.",

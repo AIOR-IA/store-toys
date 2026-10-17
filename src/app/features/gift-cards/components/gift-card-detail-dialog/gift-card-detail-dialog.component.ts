@@ -6,6 +6,7 @@ import { ButtonModule } from 'primeng/button';
 import { ConfirmationService } from 'primeng/api';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { DialogModule } from 'primeng/dialog';
+import { InputNumberModule } from 'primeng/inputnumber';
 import { InputTextModule } from 'primeng/inputtext';
 import { InputTextareaModule } from 'primeng/inputtextarea';
 import { RadioButtonModule } from 'primeng/radiobutton';
@@ -13,11 +14,12 @@ import { TagModule } from 'primeng/tag';
 import { MoneyPipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
+import { fromCents, toCents } from '@core/utils';
 import { GiftCard, GiftCardIssuePaymentMethod, GiftCardMovement } from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardLabelDialogComponent, GiftCardLabelTarget } from '../gift-card-label-dialog/gift-card-label-dialog.component';
 
-type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel';
+type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel' | 'editAmount' | 'replace';
 
 /**
  * Detalle de una gift card (Fase 6, prompt §33): info + acciones de ciclo de
@@ -35,6 +37,7 @@ type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel';
         DialogModule,
         ButtonModule,
         InputTextModule,
+        InputNumberModule,
         InputTextareaModule,
         RadioButtonModule,
         TagModule,
@@ -69,7 +72,40 @@ export class GiftCardDetailDialogComponent {
     activatePaymentMethod = signal<GiftCardIssuePaymentMethod>('cash');
     suspendReason = signal('');
     cancelReason = signal('');
+    newAmountBs = signal<number | null>(null);
+    replaceReason = signal('');
+    /** Resultado del reemplazo, mientras el panel sigue abierto (ver `confirmReplace`). */
+    replacedResult = signal<{ newCardCode: string; amountCents: number } | null>(null);
     saving = signal(false);
+
+    /**
+     * Solo admin, y solo mientras `AVAILABLE` (prompt §5, §6, §35, §41): una
+     * vez vendida/activada, el monto queda congelado en el ciclo — la Function
+     * `updateGiftCardAmount` ya lo rechaza server-side; esto solo evita
+     * mostrar una acción que de todas formas se rechazaría.
+     */
+    readonly canEditAmount = computed(() => {
+        const card = this.card();
+        return !!card && this.isAdmin() && card.status === 'AVAILABLE';
+    });
+
+    /**
+     * Elegibilidad del reemplazo, calculada con los mismos campos
+     * denormalizados que valida `replaceGiftCard` server-side (ajuste
+     * posterior, plan §16.13): `ACTIVE`/`SUSPENDED` siempre; `CANCELLED`
+     * solo si `pendingReplacement` quedó en `true` al cancelarse (había un
+     * ciclo pagado sin consumir) y todavía no se reemplazó
+     * (`replacedByCode` sigue `null`). Fallback `?? false`/`?? null`:
+     * tarjetas creadas antes de este ajuste no tienen estos campos, y nunca
+     * deben aparecer como elegibles para un reemplazo "fantasma".
+     */
+    readonly canReplace = computed(() => {
+        const card = this.card();
+        if (!card || !this.isAdmin() || card.replacedByCode) return false;
+        if (card.status === 'ACTIVE' || card.status === 'SUSPENDED') return true;
+        if (card.status === 'CANCELLED') return (card.pendingReplacement ?? false) === true;
+        return false;
+    });
 
     movements = signal<GiftCardMovement[]>([]);
     loadingMovements = signal(false);
@@ -96,6 +132,9 @@ export class GiftCardDetailDialogComponent {
                 this.activatePaymentMethod.set('cash');
                 this.suspendReason.set('');
                 this.cancelReason.set('');
+                this.newAmountBs.set(null);
+                this.replaceReason.set('');
+                this.replacedResult.set(null);
                 this.movements.set([]);
                 this.labelTarget.set(null);
                 if (card && admin) {
@@ -129,6 +168,17 @@ export class GiftCardDetailDialogComponent {
     openCancel(): void {
         this.mode.set('cancel');
     }
+    openEditAmount(): void {
+        const card = this.card();
+        if (!card) return;
+        this.newAmountBs.set(fromCents(card.amountCents));
+        this.mode.set('editAmount');
+    }
+    openReplace(): void {
+        this.replaceReason.set('');
+        this.replacedResult.set(null);
+        this.mode.set('replace');
+    }
     backToView(): void {
         this.mode.set('view');
     }
@@ -161,6 +211,82 @@ export class GiftCardDetailDialogComponent {
                 },
                 error: (error) => this.onError(error),
             });
+    }
+
+    /**
+     * Cambia el monto configurado (solo admin + AVAILABLE, prompt §5-§8):
+     * nunca es un ingreso — la Function solo deja un movimiento
+     * `AMOUNT_CHANGED` de auditoría, nunca toca `dailySummaries`.
+     */
+    confirmEditAmount(): void {
+        const card = this.card();
+        if (!card) return;
+        const bs = this.newAmountBs();
+        if (!bs || bs <= 0) {
+            this.toast.error('app.giftCards.messages.amountRequired');
+            return;
+        }
+        const amountCents = toCents(bs);
+        if (amountCents === card.amountCents) {
+            this.toast.error('app.giftCards.messages.amountUnchanged');
+            return;
+        }
+
+        this.saving.set(true);
+        this.giftCardsService.updateGiftCardAmount(card.cardCode, amountCents).subscribe({
+            next: () => {
+                this.saving.set(false);
+                this.toast.success('app.giftCards.messages.amountUpdated');
+                this.changed.emit();
+                this.close();
+            },
+            error: (error) => this.onError(error),
+        });
+    }
+
+    /**
+     * Reemplaza el plástico (solo admin, prompt §12-§22, §36-§37): transfiere
+     * el valor ya pagado a un código nuevo, SIN cobrar de nuevo. Doble
+     * confirmación a propósito (el panel ya explica el efecto, y esto
+     * todavía pide un último clic) porque es definitivo para el código viejo
+     * — mismo patrón que `confirmCancel`.
+     *
+     * A diferencia de las demás acciones, NO cierra el diálogo al terminar:
+     * se queda abierto mostrando el código nuevo para imprimir su etiqueta
+     * (prompt §34, §36) — cerrarlo de una vez limpiaría `labelTarget`, porque
+     * el padre soltaría `card()` a `null` (ver el `effect()` del
+     * constructor) antes de que la etiqueta llegara a abrirse.
+     */
+    confirmReplace(): void {
+        const card = this.card();
+        if (!card) return;
+
+        this.confirmationService.confirm({
+            header: this.translate.instant('app.common.confirm'),
+            message: this.translate.instant('app.giftCards.messages.confirmReplace'),
+            icon: 'fas fa-retweet',
+            acceptButtonStyleClass: 'p-button-warning',
+            accept: () => {
+                this.saving.set(true);
+                this.giftCardsService
+                    .replaceGiftCard(card.cardCode, this.replaceReason().trim() || undefined)
+                    .subscribe({
+                        next: ({ newCardCode, amountCents }) => {
+                            this.saving.set(false);
+                            this.toast.success('app.giftCards.messages.replaced');
+                            this.changed.emit();
+                            this.replacedResult.set({ newCardCode, amountCents });
+                        },
+                        error: (error) => this.onError(error),
+                    });
+            },
+        });
+    }
+
+    printReplacementLabel(): void {
+        const result = this.replacedResult();
+        if (!result) return;
+        this.labelTarget.set({ code: result.newCardCode, amountCents: result.amountCents });
     }
 
     confirmSuspend(): void {

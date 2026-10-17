@@ -52,6 +52,16 @@
                 <div class="text-gray-500">{{ "app.giftCards.cancelReason" | translate }}</div>
                 <div>{{ card.cancelReason }}</div>
             </div>
+            } @if (card.replacedByCode) {
+            <div class="col-span-2">
+                <div class="text-gray-500">{{ "app.giftCards.replace.replacedByLabel" | translate }}</div>
+                <div class="font-mono">{{ card.replacedByCode }}</div>
+            </div>
+            } @if (card.replacesCode) {
+            <div class="col-span-2">
+                <div class="text-gray-500">{{ "app.giftCards.replace.replacesLabel" | translate }}</div>
+                <div class="font-mono">{{ card.replacesCode }}</div>
+            </div>
             }
             <div>
                 <div class="text-gray-500">{{ "app.giftCards.createdAt" | translate }}</div>
@@ -95,6 +105,24 @@
                 [label]="'app.giftCards.actions.cancel' | translate"
                 (click)="openCancel()"
             ></button>
+            } @if (canEditAmount()) {
+            <button
+                pButton
+                type="button"
+                class="p-button-outlined"
+                icon="fas fa-pen"
+                [label]="'app.giftCards.actions.editAmount' | translate"
+                (click)="openEditAmount()"
+            ></button>
+            } @if (canReplace()) {
+            <button
+                pButton
+                type="button"
+                class="p-button-outlined p-button-warning"
+                icon="fas fa-retweet"
+                [label]="'app.giftCards.actions.replace' | translate"
+                (click)="openReplace()"
+            ></button>
             } @if (isAdmin()) {
             <button
                 pButton
@@ -123,7 +151,13 @@
                         <span class="text-gray-400">#{{ m.cycleNumber }}</span>
                         }
                         <span class="font-medium">{{ "app.giftCards.movements.type." + m.type | translate }}</span>
-                        @if (m.buyerNameSnapshot) {
+                        @if (m.type === 'AMOUNT_CHANGED') {
+                        <span class="text-gray-500"> · {{ m.previousAmountCents | money }} → {{ m.amountCents | money }}</span>
+                        } @if (m.type === 'REPLACED' && m.replacedByCode) {
+                        <span class="text-gray-500"> · {{ m.replacedByCode }}</span>
+                        } @if (m.type === 'REPLACEMENT_CREATED' && m.replacesCode) {
+                        <span class="text-gray-500"> · {{ m.replacesCode }}</span>
+                        } @if (m.buyerNameSnapshot) {
                         <span class="text-gray-500"> · {{ m.buyerNameSnapshot }}</span>
                         }
                     </span>
@@ -225,7 +259,92 @@
                 <button pButton type="submit" class="p-button-danger" [label]="'app.giftCards.actions.cancel' | translate" [loading]="saving()" [disabled]="saving()"></button>
             </div>
         </form>
-        }
+        } @else if (mode() === 'editAmount') {
+        <form (ngSubmit)="confirmEditAmount()" class="flex flex-col gap-4">
+            <div class="text-sm text-gray-500">
+                {{ "app.giftCards.editAmount.currentAmount" | translate: { amount: (card.amountCents | money) } }}
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="newAmountBs">{{
+                    "app.giftCards.editAmount.newAmountLabel" | translate
+                }}</label>
+                <p-inputNumber
+                    inputId="newAmountBs"
+                    [ngModel]="newAmountBs()"
+                    (ngModelChange)="newAmountBs.set($event)"
+                    [name]="'newAmountBs'"
+                    mode="currency"
+                    currency="BOB"
+                    locale="es-BO"
+                    [minFractionDigits]="2"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
+                <button pButton type="submit" [label]="'app.giftCards.actions.editAmount' | translate" [loading]="saving()" [disabled]="saving()"></button>
+            </div>
+        </form>
+        } @else if (mode() === 'replace') { @if (replacedResult(); as result) {
+        <div class="flex flex-col gap-4">
+            <div class="text-sm font-medium text-success">{{ "app.giftCards.replace.successTitle" | translate }}</div>
+            <div class="border border-gray-200 rounded px-3 py-2 flex items-center justify-between">
+                <span class="font-mono font-medium">{{ result.newCardCode }}</span>
+                <span class="text-sm text-gray-500">{{ result.amountCents | money }}</span>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.close' | translate" (click)="close()"></button>
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-print"
+                    [label]="'app.giftCards.labels.print' | translate"
+                    (click)="printReplacementLabel()"
+                ></button>
+            </div>
+        </div>
+        } @else {
+        <form (ngSubmit)="confirmReplace()" class="flex flex-col gap-4">
+            <div class="text-sm text-gray-500">{{ "app.giftCards.replace.explanation" | translate }}</div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                    <div class="text-gray-500">{{ "app.giftCards.replace.sourceCode" | translate }}</div>
+                    <div class="font-mono">{{ card.cardCode }}</div>
+                </div>
+                <div>
+                    <div class="text-gray-500">{{ "app.giftCards.replace.transferAmount" | translate }}</div>
+                    <div class="font-medium">{{ card.amountCents | money }}</div>
+                </div>
+                <div>
+                    <div class="text-gray-500">{{ "app.giftCards.replace.newCode" | translate }}</div>
+                    <div>{{ "app.giftCards.replace.newCodeHelp" | translate }}</div>
+                </div>
+                <div>
+                    <div class="text-gray-500">{{ "app.giftCards.replace.charge" | translate }}</div>
+                    <div class="font-medium">{{ 0 | money }}</div>
+                </div>
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="replaceReason">{{
+                    "app.giftCards.replace.reasonLabel" | translate
+                }}</label>
+                <textarea
+                    pInputTextarea
+                    id="replaceReason"
+                    [ngModel]="replaceReason()"
+                    (ngModelChange)="replaceReason.set($event)"
+                    [name]="'replaceReason'"
+                    rows="2"
+                    class="w-full"
+                ></textarea>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
+                <button pButton type="submit" class="p-button-warning" [label]="'app.giftCards.actions.replace' | translate" [loading]="saving()" [disabled]="saving()"></button>
+            </div>
+        </form>
+        } }
     </div>
     }
 </p-dialog>

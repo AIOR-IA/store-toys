@@ -36,4 +36,6 @@ export {
     suspendGiftCard,
     reactivateGiftCard,
     cancelGiftCard,
+    updateGiftCardAmount,
+    replaceGiftCard,
 } from './giftcards';
