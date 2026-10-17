@@ -79,32 +79,44 @@ export class GiftCardDetailDialogComponent {
     saving = signal(false);
 
     /**
+     * Snapshot refrescado tras `cancelGiftCard` (prompt §11): el `card()`
+     * input lo controla el padre y no cambia hasta que vuelva a cargar la
+     * lista — sin esto, tras cancelar una `ACTIVE` el panel seguiría
+     * mostrando el estado viejo hasta cerrar y reabrir el diálogo a mano.
+     * `null` = usar `card()` tal cual. Se limpia cada vez que `card()`
+     * cambia de verdad (ver el `effect()` del constructor).
+     */
+    private readonly cardOverride = signal<GiftCard | null>(null);
+    /** La tarjeta que realmente debe pintar la plantilla — ver `cardOverride`. */
+    readonly displayCard = computed(() => this.cardOverride() ?? this.card());
+
+    /**
      * Solo admin, y solo mientras `AVAILABLE` (prompt §5, §6, §35, §41): una
      * vez vendida/activada, el monto queda congelado en el ciclo — la Function
      * `updateGiftCardAmount` ya lo rechaza server-side; esto solo evita
      * mostrar una acción que de todas formas se rechazaría.
      */
     readonly canEditAmount = computed(() => {
-        const card = this.card();
+        const card = this.displayCard();
         return !!card && this.isAdmin() && card.status === 'AVAILABLE';
     });
 
     /**
-     * Elegibilidad del reemplazo, calculada con los mismos campos
-     * denormalizados que valida `replaceGiftCard` server-side (ajuste
-     * posterior, plan §16.13): `ACTIVE`/`SUSPENDED` siempre; `CANCELLED`
-     * solo si `pendingReplacement` quedó en `true` al cancelarse (había un
-     * ciclo pagado sin consumir) y todavía no se reemplazó
-     * (`replacedByCode` sigue `null`). Fallback `?? false`/`?? null`:
-     * tarjetas creadas antes de este ajuste no tienen estos campos, y nunca
-     * deben aparecer como elegibles para un reemplazo "fantasma".
+     * Elegibilidad del reemplazo (regla de flujo definitiva, ajuste
+     * posterior): el reemplazo YA NO es directo desde `ACTIVE`/`SUSPENDED`
+     * — el admin primero debe cancelar definitivamente. Solo es elegible
+     * una tarjeta `CANCELLED` con `pendingReplacement === true` (quedó así
+     * porque tenía un ciclo pagado sin consumir al cancelarse) y que
+     * todavía no se haya reemplazado (`replacedByCode` sigue `null`).
+     * Mismos campos y mismo criterio que valida `replaceGiftCard`
+     * server-side. Fallback `?? false`: tarjetas creadas antes de este
+     * ajuste no tienen el campo, y nunca deben aparecer como elegibles para
+     * un reemplazo "fantasma".
      */
     readonly canReplace = computed(() => {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card || !this.isAdmin() || card.replacedByCode) return false;
-        if (card.status === 'ACTIVE' || card.status === 'SUSPENDED') return true;
-        if (card.status === 'CANCELLED') return (card.pendingReplacement ?? false) === true;
-        return false;
+        return card.status === 'CANCELLED' && (card.pendingReplacement ?? false) === true;
     });
 
     movements = signal<GiftCardMovement[]>([]);
@@ -135,6 +147,7 @@ export class GiftCardDetailDialogComponent {
                 this.newAmountBs.set(null);
                 this.replaceReason.set('');
                 this.replacedResult.set(null);
+                this.cardOverride.set(null);
                 this.movements.set([]);
                 this.labelTarget.set(null);
                 if (card && admin) {
@@ -169,7 +182,7 @@ export class GiftCardDetailDialogComponent {
         this.mode.set('cancel');
     }
     openEditAmount(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
         this.newAmountBs.set(fromCents(card.amountCents));
         this.mode.set('editAmount');
@@ -192,7 +205,7 @@ export class GiftCardDetailDialogComponent {
     }
 
     confirmActivate(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
 
         this.saving.set(true);
@@ -219,7 +232,7 @@ export class GiftCardDetailDialogComponent {
      * `AMOUNT_CHANGED` de auditoría, nunca toca `dailySummaries`.
      */
     confirmEditAmount(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
         const bs = this.newAmountBs();
         if (!bs || bs <= 0) {
@@ -258,7 +271,7 @@ export class GiftCardDetailDialogComponent {
      * constructor) antes de que la etiqueta llegara a abrirse.
      */
     confirmReplace(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
 
         this.confirmationService.confirm({
@@ -290,7 +303,7 @@ export class GiftCardDetailDialogComponent {
     }
 
     confirmSuspend(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
         if (!this.suspendReason().trim()) {
             this.toast.error('app.giftCards.messages.reasonRequired');
@@ -310,7 +323,7 @@ export class GiftCardDetailDialogComponent {
     }
 
     confirmReactivate(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
 
         this.confirmationService.confirm({
@@ -333,8 +346,19 @@ export class GiftCardDetailDialogComponent {
         });
     }
 
+    /**
+     * A diferencia de las demás acciones, NO cierra el diálogo al terminar
+     * (prompt §11): se queda abierto, refrescado, para que si la tarjeta
+     * quedó con `pendingReplacement: true` el admin vea de inmediato la
+     * acción "Reemplazar tarjeta" sin tener que cerrar y volver a abrir el
+     * modal a mano. El `card()` input es del padre y no cambia solo —
+     * `cardOverride` se actualiza aquí con una relectura real del documento
+     * (`lookupByCode`, la misma que ya usa el buscador del listado) en vez
+     * de adivinar el resultado: así `canReplace` refleja exactamente lo que
+     * `cancelGiftCard` decidió server-side, no una suposición del cliente.
+     */
     confirmCancel(): void {
-        const card = this.card();
+        const card = this.displayCard();
         if (!card) return;
         if (!this.cancelReason().trim()) {
             this.toast.error('app.giftCards.messages.reasonRequired');
@@ -353,7 +377,13 @@ export class GiftCardDetailDialogComponent {
                         this.saving.set(false);
                         this.toast.success('app.giftCards.messages.cancelled');
                         this.changed.emit();
-                        this.close();
+                        this.mode.set('view');
+                        this.giftCardsService.lookupByCode(card.cardCode).subscribe({
+                            next: (fresh) => {
+                                if (fresh) this.cardOverride.set(fresh);
+                            },
+                            error: () => undefined,
+                        });
                     },
                     error: (error) => this.onError(error),
                 });

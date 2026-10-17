@@ -13,11 +13,16 @@ import { GiftCardDetailDialogComponent } from './gift-card-detail-dialog.compone
 
 /**
  * Identidad ≠ monto (ajuste posterior, plan §16.13): "Editar monto" solo
- * para admin + AVAILABLE; "Reemplazar" solo para admin + (ACTIVE/SUSPENDED,
- * o CANCELLED con `pendingReplacement`) y nunca si ya fue reemplazada. La
- * elegibilidad server-side es la real (ver `functions/src/giftcards.ts`);
- * aquí se prueba que el frontend refleja EXACTAMENTE el mismo criterio, para
- * no mostrar una acción que la Function de todas formas rechazaría.
+ * para admin + AVAILABLE.
+ *
+ * "Reemplazar" — regla de flujo DEFINITIVA (segundo ajuste posterior): YA NO
+ * es directo desde `ACTIVE`/`SUSPENDED`. Solo es elegible una tarjeta
+ * `CANCELLED` con `pendingReplacement === true` (quedó así al cancelarse
+ * con un ciclo pagado abierto) y que todavía no se haya reemplazado
+ * (`replacedByCode` sigue `null`). La elegibilidad server-side es la real
+ * (ver `functions/src/giftcards.ts`); aquí se prueba que el frontend
+ * refleja EXACTAMENTE el mismo criterio, para no mostrar una acción que la
+ * Function de todas formas rechazaría.
  */
 describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / reemplazar)', () => {
     const timestamp = (ms = 0) => ({ toDate: () => new Date(ms) }) as unknown as GiftCard['createdAt'];
@@ -57,6 +62,8 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
     let sessionRole = signal<{ status: string; role: string }>({ status: 'active', role: 'admin' });
     let updateGiftCardAmount: jasmine.Spy;
     let replaceGiftCard: jasmine.Spy;
+    let cancelGiftCard: jasmine.Spy;
+    let lookupByCode: jasmine.Spy;
 
     const setUp = async (card: GiftCard, role: 'admin' | 'user' = 'admin') => {
         sessionRole.set({ status: 'active', role });
@@ -66,6 +73,8 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         replaceGiftCard = jasmine.createSpy('replaceGiftCard').and.returnValue(
             of({ cardCode: card.cardCode, newCardCode: 'GC-000099', amountCents: card.amountCents }),
         );
+        cancelGiftCard = jasmine.createSpy('cancelGiftCard').and.returnValue(of({ cardCode: card.cardCode }));
+        lookupByCode = jasmine.createSpy('lookupByCode').and.returnValue(of(null));
 
         await TestBed.configureTestingModule({
             imports: [GiftCardDetailDialogComponent, TranslateModule.forRoot()],
@@ -78,6 +87,8 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
                         getMovements: () => of([]),
                         updateGiftCardAmount,
                         replaceGiftCard,
+                        cancelGiftCard,
+                        lookupByCode,
                     },
                 },
                 { provide: SessionService, useValue: { session: sessionRole } },
@@ -121,18 +132,18 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         });
     });
 
-    describe('canReplace', () => {
-        it('E) admin + ACTIVE: true', async () => {
+    describe('canReplace — regla de flujo definitiva: solo CANCELLED + pendingReplacement', () => {
+        it('E) admin + ACTIVE: false (ya NO es directo — hay que cancelar primero)', async () => {
             await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
-            expect(component.canReplace()).toBeTrue();
+            expect(component.canReplace()).toBeFalse();
         });
 
-        it('F) admin + SUSPENDED: true', async () => {
+        it('F) admin + SUSPENDED: false (ya NO es directo — hay que cancelar primero)', async () => {
             await setUp(baseCard({ status: 'SUSPENDED' }), 'admin');
-            expect(component.canReplace()).toBeTrue();
+            expect(component.canReplace()).toBeFalse();
         });
 
-        it('G) admin + CANCELLED con pendingReplacement: true', async () => {
+        it('G) admin + CANCELLED con pendingReplacement + sin replacedByCode: true', async () => {
             await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
             expect(component.canReplace()).toBeTrue();
         });
@@ -154,13 +165,16 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             expect(component.canReplace()).toBeFalse();
         });
 
-        it('K) ya reemplazada (replacedByCode no nulo): false aunque esté ACTIVE', async () => {
-            await setUp(baseCard({ status: 'ACTIVE', replacedByCode: 'GC-000050' }), 'admin');
+        it('K) CANCELLED + pendingReplacement pero YA con replacedByCode: false (ya fue reemplazada)', async () => {
+            await setUp(
+                baseCard({ status: 'CANCELLED', pendingReplacement: true, replacedByCode: 'GC-000050' }),
+                'admin',
+            );
             expect(component.canReplace()).toBeFalse();
         });
 
-        it('L) vendedor (no admin) + ACTIVE: false', async () => {
-            await setUp(baseCard({ status: 'ACTIVE' }), 'user');
+        it('L) vendedor (no admin) + CANCELLED + pendingReplacement: false', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'user');
             expect(component.canReplace()).toBeFalse();
         });
     });
@@ -207,7 +221,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         };
 
         it('P) acepta la confirmación y llama replaceGiftCard; NO cierra el diálogo (visibleChange no emitido)', async () => {
-            await setUp(baseCard({ status: 'ACTIVE', amountCents: 100000 }), 'admin');
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true, amountCents: 100000 }), 'admin');
             acceptImmediately(fixture);
 
             let closed = false;
@@ -222,7 +236,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         });
 
         it('Q) envía el motivo escrito (trim) cuando se completa', async () => {
-            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
             acceptImmediately(fixture);
 
             component.openReplace();
@@ -233,7 +247,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         });
 
         it('R) printReplacementLabel abre la etiqueta de la tarjeta NUEVA, no la vieja', async () => {
-            await setUp(baseCard({ status: 'ACTIVE', amountCents: 100000 }), 'admin');
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true, amountCents: 100000 }), 'admin');
             acceptImmediately(fixture);
 
             component.openReplace();
@@ -241,6 +255,71 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             component.printReplacementLabel();
 
             expect(component.labelTarget()).toEqual({ code: 'GC-000099', amountCents: 100000 });
+        });
+    });
+
+    describe('confirmCancel — el detalle se refresca en el sitio (prompt §11)', () => {
+        const acceptImmediately = (fixture: ComponentFixture<GiftCardDetailDialogComponent>) => {
+            const confirmation = fixture.debugElement.injector.get(ConfirmationService);
+            spyOn(confirmation, 'confirm').and.callFake(((opts: { accept: () => void }) => opts.accept()) as never);
+        };
+
+        it('S) cancelar una ACTIVE con ciclo pagado: NO cierra el diálogo, y tras refrescar "Reemplazar" aparece sin reabrir', async () => {
+            const active = baseCard({ status: 'ACTIVE', amountCents: 25000 });
+            await setUp(active, 'admin');
+            acceptImmediately(fixture);
+            expect(component.canReplace()).toBeFalse(); // todavía ACTIVE: no se puede reemplazar directo
+
+            const cancelled = baseCard({ status: 'CANCELLED', pendingReplacement: true, amountCents: 25000 });
+            lookupByCode.and.returnValue(of(cancelled));
+
+            let closed = false;
+            component.visibleChange.subscribe(() => (closed = true));
+
+            component.openCancel();
+            component.cancelReason.set('tarjeta dañada');
+            component.confirmCancel();
+
+            expect(cancelGiftCard).toHaveBeenCalledOnceWith('GC-000001', 'tarjeta dañada');
+            expect(lookupByCode).toHaveBeenCalledOnceWith('GC-000001');
+            expect(closed).toBeFalse(); // sigue abierto, sin cerrar y reabrir a mano
+            expect(component.displayCard()?.status).toBe('CANCELLED');
+            expect(component.canReplace()).toBeTrue(); // ahora SÍ, sin recargar el diálogo
+            expect(component.mode()).toBe('view');
+        });
+
+        it('T) cancelar una AVAILABLE (nunca vendida): se refresca, pero "Reemplazar" sigue sin aparecer', async () => {
+            const available = baseCard({ status: 'AVAILABLE', amountCents: 25000 });
+            await setUp(available, 'admin');
+            acceptImmediately(fixture);
+
+            const cancelled = baseCard({ status: 'CANCELLED', pendingReplacement: false, amountCents: 25000 });
+            lookupByCode.and.returnValue(of(cancelled));
+
+            component.openCancel();
+            component.cancelReason.set('nunca se usó');
+            component.confirmCancel();
+
+            expect(component.displayCard()?.status).toBe('CANCELLED');
+            expect(component.canReplace()).toBeFalse();
+        });
+
+        it('U) la refrescada se limpia si se abre otra tarjeta (el override no se "pega" entre tarjetas)', async () => {
+            const active = baseCard({ status: 'ACTIVE', amountCents: 25000 });
+            await setUp(active, 'admin');
+            acceptImmediately(fixture);
+            lookupByCode.and.returnValue(of(baseCard({ status: 'CANCELLED', pendingReplacement: true })));
+
+            component.openCancel();
+            component.cancelReason.set('x');
+            component.confirmCancel();
+            expect(component.displayCard()?.status).toBe('CANCELLED');
+
+            const otherCard = baseCard({ cardCode: 'GC-000777', status: 'ACTIVE' });
+            fixture.componentRef.setInput('card', otherCard);
+            fixture.detectChanges();
+
+            expect(component.displayCard()).toEqual(otherCard);
         });
     });
 });

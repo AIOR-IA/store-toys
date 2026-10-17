@@ -5,10 +5,10 @@
     [style]="{ width: '36rem' }"
     [breakpoints]="{ '640px': '95vw' }"
     [draggable]="false"
-    [header]="card()?.cardCode || ''"
+    [header]="displayCard()?.cardCode || ''"
     (onHide)="close()"
 >
-    @if (card(); as card) {
+    @if (displayCard(); as card) {
     <div class="flex flex-col gap-4">
         <div class="flex items-center justify-between">
             @switch (card.status) { @case ('AVAILABLE') {

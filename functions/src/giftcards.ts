@@ -1040,26 +1040,33 @@ export const updateGiftCardAmount = onCall<UpdateGiftCardAmountData>({ region: R
  * `reports.service.ts`) excluyen `origin === 'replacement'` de sus totales
  * (prompt §28).
  *
- * Elegibilidad, decidida enteramente con los campos ya denormalizados en
- * `giftCards` (nunca hace falta releer `giftCardIssues` — mismo criterio de
- * "1 lectura" que el resto de esta colección, §16.1):
- * - `ACTIVE`/`SUSPENDED` — siempre elegible: hay un ciclo abierto y pagado
- *   (`activeCycleId`/`cycleNumber` ya identifican exactamente cuál).
- * - `CANCELLED` — elegible SOLO si `pendingReplacement === true`: quedó así
- *   al cancelarse con un ciclo abierto (prompt §17, §47) y todavía no se
- *   reemplazó. Una tarjeta `CANCELLED` que nunca tuvo ciclo abierto (prompt
- *   §20, §48, o simplemente una tarjeta creada antes de este ajuste) no
- *   tiene `pendingReplacement: true`, así que se rechaza: ese monto era solo
- *   configuración, nadie pagó por él.
- * - `AVAILABLE` — nunca elegible: no hay nada pagado pendiente que transferir.
- * - Doble reemplazo (prompt §18): `replacedByCode` ya no nulo rechaza de
- *   inmediato, sin mirar nada más — protegido server-side, dentro de la
- *   misma transacción que crea el reemplazo.
+ * REGLA DE FLUJO DEFINITIVA (ajuste posterior sobre el ajuste anterior):
+ * el reemplazo YA NO es directo desde `ACTIVE`/`SUSPENDED` — el admin
+ * primero debe ejecutar `cancelGiftCard` (que decide, según había o no un
+ * ciclo pagado abierto, si deja `pendingReplacement: true`); solo entonces
+ * esta Function acepta transferir el valor. Elegibilidad, decidida
+ * enteramente con los campos ya denormalizados en `giftCards` (nunca hace
+ * falta releer `giftCardIssues` — mismo criterio de "1 lectura" que el
+ * resto de esta colección, §16.1):
+ * - `ACTIVE`/`SUSPENDED` — rechazada: hay que cancelar primero.
+ * - `AVAILABLE` — rechazada: no hay nada pagado pendiente que transferir.
+ * - `CANCELLED` sin `pendingReplacement` (nunca tuvo ciclo abierto, prompt
+ *   §20/§48, o una tarjeta anterior a este ajuste) — rechazada: ese monto
+ *   era solo configuración, nadie pagó por él.
+ * - `CANCELLED` con `replacedByCode` ya fijado (doble reemplazo, prompt
+ *   §18) — rechazada de inmediato, sin mirar nada más.
+ * - `CANCELLED` + `pendingReplacement === true` + `replacedByCode` nulo —
+ *   única combinación elegible.
  *
- * Atómico de punta a punta (prompt §16): todo — cancelar el código viejo,
- * reservar y crear el nuevo, abrir su ciclo, los movimientos de auditoría —
- * ocurre en una sola transacción. Nunca existe un instante donde el código
- * viejo y el nuevo estén ambos operativos a la vez.
+ * El `cycleId`/`cycleNumber` que se citan en los movimientos de auditoría
+ * salen de `lastCycleId`/`cycleNumber`, que `cancelGiftCard` ya deja fijados
+ * en el momento de cancelar y esta Function nunca vuelve a tocar — el ciclo
+ * ya quedó cerrado (`status: 'cancelled'`) por `cancelGiftCard`, así que
+ * aquí no hace falta releerlo ni volver a escribirlo.
+ *
+ * Atómico de punta a punta (prompt §16): reservar y crear el código nuevo,
+ * marcar el viejo como reemplazado, abrir el ciclo nuevo y los movimientos
+ * de auditoría ocurren en una sola transacción.
  */
 export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, async (request) => {
     const adminSnap = await assertAdmin(request.auth);
@@ -1087,22 +1094,18 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         }
 
         const status = oldCardSnap.get('status') as string;
-        const hasOpenEntitlement = status === 'ACTIVE' || status === 'SUSPENDED';
-        const hasPendingCancelledEntitlement =
-            status === 'CANCELLED' && oldCardSnap.get('pendingReplacement') === true;
-        if (!hasOpenEntitlement && !hasPendingCancelledEntitlement) {
+        const pendingReplacement = oldCardSnap.get('pendingReplacement') === true;
+        if (status !== 'CANCELLED' || !pendingReplacement) {
             throw new HttpsError(
                 'failed-precondition',
-                'Esta tarjeta no tiene un valor pagado pendiente para transferir.',
+                'Solo se puede reemplazar una tarjeta ya cancelada definitivamente, con un valor pagado pendiente.',
             );
         }
 
         const amountCents = oldCardSnap.get('amountCents') as number;
         transferredAmountCents = amountCents;
         const cycleNumber = oldCardSnap.get('cycleNumber') as number;
-        const cycleId = hasOpenEntitlement
-            ? (oldCardSnap.get('activeCycleId') as string | null)
-            : (oldCardSnap.get('lastCycleId') as string | null);
+        const cycleId = oldCardSnap.get('lastCycleId') as string | null;
 
         const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(tx, 1);
         newCode = codes[0];
@@ -1112,48 +1115,14 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         // Solo escrituras de aquí en adelante.
         writeGeneratedCodeCounter(tx, counterRef, counterExists, finalSeq);
 
-        if (hasOpenEntitlement) {
-            // La tarjeta vieja todavía estaba ACTIVE/SUSPENDED: se cierra
-            // definitivamente ahora, igual que `cancelGiftCard`, dejando
-            // constancia de hacia dónde se transfirió el valor.
-            tx.update(oldCardRef, {
-                status: 'CANCELLED',
-                cancelledAt: FieldValue.serverTimestamp(),
-                cancelledBy: uid,
-                cancelledByName: name,
-                cancelReason: reason,
-                replacedByCode: newCode,
-                pendingReplacement: false,
-                activeCycleId: null,
-                currentBuyerName: null,
-                activatedAt: null,
-                activatedBy: null,
-                activatedByName: null,
-                suspendedAt: null,
-                suspendedBy: null,
-                suspendedByName: null,
-                suspensionReason: null,
-                updatedAt: FieldValue.serverTimestamp(),
-            });
-            if (cycleId) {
-                tx.update(db.doc(`giftCardIssues/${cycleId}`), {
-                    status: 'cancelled',
-                    cancelledAt: FieldValue.serverTimestamp(),
-                    cancelledBy: uid,
-                    cancelReason: reason,
-                    closedAt: FieldValue.serverTimestamp(),
-                });
-            }
-        } else {
-            // Ya estaba CANCELLED de antes (prompt §17, §47): solo se marca
-            // hacia dónde se transfirió el valor, sin reabrir ni tocar nada
-            // de su estado terminal.
-            tx.update(oldCardRef, {
-                replacedByCode: newCode,
-                pendingReplacement: false,
-                updatedAt: FieldValue.serverTimestamp(),
-            });
-        }
+        // La tarjeta vieja ya estaba CANCELLED (la dejó así `cancelGiftCard`):
+        // solo se marca hacia dónde se transfirió el valor, sin reabrir ni
+        // tocar nada más de su estado terminal.
+        tx.update(oldCardRef, {
+            replacedByCode: newCode,
+            pendingReplacement: false,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
 
         tx.create(newCardRef, {
             cardCode: newCode,
