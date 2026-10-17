@@ -820,6 +820,67 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('UH3. sin incrementar giftCardsIssuedCents/giftCardIssuesCashCents/giftCardIssuesQrCents',
         issuesOf(summary()).issued === 25000 && issuesOf(summary()).cash === 25000 && issuesOf(summary()).qr === 0);
 
+    // ---- Identidad del entitlement (comprador/vendedor originales) sobrevive al reemplazo ----
+    console.log('\nV. El reemplazo transfiere también el comprador y el vendedor ORIGINALES (hallazgo en DEV)');
+    base();
+    store.set('users/lenar', { isActive: true, role: 'user', firstName: 'Lenar', lastName: 'Lima' });
+    store.set('users/nuevavendedora', { isActive: true, role: 'user', firstName: 'Vendedora', lastName: 'Nueva' });
+
+    // A) Camila compra la GC origen, vendida por Lenar Lima.
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 25000, codeMode: 'generated' }));
+    const V1 = rg.value.cardCode;
+    r = await outcome(call(activateGiftCard, 'lenar', { code: V1, buyerName: 'Camila', payments: [{ method: 'cash', amountCents: 25000 }] }));
+    check('VA. Camila compra la GC origen (vendida por Lenar Lima)',
+        r.ok && store.get(`giftCards/${V1}`).currentBuyerName === 'Camila' && store.get(`giftCards/${V1}`).activatedByName === 'Lenar Lima', r.message);
+
+    // B) se cancela y reemplaza.
+    await call(cancelGiftCard, 'admin', { code: V1, reason: 'tarjeta dañada' });
+    const beforeV = freezeSummary();
+    r = await outcome(call(replaceGiftCard, 'admin', { code: V1 }));
+    const V2 = r.value?.newCardCode;
+    check('VB. se cancela y reemplaza: ÉXITO', r.ok && !!V2, r.message);
+
+    // C) replacement ACTIVE muestra buyer Camila / seller Lenar Lima (campos LIVE de giftCards, cero N+1).
+    check('VC. GC-reemplazo ACTIVE muestra comprador=Camila y "vendido por"=Lenar Lima (campos live, los mismos que lee el listado)',
+        store.get(`giftCards/${V2}`).status === 'ACTIVE' && store.get(`giftCards/${V2}`).amountCents === 25000
+        && store.get(`giftCards/${V2}`).currentBuyerName === 'Camila' && store.get(`giftCards/${V2}`).activatedByName === 'Lenar Lima');
+
+    // D) el admin que ejecutó el reemplazo NO sustituye al vendedor original.
+    check('VD. el admin del reemplazo NO queda como "activatedByName" de la tarjeta/ciclo nuevo (sigue Lenar Lima, no "Ad Min")',
+        store.get(`giftCards/${V2}`).activatedByName === 'Lenar Lima' && store.get(`giftCards/${V2}`).activatedByName !== 'Ad Min');
+    check('VD2. el admin SÍ queda registrado, pero solo en los movimientos de auditoría del reemplazo',
+        [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.type === 'REPLACEMENT_CREATED' && v.giftCardId === V2 && v.performedByName === 'Ad Min' && v.buyerNameSnapshot === 'Camila'));
+
+    // H/I) lo que el listado y el detalle de Gift Cards leen realmente (campos
+    // live de `giftCards`, prompt §2/§3) — ANTES de que V2 siga la cadena y se
+    // cancele en el paso E (una vez CANCELLED, estos campos live se limpian a
+    // propósito; el snapshot histórico pasa a vivir en movements/issue viejo).
+    check('VH. "listado": card.currentBuyerName de la tarjeta de reemplazo (V2) es exactamente Camila, sin consultas extra',
+        store.get(`giftCards/${V2}`).currentBuyerName === 'Camila');
+    check('VI. "detalle": card.activatedByName de la tarjeta de reemplazo (V2) es exactamente Lenar Lima',
+        store.get(`giftCards/${V2}`).activatedByName === 'Lenar Lima');
+
+    // E) cadena V1 → V2 → V3: conserva buyer/seller originales en cada eslabón.
+    await call(cancelGiftCard, 'admin', { code: V2, reason: 'dañada otra vez' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: V2 }));
+    const V3 = r.value?.newCardCode;
+    check('VE. cadena V1→V2→V3: el tercer eslabón SIGUE mostrando Camila / Lenar Lima',
+        r.ok && store.get(`giftCards/${V3}`).currentBuyerName === 'Camila' && store.get(`giftCards/${V3}`).activatedByName === 'Lenar Lima', r.message);
+
+    // F) V3 se canjea y luego se vende de verdad a Roberto, por otra vendedora: buyer/seller YA NO son Camila/Lenar.
+    const cycleV3 = store.get(`giftCards/${V3}`).activeCycleId;
+    await call(createSale, 'seller', { saleId: 'V-sale', items: [{ productId: 'bear', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 7500, giftCardId: V3, giftCardCycleId: cycleV3 }] });
+    check('VF1. tras canjearse: AVAILABLE (el plástico vuelve al inventario)', store.get(`giftCards/${V3}`).status === 'AVAILABLE');
+    r = await outcome(call(activateGiftCard, 'nuevavendedora', { code: V3, buyerName: 'Roberto', payments: [{ method: 'qr', amountCents: 25000 }] }));
+    check('VF2. nueva venta REAL a Roberto: buyer pasa a Roberto, seller a la nueva vendedora (ya NO Camila/Lenar)',
+        r.ok && store.get(`giftCards/${V3}`).currentBuyerName === 'Roberto' && store.get(`giftCards/${V3}`).activatedByName === 'Vendedora Nueva', r.message);
+
+    // G) ningún reemplazo de esta cadena generó ingreso (solo la compra original de Camila + la reventa real a Roberto).
+    const dV = summary();
+    check('VG. ingreso total de la cadena = solo Camila (250, cash) + Roberto (250, qr) = Bs 500; los reemplazos no suman nada',
+        dV.giftCardsIssuedCents === 50000 && dV.giftCardIssuesCashCents === 25000 && dV.giftCardIssuesQrCents === 25000, JSON.stringify(dV));
+
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);
 })();

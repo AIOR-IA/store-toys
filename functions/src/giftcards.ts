@@ -1061,8 +1061,25 @@ export const updateGiftCardAmount = onCall<UpdateGiftCardAmountData>({ region: R
  * El `cycleId`/`cycleNumber` que se citan en los movimientos de auditoría
  * salen de `lastCycleId`/`cycleNumber`, que `cancelGiftCard` ya deja fijados
  * en el momento de cancelar y esta Function nunca vuelve a tocar — el ciclo
- * ya quedó cerrado (`status: 'cancelled'`) por `cancelGiftCard`, así que
- * aquí no hace falta releerlo ni volver a escribirlo.
+ * ya quedó cerrado (`status: 'cancelled'`) por `cancelGiftCard`.
+ *
+ * IDENTIDAD DEL ENTITLEMENT (ajuste posterior, hallazgo en DEV): el valor
+ * transferido no es solo el monto — también el COMPRADOR y el VENDEDOR
+ * ORIGINALES viajan con él, porque siguen siendo el mismo derecho pagado,
+ * solo con un plástico nuevo. Esta Function SÍ necesita releer
+ * `giftCardIssues/{lastCycleId}` (una lectura más, dentro de la misma
+ * transacción) para tomar `buyerName`/`activatedAt`/`activatedBy`/
+ * `activatedByName` de ahí — no hay otro snapshot estable de esa identidad.
+ * El nuevo `giftCards`/`giftCardIssues` se crea con esos mismos valores
+ * (nunca con los del admin que ejecuta el reemplazo): así el listado y el
+ * detalle siguen resolviendo "Comprador"/"Vendido por" sin releer nada —
+ * siguen leyendo `giftCards.currentBuyerName`/`activatedByName` tal cual ya
+ * hacían, cero N+1 — y la cadena de reemplazos (A→B→C) propaga la misma
+ * identidad indefinidamente, porque cada eslabón nuevo vuelve a dejarla en
+ * SU PROPIO `lastCycleId`. El admin que ejecuta el reemplazo solo queda
+ * registrado en `performedBy`/`performedByName` de los movimientos
+ * `REPLACED`/`REPLACEMENT_CREATED` de abajo — nunca en `activatedBy` de la
+ * tarjeta ni del ciclo, porque no fue quien la vendió.
  *
  * Atómico de punta a punta (prompt §16): reservar y crear el código nuevo,
  * marcar el viejo como reemplazado, abrir el ciclo nuevo y los movimientos
@@ -1106,6 +1123,33 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         transferredAmountCents = amountCents;
         const cycleNumber = oldCardSnap.get('cycleNumber') as number;
         const cycleId = oldCardSnap.get('lastCycleId') as string | null;
+        if (!cycleId) {
+            throw new HttpsError(
+                'internal',
+                'No se pudo recuperar el ciclo original de esta tarjeta. Intenta nuevamente.',
+            );
+        }
+
+        // Snapshot del comprador/vendedor ORIGINALES (ajuste posterior:
+        // identidad del entitlement, no solo su monto): `lastCycleId` ya
+        // identifica exactamente el ciclo que pagó este valor (§16.13), así
+        // que esta es la MISMA fuente que ya usa el resto del sistema para
+        // esa información — ni un campo nuevo ni una consulta extra fuera de
+        // esta transacción. El reemplazo transfiere la identidad del
+        // comprador/vendedor junto con el valor; quién ejecuta el reemplazo
+        // (este admin) solo queda registrado en los movimientos de abajo,
+        // nunca pisa `activatedBy`/`activatedByName` de la tarjeta.
+        const originalIssueSnap = await tx.get(db.doc(`giftCardIssues/${cycleId}`));
+        if (!originalIssueSnap.exists) {
+            throw new HttpsError(
+                'internal',
+                'No se pudo recuperar el ciclo original de esta tarjeta. Intenta nuevamente.',
+            );
+        }
+        const originalBuyerName = (originalIssueSnap.get('buyerName') as string | null) ?? null;
+        const originalActivatedAt = originalIssueSnap.get('activatedAt');
+        const originalActivatedBy = originalIssueSnap.get('activatedBy') as string;
+        const originalActivatedByName = originalIssueSnap.get('activatedByName') as string;
 
         const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(tx, 1);
         newCode = codes[0];
@@ -1134,10 +1178,10 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             replacedByCode: null,
             replacesCode: oldCode,
             pendingReplacement: false,
-            currentBuyerName: null,
-            activatedAt: FieldValue.serverTimestamp(),
-            activatedBy: uid,
-            activatedByName: name,
+            currentBuyerName: originalBuyerName,
+            activatedAt: originalActivatedAt,
+            activatedBy: originalActivatedBy,
+            activatedByName: originalActivatedByName,
             suspendedAt: null,
             suspendedBy: null,
             suspendedByName: null,
@@ -1157,10 +1201,10 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             cycleNumber: 1,
             amountCents,
             status: 'active',
-            buyerName: null,
-            activatedAt: FieldValue.serverTimestamp(),
-            activatedBy: uid,
-            activatedByName: name,
+            buyerName: originalBuyerName,
+            activatedAt: originalActivatedAt,
+            activatedBy: originalActivatedBy,
+            activatedByName: originalActivatedByName,
             dateKey,
             monthKey,
             year,
@@ -1191,7 +1235,7 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             createdAt: FieldValue.serverTimestamp(),
             performedBy: uid,
             performedByName: name,
-            buyerNameSnapshot: null,
+            buyerNameSnapshot: originalBuyerName,
             saleId: null,
             reason,
             replacedByCode: newCode,
@@ -1207,7 +1251,7 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             createdAt: FieldValue.serverTimestamp(),
             performedBy: uid,
             performedByName: name,
-            buyerNameSnapshot: null,
+            buyerNameSnapshot: originalBuyerName,
             saleId: null,
             reason,
             replacedByCode: null,
