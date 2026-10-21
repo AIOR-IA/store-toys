@@ -3,6 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { TranslateModule } from '@ngx-translate/core';
 import { ToastService } from '@core/services';
 import { CursorPager, PageResult, PageSize } from '@core/data';
+import { LABEL_SIZE_MM } from '@shared/constants';
 import { ProductsService } from '../../products.service';
 import { Product } from '../../product.model';
 import {
@@ -11,6 +12,9 @@ import {
 } from './product-labels-sheet.component';
 
 const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+/** mismo factor que usa el componente para convertir mm → pt (pdfmake mide en pt). */
+const MM_TO_PT = 2.834645669;
+const LETTER_WIDTH_PT = 8.5 * 72;
 
 const makeProduct = (n: number): Product =>
     ({
@@ -206,6 +210,159 @@ describe('ProductLabelsSheetComponent — paginación y selección global', () =
             'PRODUCTO 12',
             'PRODUCTO 21',
         ]);
+    });
+
+    describe('distribución en filas de 4 columnas (ajuste posterior)', () => {
+        const run = async (quantity: number) => {
+            const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+                default: { createPdf: (doc: unknown) => unknown };
+            };
+            let doc:
+                | {
+                      pageSize: string;
+                      pageMargins: [number, number, number, number];
+                      content: {
+                          table: { widths: number[]; body: unknown[][] };
+                          layout: {
+                              paddingLeft: (i: number) => number;
+                              paddingRight: (i: number) => number;
+                          };
+                      }[];
+                  }
+                | undefined;
+            const spy = spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((
+                d: typeof doc,
+            ) => {
+                doc = d;
+                return { download: () => undefined };
+            }) as never);
+
+            component.toggleSelected(product(1), true);
+            component.setQuantity(product(1), quantity);
+            await component.generatePdf();
+            spy.calls.reset();
+
+            return doc!;
+        };
+
+        it('1 etiqueta → 1 fila con 4 columnas (padding con celdas vacías)', async () => {
+            const doc = await run(1);
+            expect(doc.content[0].table.widths.length).toBe(4);
+            expect(doc.content[0].table.body.length).toBe(1);
+            expect(doc.content[0].table.body[0].length).toBe(4);
+        });
+
+        it('3 etiquetas → 1 fila de 4 columnas, con 1 celda vacía de relleno', async () => {
+            const doc = await run(3);
+            expect(doc.content[0].table.body.length).toBe(1);
+            expect(doc.content[0].table.body[0].length).toBe(4);
+        });
+
+        it('4 etiquetas → exactamente 1 fila completa', async () => {
+            const doc = await run(4);
+            expect(doc.content[0].table.body.length).toBe(1);
+            expect(doc.content[0].table.body[0].length).toBe(4);
+        });
+
+        it('5 etiquetas → 4 + 1 (dos filas)', async () => {
+            const doc = await run(5);
+            expect(doc.content[0].table.body.length).toBe(2);
+            expect(doc.content[0].table.body[0].length).toBe(4);
+            expect(doc.content[0].table.body[1].length).toBe(4); // relleno hasta 4
+        });
+
+        it('8 etiquetas → 4 + 4 (dos filas completas)', async () => {
+            const doc = await run(8);
+            expect(doc.content[0].table.body.length).toBe(2);
+        });
+
+        it('10 etiquetas → 4 + 4 + 2 (tres filas)', async () => {
+            const doc = await run(10);
+            expect(doc.content[0].table.body.length).toBe(3);
+        });
+
+        it('12 etiquetas → 4 + 4 + 4 (tres filas completas)', async () => {
+            const doc = await run(12);
+            expect(doc.content[0].table.body.length).toBe(3);
+        });
+
+        it('13 etiquetas → 4 + 4 + 4 + 1 (cuatro filas)', async () => {
+            const doc = await run(13);
+            expect(doc.content[0].table.body.length).toBe(4);
+        });
+    });
+
+    describe('centrado horizontal (ajuste posterior: margen izq. = margen der.)', () => {
+        const run = async () => {
+            const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+                default: { createPdf: (doc: unknown) => unknown };
+            };
+            let doc:
+                | {
+                      pageSize: string;
+                      pageMargins: [number, number, number, number];
+                      content: {
+                          table: { widths: number[]; body: unknown[][] };
+                          layout: {
+                              paddingLeft: (i: number) => number;
+                              paddingRight: (i: number) => number;
+                          };
+                      }[];
+                  }
+                | undefined;
+            spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((d: typeof doc) => {
+                doc = d;
+                return { download: () => undefined };
+            }) as never);
+
+            component.toggleSelected(product(1), true);
+            component.setQuantity(product(1), 4);
+            await component.generatePdf();
+            return doc!;
+        };
+
+        it('mantiene hoja Carta y las 4 columnas ya validadas', async () => {
+            const doc = await run();
+            expect(doc.pageSize).toBe('LETTER');
+            expect(doc.content[0].table.widths.length).toBe(4);
+        });
+
+        it('NO cambió el ancho de columna: sigue siendo LABEL_SIZE_MM.width en puntos (barcode intacto)', async () => {
+            const doc = await run();
+            const expectedWidthPt = LABEL_SIZE_MM.width * MM_TO_PT;
+            for (const width of doc.content[0].table.widths) {
+                expect(width).toBeCloseTo(expectedWidthPt, 6);
+            }
+        });
+
+        it('elimina el padding horizontal interno de la tabla (causa real del desplazamiento)', async () => {
+            const doc = await run();
+            const { layout } = doc.content[0];
+            for (let i = 0; i < 4; i++) {
+                expect(layout.paddingLeft(i)).toBe(0);
+                expect(layout.paddingRight(i)).toBe(0);
+            }
+        });
+
+        it('margen izquierdo y derecho quedan EXACTAMENTE iguales', async () => {
+            const doc = await run();
+            const [left, , right] = doc.pageMargins;
+            expect(left).toBeCloseTo(right, 9);
+        });
+
+        it('margen vertical (arriba/abajo) permanece en 10mm, sin cambios', async () => {
+            const doc = await run();
+            const [, top, , bottom] = doc.pageMargins;
+            expect(top).toBeCloseTo(10 * MM_TO_PT, 6);
+            expect(bottom).toBeCloseTo(10 * MM_TO_PT, 6);
+        });
+
+        it('el bloque completo (4 columnas + márgenes) cabe exacto en el ancho de la hoja Carta, sin recorte', async () => {
+            const doc = await run();
+            const [left, , right] = doc.pageMargins;
+            const tableWidth = doc.content[0].table.widths.reduce((a, b) => a + b, 0);
+            expect(left + tableWidth + right).toBeCloseTo(LETTER_WIDTH_PT, 6);
+        });
     });
 
     it('muestra el nombre en MAYÚSCULAS sin alterar el dato del producto', () => {

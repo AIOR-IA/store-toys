@@ -23,7 +23,15 @@ import { ProductsService } from '../../products.service';
 import { Product } from '../../product.model';
 
 const MM_TO_PT = 2.834645669;
-const PAGE_MARGIN_MM = 10;
+/** Vertical sin cambios: el ajuste a 4 columnas es solo horizontal. */
+const PAGE_MARGIN_VERTICAL_MM = 10;
+/**
+ * Piso de seguridad SOLO para decidir cuántas columnas entran. El margen que
+ * realmente se aplica (`generatePdf`) siempre resulta mayor que esto: se
+ * calcula centrando el ancho exacto de la tabla en el espacio sobrante, para
+ * que el margen izquierdo y el derecho queden iguales.
+ */
+const MIN_PAGE_MARGIN_HORIZONTAL_MM = 5;
 /** Carta/Letter en mm — pdfmake mide en puntos, la conversión vive solo aquí. */
 const PAGE_SIZE_MM = { width: 215.9, height: 279.4 };
 
@@ -237,9 +245,22 @@ export class ProductLabelsSheetComponent implements OnInit {
             pdfMake.addVirtualFileSystem(vfs);
 
             const labelWidthPt = LABEL_SIZE_MM.width * MM_TO_PT;
-            const marginPt = PAGE_MARGIN_MM * MM_TO_PT;
-            const usableWidthPt = PAGE_SIZE_MM.width * MM_TO_PT - marginPt * 2;
-            const columns = Math.max(1, Math.floor(usableWidthPt / labelWidthPt));
+            const pageWidthPt = PAGE_SIZE_MM.width * MM_TO_PT;
+            const marginVerticalPt = PAGE_MARGIN_VERTICAL_MM * MM_TO_PT;
+            const minMarginHorizontalPt = MIN_PAGE_MARGIN_HORIZONTAL_MM * MM_TO_PT;
+            const columns = Math.max(
+                1,
+                Math.floor((pageWidthPt - minMarginHorizontalPt * 2) / labelWidthPt),
+            );
+            // El layout de tabla por defecto de pdfmake ('noBorders') agrega 4pt de
+            // padding entre columnas (docMeasure.js: getOffsets), lo que ensanchaba
+            // la tabla más allá de columns*labelWidthPt y descentraba el bloque
+            // hacia la derecha. El layout propio de abajo lo elimina: el único
+            // espacio entre etiquetas vuelve a ser el `margin` de cada celda, que
+            // ya vive DENTRO de labelWidthPt. Con eso el ancho real de la tabla es
+            // exactamente columns*labelWidthPt y se puede centrar con precisión.
+            const tableWidthPt = columns * labelWidthPt;
+            const marginHorizontalPt = (pageWidthPt - tableWidthPt) / 2;
 
             const cells = instances.map((product) =>
                 this.buildLabelCell(product, JsBarcode, labelWidthPt),
@@ -254,14 +275,29 @@ export class ProductLabelsSheetComponent implements OnInit {
             pdfMake
                 .createPdf({
                     pageSize: 'LETTER',
-                    pageMargins: [marginPt, marginPt, marginPt, marginPt],
+                    pageMargins: [
+                        marginHorizontalPt,
+                        marginVerticalPt,
+                        marginHorizontalPt,
+                        marginVerticalPt,
+                    ],
                     content: [
                         {
                             table: {
                                 widths: Array(columns).fill(labelWidthPt),
                                 body,
                             },
-                            layout: 'noBorders',
+                            // Sin bordes y SIN el padding horizontal que agrega
+                            // 'noBorders' por defecto (ver nota junto a tableWidthPt).
+                            // paddingTop/paddingBottom quedan en su valor por
+                            // defecto de pdfmake (2pt): el espaciado vertical no
+                            // cambia.
+                            layout: {
+                                hLineWidth: () => 0,
+                                vLineWidth: () => 0,
+                                paddingLeft: () => 0,
+                                paddingRight: () => 0,
+                            },
                         },
                     ],
                 })
