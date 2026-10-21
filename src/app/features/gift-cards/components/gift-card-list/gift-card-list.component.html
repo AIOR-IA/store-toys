@@ -124,7 +124,15 @@
     </ng-template>
 </p-table>
 
-@if (!singleResultMode()) {
+@if (!singleResultMode() && denominationFilter() === null) {
+<!--
+  Con un monto activo, `visibleRows` ya no es "la página que el paginador
+  tiene cargada" — pasa a filtrar sobre el universo acotado de `summary()`
+  (ver el comentario en el componente). El paginador de cursores no aplica
+  a esa vista: mostrarlo confundiría (sus botones moverían `rows()`, que
+  `visibleRows` ignora en este modo) y ya no hace falta, porque esa vista
+  siempre muestra el resultado completo (acotado a 200, igual que los chips).
+-->
 <app-cards-paginator
     [hasNextPage]="hasNext()"
     [hasPreviousPage]="hasPrev()"

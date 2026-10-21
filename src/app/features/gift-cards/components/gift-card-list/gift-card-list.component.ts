@@ -132,13 +132,43 @@ export class GiftCardListComponent implements OnInit {
         );
     });
 
-    /** Filtro de denominación aplicado SOBRE la página ya cargada (prompt §34). */
+    /**
+     * Filtro de monto (ajuste posterior — corrección de bug): filtra siempre
+     * por `amountCents`, nunca por el código (CLAUDE.md, "identidad ≠ monto":
+     * un código histórico como `GC20-001` puede valer Bs 500 hoy).
+     *
+     * Causa raíz del bug original: este filtro se aplicaba SOBRE `rows()`
+     * — la página que el paginador por cursores ya tenía cargada, acotada
+     * por `status` server-side nada más. Con `TODAS` (sin filtro de estado)
+     * esa página de 10 podía no contener ninguna tarjeta del monto buscado
+     * aunque existieran en otra página, mostrando "No se encontraron
+     * registros" de forma incorrecta. Con un estado específico el bug no se
+     * notaba porque, a esta escala (prompt §34, "20-40 tarjetas"), todas las
+     * tarjetas de ese estado suelen caber en la primera página.
+     *
+     * Corrección estructural (no un parche de "20 Bs"): cuando el monto está
+     * activo y no es una búsqueda puntual por código, se filtra sobre
+     * `summary()` — el mismo universo acotado (`limit(200)`, igual que los
+     * chips de arriba) que YA se cargaba para los chips/el dropdown, en vez
+     * de sobre la página del paginador. Así "TODAS + monto" ve todas las
+     * tarjetas de ese monto sin importar su estado, y "ESTADO + monto" las
+     * filtra también por estado — exactamente la matriz del prompt. Una
+     * búsqueda por código (`singleResultMode`) sigue comprobando el monto
+     * sobre esa única tarjeta encontrada, como ya hacía.
+     */
     denominationFilter = signal<number | null>(null);
     readonly visibleRows = computed(() => {
         const denom = this.denominationFilter();
-        const rows = this.rows();
-        if (denom === null) return rows;
-        return rows.filter((r) => r.amountCents === denom);
+        if (denom === null) return this.rows();
+
+        if (this.singleResultMode()) {
+            return this.rows().filter((r) => r.amountCents === denom);
+        }
+
+        const status = this.filter();
+        return this.summary().filter(
+            (card) => card.amountCents === denom && (status === 'all' || card.status === status),
+        );
     });
 
     private pager = this.giftCardsService.createPager(this.filter(), this.pageSize());

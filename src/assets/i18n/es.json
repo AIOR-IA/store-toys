@@ -409,7 +409,7 @@
       },
       "filters": {
         "all": "Todas",
-        "denomination": "Denominación"
+        "denomination": "Monto"
       },
       "actions": {
         "activate": "Vender / Activar",
