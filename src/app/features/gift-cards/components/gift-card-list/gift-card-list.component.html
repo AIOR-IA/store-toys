@@ -36,6 +36,17 @@
 }
 }
 
+<div class="flex justify-end mb-2">
+    <button
+        pButton
+        type="button"
+        class="p-button-text"
+        icon="fas fa-tags"
+        [label]="'app.giftCards.labelsSheet.title' | translate"
+        routerLink="etiquetas"
+    ></button>
+</div>
+
 <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
     <app-filter-tab
         [options]="filterOptions"

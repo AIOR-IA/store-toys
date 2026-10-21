@@ -14,4 +14,11 @@ export default [
                 (m) => m.GiftCardListComponent,
             ),
     },
+    {
+        path: 'etiquetas',
+        loadComponent: () =>
+            import(
+                './components/gift-card-labels-sheet/gift-card-labels-sheet.component'
+            ).then((m) => m.GiftCardLabelsSheetComponent),
+    },
 ] satisfies Routes;

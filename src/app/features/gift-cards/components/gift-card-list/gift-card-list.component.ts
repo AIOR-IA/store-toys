@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
 import { DropdownModule } from 'primeng/dropdown';
@@ -38,6 +39,7 @@ import { GiftCard, GiftCardStatus } from '../../gift-card.model';
     imports: [
         CommonModule,
         FormsModule,
+        RouterLink,
         TableModule,
         TagModule,
         ButtonModule,

@@ -503,6 +503,13 @@
         "print": "Imprimir etiqueta",
         "close": "Cerrar",
         "amountNotPrinted": "Monto actual: {{amount}} (no se imprime en la etiqueta: puede cambiar)"
+      },
+      "labelsSheet": {
+        "title": "Etiquetas",
+        "selectCards": "Selecciona las Gift Cards",
+        "generatePdf": "Generar PDF",
+        "selectedSummary": "Seleccionadas: {{count}}",
+        "cancelledHint": "Dada de baja: no se puede volver a imprimir"
       }
     },
     "reports": {

@@ -1,0 +1,105 @@
+<app-title-bar
+    [title]="'app.giftCards.labelsSheet.title' | translate"
+    backPath="/giftcards"
+></app-title-bar>
+
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+    <app-filter-tab
+        [options]="filterOptions"
+        [selectedOption]="filter()"
+        (onChange)="onFilterChange($event)"
+    ></app-filter-tab>
+
+    <app-search-bar
+        [placeholder]="'app.giftCards.searchPlaceholder'"
+        [compact]="true"
+        [selectOnSearch]="true"
+        (onSearch)="onSearch($event)"
+    ></app-search-bar>
+</div>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!rows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p class="text-sm text-gray-500 mb-3">
+    {{ "app.giftCards.labelsSheet.selectCards" | translate }}
+</p>
+
+<!--
+  Mismo patrón de fila que Productos → Etiquetas, sin cantidad: cada Gift
+  Card es un código físico único, 1 seleccionada = 1 etiqueta. El monto se
+  muestra aquí solo para que el admin identifique la tarjeta — nunca llega
+  al PDF (CLAUDE.md, "identidad ≠ monto").
+-->
+<div class="flex flex-col mb-4">
+    @for (card of rows(); track card.cardCode) {
+    <div
+        class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-gray-100 py-2"
+    >
+        <p-checkbox
+            [binary]="true"
+            [ngModel]="isSelected(card)"
+            [disabled]="!isSelectable(card)"
+            (ngModelChange)="toggleSelected(card, $event)"
+        ></p-checkbox>
+        <span class="min-w-0 basis-40 grow font-mono text-base font-medium sm:grow-0 sm:basis-auto sm:w-40">{{
+            card.cardCode
+        }}</span>
+        <span class="text-sm text-gray-500">{{ card.amountCents | money }}</span>
+        @switch (card.status) { @case ('AVAILABLE') {
+        <p-tag severity="success" [value]="'app.giftCards.status.available' | translate"></p-tag>
+        } @case ('ACTIVE') {
+        <p-tag severity="info" [value]="'app.giftCards.status.active' | translate"></p-tag>
+        } @case ('SUSPENDED') {
+        <p-tag severity="warning" [value]="'app.giftCards.status.suspended' | translate"></p-tag>
+        } @case ('CANCELLED') {
+        <p-tag severity="secondary" [value]="'app.giftCards.status.cancelled' | translate"></p-tag>
+        } }
+        @if (!isSelectable(card)) {
+        <span class="text-xs text-gray-400">{{
+            "app.giftCards.labelsSheet.cancelledHint" | translate
+        }}</span>
+        }
+    </div>
+    }
+</div>
+}
+
+<!--
+  Fuera del bloque de arriba a propósito, igual que en Productos: montar/
+  desmontar el paginador en cada carga dispara un evento espurio del
+  `p-dropdown` de tamaño de página que reintroduce el loop de Firestore.
+-->
+@if (hasLoadedOnce() && !singleResultMode()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+}
+
+@if (hasLoadedOnce()) {
+<div class="flex flex-wrap items-center gap-3 mt-4">
+    <button
+        pButton
+        type="button"
+        icon="fas fa-file-pdf"
+        [label]="'app.giftCards.labelsSheet.generatePdf' | translate"
+        [loading]="generating()"
+        [disabled]="!hasSelection()"
+        (click)="generatePdf()"
+    ></button>
+    <span class="text-sm text-gray-500">{{
+        "app.giftCards.labelsSheet.selectedSummary" | translate : { count: selectedCount() }
+    }}</span>
+</div>
+}
