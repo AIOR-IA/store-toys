@@ -38,4 +38,6 @@ export {
     cancelGiftCard,
     updateGiftCardAmount,
     replaceGiftCard,
+    getGiftCardIssue,
+    listGiftCardIssues,
 } from './giftcards';

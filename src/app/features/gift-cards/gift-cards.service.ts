@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import {
     Firestore,
+    Timestamp,
     collection,
     doc,
     getDoc,
@@ -11,13 +12,132 @@ import {
     where,
 } from '@angular/fire/firestore';
 import { Functions, httpsCallable } from '@angular/fire/functions';
-import { Observable, from, map } from 'rxjs';
-import { CursorPager, PageSize } from '@core/data';
+import { Observable, firstValueFrom, from, map } from 'rxjs';
+import { PageResult, PageSize, CursorPager } from '@core/data';
 import { normalizeGiftCardCode } from '@core/utils';
 import { giftCardConverter, giftCardMovementConverter } from './gift-card.converter';
-import { GiftCard, GiftCardIssuePayment, GiftCardMovement, GiftCardStatus } from './gift-card.model';
+import {
+    GiftCard,
+    GiftCardIssuePayment,
+    GiftCardMovement,
+    GiftCardReceipt,
+    GiftCardStatus,
+} from './gift-card.model';
 
 export type GiftCardsFilter = 'all' | GiftCardStatus;
+
+/**
+ * Historial de emisiones/ventas reales de Gift Card (ajuste posterior,
+ * Recibo/Historial — ver `listGiftCardIssues` en `functions/src/giftcards.ts`
+ * para la justificación completa). Espejo de `SalesHistoryFilter`
+ * (`sales.service.ts`): `sellerId` solo lo usa el admin, el vendedor
+ * siempre ve las suyas (la Function lo fuerza server-side, nunca se confía
+ * en lo que mande el cliente).
+ */
+export interface GiftCardIssuesHistoryFilter {
+    cardCode?: string;
+    sellerId?: string;
+}
+
+interface ListIssuesCursorDto {
+    activatedAtMs: number;
+    id: string;
+}
+
+interface GiftCardIssueDto {
+    id: string;
+    cardCode: string;
+    cycleNumber: number;
+    amountCents: number;
+    buyerName: string | null;
+    activatedAtMs: number;
+    activatedBy: string;
+    activatedByName: string;
+    dateKey: string;
+    payments: GiftCardIssuePayment[];
+}
+
+interface ListIssuesResponse {
+    rows: GiftCardIssueDto[];
+    hasNext: boolean;
+    total: number;
+    nextCursor: ListIssuesCursorDto | null;
+}
+
+/**
+ * `activatedAtMs` (número) → `Timestamp` real: la respuesta de un
+ * `httpsCallable` es JSON plano, nunca un `Timestamp` de
+ * `@angular/fire/firestore` (a diferencia de un `getDoc` con `withConverter`)
+ * — hay que reconstruirlo para que `formatInStoreTimezone` (el mismo que usa
+ * el recibo de Ventas) pueda seguir llamando `.toDate()` sin distinguir de
+ * dónde vino el dato.
+ */
+function dtoToReceipt(dto: GiftCardIssueDto): GiftCardReceipt {
+    return {
+        id: dto.id,
+        cardCode: dto.cardCode,
+        cycleNumber: dto.cycleNumber,
+        amountCents: dto.amountCents,
+        buyerName: dto.buyerName,
+        activatedAt: Timestamp.fromMillis(dto.activatedAtMs),
+        activatedByName: dto.activatedByName,
+        dateKey: dto.dateKey,
+        payments: dto.payments,
+    };
+}
+
+/**
+ * Paginador del Historial de Gift Cards — mismo contrato público que
+ * `CursorPager` (`first/next/prev` → `PageResult`), pero sobre la Function
+ * `listGiftCardIssues` en vez de una `Query` directa de Firestore:
+ * `giftCardIssues` es `allow get, list: if isAdmin()` en las Rules (plan
+ * §16.1) y esta pantalla también la usa el vendedor para sus propias
+ * emisiones — el cursor por lo tanto también vive del lado del servidor
+ * (ver el comentario largo de la Function). `cursors[i]` = el cursor que
+ * `listGiftCardIssues` devolvió al pedir la página `i` — exactamente el
+ * mismo invariante que `CursorPager.cursors[i]` (el último documento de esa
+ * página), solo que aquí es un valor opaco que la Function ya resolvió.
+ */
+class GiftCardIssuesPager {
+    private cursors: (ListIssuesCursorDto | null)[] = [];
+    private pageIndex = 0;
+    private total = 0;
+
+    constructor(
+        private readonly fetchPage: (
+            cursor: ListIssuesCursorDto | null,
+        ) => Promise<ListIssuesResponse>,
+    ) {}
+
+    async first(): Promise<PageResult<GiftCardReceipt>> {
+        this.cursors = [];
+        this.pageIndex = 0;
+        return this.fetchCurrentPage();
+    }
+
+    async next(): Promise<PageResult<GiftCardReceipt>> {
+        this.pageIndex += 1;
+        return this.fetchCurrentPage();
+    }
+
+    async prev(): Promise<PageResult<GiftCardReceipt>> {
+        if (this.pageIndex > 0) this.pageIndex -= 1;
+        return this.fetchCurrentPage();
+    }
+
+    private async fetchCurrentPage(): Promise<PageResult<GiftCardReceipt>> {
+        const cursor = this.pageIndex > 0 ? this.cursors[this.pageIndex - 1] ?? null : null;
+        const res = await this.fetchPage(cursor);
+        this.total = res.total;
+        this.cursors[this.pageIndex] = res.nextCursor;
+        return {
+            rows: res.rows.map(dtoToReceipt),
+            hasNext: res.hasNext,
+            hasPrev: this.pageIndex > 0,
+            total: this.total,
+        };
+    }
+}
 
 export interface ActivateGiftCardInput {
     code: string;
@@ -83,6 +203,54 @@ export class GiftCardsService {
         const normalized = normalizeGiftCardCode(code);
         return from(getDoc(doc(this.giftCardsCollection, normalized))).pipe(
             map((snap) => (snap.exists() ? snap.data() : null)),
+        );
+    }
+
+    /**
+     * Recibo de UNA emisión real (`getGiftCardIssue`, Function, prompt
+     * Recibo/Historial §3-§4, §16): único punto de lectura, tanto para
+     * imprimir justo después de vender como para reimprimir desde el
+     * Historial — así los dos caminos nunca pueden mostrar algo distinto
+     * para el mismo ciclo. Rechaza un `origin: 'replacement'` (nunca genera
+     * recibo de cobro) y aplica la misma regla de dueño que `sales`: el
+     * vendedor solo puede traer su propia emisión, el admin cualquiera.
+     */
+    getIssueReceipt(issueId: string): Observable<GiftCardReceipt> {
+        const callable = httpsCallable<{ issueId: string }, GiftCardIssueDto>(
+            this.functions,
+            'getGiftCardIssue',
+        );
+        return from(callable({ issueId })).pipe(map((r) => dtoToReceipt(r.data)));
+    }
+
+    /**
+     * Historial de emisiones/ventas reales (`listGiftCardIssues`, Function,
+     * prompt Recibo/Historial §9-§11, §15, §20): paginado por cursor, SIN
+     * `giftCards` — cada ciclo de una misma tarjeta reutilizada aparece como
+     * una fila independiente. Nunca incluye un `origin: 'replacement'`.
+     */
+    createIssuesHistoryPager(filter: GiftCardIssuesHistoryFilter, pageSize: PageSize) {
+        const callable = httpsCallable<
+            {
+                pageSize: number;
+                cursor: ListIssuesCursorDto | null;
+                cardCode?: string;
+                sellerId?: string;
+            },
+            ListIssuesResponse
+        >(this.functions, 'listGiftCardIssues');
+
+        return new GiftCardIssuesPager((cursor) =>
+            firstValueFrom(
+                from(
+                    callable({
+                        pageSize,
+                        cursor,
+                        cardCode: filter.cardCode,
+                        sellerId: filter.sellerId,
+                    }),
+                ).pipe(map((r) => r.data)),
+            ),
         );
     }
 

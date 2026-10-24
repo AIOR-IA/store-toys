@@ -1,4 +1,4 @@
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { db } from './admin';
 import { assertActive, assertAdmin } from './guards';
@@ -101,6 +101,19 @@ const MAX_REASON_LENGTH = 300;
  */
 const MAX_GENERATION_ATTEMPTS = 10000;
 
+/**
+ * Historial de Gift Cards (recibo/reimpresión — ajuste posterior, sin abrir
+ * una fase nueva): `ISSUE_LIST_MAX_PAGE_SIZE` espeja el mismo techo que
+ * `PAGE_SIZE_OPTIONS` del frontend (5/10/15, `core/data`). El loop de
+ * `listGiftCardIssues` filtra `origin === 'replacement'` EN MEMORIA (ver el
+ * comentario largo de esa Function para el porqué) — `ISSUE_LIST_MAX_BATCH_ITERATIONS`
+ * es el mismo tipo de techo defensivo que `MAX_GENERATION_ATTEMPTS` arriba:
+ * a esta escala (20-40 tarjetas) nunca se acerca, solo evita un bucle
+ * colgado si algún día hay muchísimos reemplazos consecutivos.
+ */
+const ISSUE_LIST_MAX_PAGE_SIZE = 15;
+const ISSUE_LIST_MAX_BATCH_ITERATIONS = 20;
+
 type IssuePaymentMethod = 'cash' | 'qr';
 const ISSUE_PAYMENT_METHODS: IssuePaymentMethod[] = ['cash', 'qr'];
 
@@ -155,6 +168,24 @@ interface ReactivateGiftCardData {
 interface CancelGiftCardData {
     code: string;
     reason: string;
+}
+
+interface GetGiftCardIssueData {
+    issueId: string;
+}
+
+interface ListGiftCardIssuesCursor {
+    activatedAtMs: number;
+    id: string;
+}
+
+interface ListGiftCardIssuesData {
+    pageSize: number;
+    cursor?: ListGiftCardIssuesCursor | null;
+    /** Admin y vendedor por igual (prompt Historial §14, búsqueda por código). */
+    cardCode?: string;
+    /** Solo lo usa el admin (prompt §9, §20): el vendedor siempre ve las suyas. */
+    sellerId?: string;
 }
 
 function requireCode(value: unknown, field = 'code'): string {
@@ -363,6 +394,88 @@ async function assertStaffRole(auth: Parameters<typeof assertActive>[0]) {
 
 function staffName(snap: FirebaseFirestore.DocumentSnapshot): string {
     return `${snap.get('firstName')} ${snap.get('lastName')}`.trim();
+}
+
+function requireIssueId(value: unknown): string {
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new HttpsError('invalid-argument', 'Emisión inválida.');
+    }
+    return value.trim();
+}
+
+function requireListPageSize(value: unknown): number {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > ISSUE_LIST_MAX_PAGE_SIZE
+    ) {
+        throw new HttpsError('invalid-argument', 'Tamaño de página inválido.');
+    }
+    return value;
+}
+
+function optionalCardCodeFilter(value: unknown): string | null {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    return normalizeGiftCardCode(value);
+}
+
+function optionalSellerIdFilter(value: unknown): string | null {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    return value.trim();
+}
+
+function optionalListCursor(value: unknown): ListGiftCardIssuesCursor | null {
+    if (value === undefined || value === null) return null;
+    const ms = (value as { activatedAtMs?: unknown })?.activatedAtMs;
+    const id = (value as { id?: unknown })?.id;
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || typeof id !== 'string' || !id) {
+        throw new HttpsError('invalid-argument', 'Cursor de paginación inválido.');
+    }
+    return { activatedAtMs: ms, id };
+}
+
+/**
+ * `true` únicamente para un ciclo abierto por `replaceGiftCard` (prompt
+ * Historial/Recibo §10, §12): nunca es una venta real, nunca tiene recibo de
+ * cobro. Los ciclos de VENTA anteriores a este campo (plan §16.13) no lo
+ * tienen en absoluto — se leen como `'sale'`, nunca como reemplazo.
+ */
+function isReplacementOrigin(snap: FirebaseFirestore.DocumentSnapshot): boolean {
+    return (snap.get('origin') as string | undefined) === 'replacement';
+}
+
+interface GiftCardIssueDto {
+    id: string;
+    cardCode: string;
+    cycleNumber: number;
+    amountCents: number;
+    status: string;
+    buyerName: string | null;
+    activatedAtMs: number;
+    activatedBy: string;
+    activatedByName: string;
+    dateKey: string;
+    payments: { method: IssuePaymentMethod; amountCents: number }[];
+}
+
+/** Forma serializable (sin `Timestamp`) de un ciclo, para la respuesta de un `onCall`. */
+function toIssueDto(snap: FirebaseFirestore.DocumentSnapshot): GiftCardIssueDto {
+    const activatedAt = snap.get('activatedAt') as FirebaseFirestore.Timestamp;
+    return {
+        id: snap.id,
+        cardCode: snap.get('cardCode') as string,
+        cycleNumber: snap.get('cycleNumber') as number,
+        amountCents: snap.get('amountCents') as number,
+        status: snap.get('status') as string,
+        buyerName: (snap.get('buyerName') as string | null) ?? null,
+        activatedAtMs: activatedAt.toMillis(),
+        activatedBy: snap.get('activatedBy') as string,
+        activatedByName: snap.get('activatedByName') as string,
+        dateKey: snap.get('dateKey') as string,
+        payments:
+            (snap.get('payments') as { method: IssuePaymentMethod; amountCents: number }[]) ?? [],
+    };
 }
 
 /**
@@ -1260,4 +1373,160 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
     });
 
     return { cardCode: oldCode, newCardCode: newCode, amountCents: transferredAmountCents };
+});
+
+/**
+ * Recibo de cobro de UNA emisión/venta real de Gift Card (ajuste posterior,
+ * Recibo/Historial de Gift Cards, sin abrir una fase nueva — ver también
+ * `listGiftCardIssues` abajo). Fuente de verdad del comprobante: SIEMPRE
+ * `giftCardIssues/{issueId}`, nunca `giftCards` — el monto/comprador
+ * ACTUALES de la tarjeta pueden pertenecer a un ciclo totalmente distinto
+ * para cuando alguien reimprime (plan §16.13, identidad ≠ monto). Un
+ * `origin: 'replacement'` se rechaza explícitamente: un reemplazo nunca
+ * generó dinero nuevo y no tiene recibo de cobro.
+ *
+ * Esta misma Function es el único punto de lectura tanto para "Imprimir
+ * recibo" justo después de vender como para reimprimir desde el Historial:
+ * así los dos caminos nunca pueden mostrar algo distinto para el mismo
+ * ciclo.
+ *
+ * `giftCardIssues` es `allow get, list: if isAdmin()` en las Rules (solo
+ * auditoría, plan §16.1, comentario de cabecera de este archivo): un
+ * vendedor no puede leerlo directo desde Angular. En vez de abrir las Rules
+ * SOLO para esta pantalla (instrucción explícita del prompt: "NO cambies
+ * Rules a una solución más permisiva solamente para leer historial"), esta
+ * Function hace la misma verificación de dueño que ya usa `sales`
+ * (`sellerId == uid` en la Rule de `sales`, acá `activatedBy == uid` en
+ * código): el vendedor solo puede traer SU PROPIA emisión; el admin,
+ * cualquiera.
+ */
+export const getGiftCardIssue = onCall<GetGiftCardIssueData>({ region: REGION }, async (request) => {
+    const staffSnap = await assertStaffRole(request.auth);
+    const uid = request.auth!.uid;
+    const isAdmin = staffSnap.get('role') === 'admin';
+
+    const issueId = requireIssueId(request.data.issueId);
+    const snap = await db.doc(`giftCardIssues/${issueId}`).get();
+    if (!snap.exists) {
+        throw new HttpsError('not-found', 'Emisión no encontrada.');
+    }
+    if (isReplacementOrigin(snap)) {
+        throw new HttpsError(
+            'failed-precondition',
+            'Un reemplazo de plástico no genera un recibo de cobro.',
+        );
+    }
+    if (!isAdmin && snap.get('activatedBy') !== uid) {
+        throw new HttpsError('permission-denied', 'No puedes ver esta emisión.');
+    }
+
+    return toIssueDto(snap);
+});
+
+/**
+ * Historial de emisiones/ventas REALES de Gift Card, paginado por cursor
+ * (ajuste posterior, Recibo/Historial de Gift Cards). Fuente SIEMPRE
+ * `giftCardIssues`, nunca `giftCards`: una misma tarjeta física reutilizada
+ * son N emisiones distintas en este historial (plan §16.13 — el ejemplo del
+ * prompt: Camila/Bs 100 → Roberto/Bs 500 → María/Bs 1000, tres filas, no
+ * una). Un ciclo con `origin: 'replacement'` jamás aparece aquí: no es una
+ * venta, es Bs 0 de ingreso nuevo.
+ *
+ * Mismo motivo que `getGiftCardIssue` para ser una Function y no una
+ * consulta directa desde Angular (`giftCardIssues` es admin-only en las
+ * Rules): el vendedor ve solo lo que él mismo activó (`activatedBy` forzado
+ * a su propio uid si no es admin, igual que `sellerId` en el historial de
+ * Ventas); el admin ve todo y puede acotar por vendedor o por código.
+ *
+ * SIN filtro de fecha a propósito, a diferencia de Ventas: la tienda tiene
+ * 20-40 tarjetas físicas (CLAUDE.md) — unas pocas decenas de emisiones en
+ * total con el tiempo, no miles por día — así que forzar un filtro de fecha
+ * no aporta nada aquí y solo complicaría la pantalla sin necesidad (prompt
+ * Historial §14: "no agregues filtros que no aporten").
+ *
+ * `origin: 'replacement'` no se puede excluir con un `where()`: los ciclos
+ * de VENTA anteriores a este campo (plan §16.13) no tienen `origin` en
+ * absoluto, y un filtro de Firestore (`==`, `in`, `!=`) nunca incluye un
+ * documento que no tiene el campo — se leerían como si esas ventas
+ * históricas no existieran. Por eso se filtra EN MEMORIA, en páginas
+ * internas acotadas (mismo patrón que `getSellerIssuesTotals` en
+ * `reports.service.ts`, del lado del cliente, para un problema análogo):
+ * nunca una lectura sin límite, solo varias lecturas acotadas encadenadas
+ * por cursor hasta reunir una página completa o agotar la colección.
+ *
+ * El total mostrado en el paginador excluye los reemplazos de la misma
+ * forma: `totalAll − totalReplacements`, dos agregaciones `count()` baratas
+ * (nunca se transfieren documentos para contar) sobre el mismo filtro de
+ * `cardCode`/`activatedBy` que ya aplica la página.
+ */
+export const listGiftCardIssues = onCall<ListGiftCardIssuesData>({ region: REGION }, async (request) => {
+    const staffSnap = await assertStaffRole(request.auth);
+    const uid = request.auth!.uid;
+    const isAdmin = staffSnap.get('role') === 'admin';
+
+    const pageSize = requireListPageSize(request.data.pageSize);
+    const cardCode = optionalCardCodeFilter(request.data.cardCode);
+    const sellerId = isAdmin ? optionalSellerIdFilter(request.data.sellerId) : uid;
+    const cursor = optionalListCursor(request.data.cursor);
+
+    const withEqualityFilters = (q: FirebaseFirestore.Query): FirebaseFirestore.Query => {
+        let filtered = q;
+        if (cardCode) filtered = filtered.where('cardCode', '==', cardCode);
+        if (sellerId) filtered = filtered.where('activatedBy', '==', sellerId);
+        return filtered;
+    };
+
+    const [totalAll, totalReplacements] = await Promise.all([
+        withEqualityFilters(db.collection('giftCardIssues'))
+            .count()
+            .get()
+            .then((snap) => snap.data().count),
+        withEqualityFilters(db.collection('giftCardIssues'))
+            .where('origin', '==', 'replacement')
+            .count()
+            .get()
+            .then((snap) => snap.data().count),
+    ]);
+    const total = totalAll - totalReplacements;
+
+    const baseQuery = withEqualityFilters(db.collection('giftCardIssues'))
+        .orderBy('activatedAt', 'desc')
+        .orderBy(FieldPath.documentId(), 'desc');
+
+    const batchSize = pageSize + 1;
+    let cursorQuery: FirebaseFirestore.Query = cursor
+        ? baseQuery.startAfter(Timestamp.fromMillis(cursor.activatedAtMs), cursor.id)
+        : baseQuery;
+
+    const accepted: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    let iterations = 0;
+    while (accepted.length < batchSize) {
+        iterations++;
+        if (iterations > ISSUE_LIST_MAX_BATCH_ITERATIONS) break;
+
+        const snap = await cursorQuery.limit(batchSize).get();
+        if (snap.empty) break;
+
+        for (const doc of snap.docs) {
+            if (!isReplacementOrigin(doc)) accepted.push(doc);
+            if (accepted.length >= batchSize) break;
+        }
+
+        if (snap.docs.length < batchSize) break; // se agotó la colección real que cumple los filtros
+        cursorQuery = baseQuery.startAfter(snap.docs[snap.docs.length - 1]);
+    }
+
+    const hasNext = accepted.length > pageSize;
+    const pageDocs = accepted.slice(0, pageSize);
+    const rows = pageDocs.map(toIssueDto);
+    const lastDoc = pageDocs.at(-1);
+    const nextCursor =
+        hasNext && lastDoc
+            ? {
+                  activatedAtMs: (lastDoc.get('activatedAt') as FirebaseFirestore.Timestamp).toMillis(),
+                  id: lastDoc.id,
+              }
+            : null;
+
+    return { rows, hasNext, total, nextCursor };
 });

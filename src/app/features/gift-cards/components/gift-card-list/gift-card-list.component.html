@@ -36,7 +36,15 @@
 }
 }
 
-<div class="flex justify-end mb-2">
+<div class="flex justify-end gap-2 mb-2">
+    <button
+        pButton
+        type="button"
+        class="p-button-text"
+        icon="fas fa-receipt"
+        [label]="'app.giftCards.history.action' | translate"
+        routerLink="historial"
+    ></button>
     <button
         pButton
         type="button"

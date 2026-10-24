@@ -421,7 +421,9 @@
       },
       "activate": {
         "paymentMethod": "¿Cómo pagó el comprador la tarjeta?",
-        "amountHelp": "Se registra el pago completo de {{amount}}: las gift cards no admiten compra parcial."
+        "amountHelp": "Se registra el pago completo de {{amount}}: las gift cards no admiten compra parcial.",
+        "successTitle": "Tarjeta vendida/activada correctamente.",
+        "printReceipt": "Imprimir recibo"
       },
       "suspend": {
         "reasonLabel": "Motivo (pérdida, robo…)"
@@ -510,6 +512,34 @@
         "generatePdf": "Generar PDF",
         "selectedSummary": "Seleccionadas: {{count}}",
         "cancelledHint": "Dada de baja: no se puede volver a imprimir"
+      },
+      "receipt": {
+        "title": "Comprobante de Gift Card",
+        "number": "Nº",
+        "date": "Fecha",
+        "code": "Código",
+        "buyer": "Comprador",
+        "seller": "Vendido por",
+        "amount": "MONTO GIFT CARD",
+        "totalPaid": "TOTAL PAGADO",
+        "footer": "Gracias por su compra · Mi Pimpollito"
+      },
+      "history": {
+        "action": "Historial de ventas",
+        "title": "Historial de ventas de Gift Cards",
+        "searchPlaceholder": "Buscar por código",
+        "seller": "Vendedor",
+        "allSellers": "Todos los vendedores",
+        "columns": {
+          "date": "Fecha",
+          "code": "Código",
+          "buyer": "Comprador",
+          "amount": "Monto",
+          "payment": "Forma de pago",
+          "seller": "Vendido por"
+        },
+        "detailTitle": "Detalle de la emisión",
+        "reprint": "Reimprimir recibo"
       }
     },
     "reports": {

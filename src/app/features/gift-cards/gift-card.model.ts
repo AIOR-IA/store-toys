@@ -127,6 +127,34 @@ export interface GiftCardIssuePayment {
     amountCents: number;
 }
 
+/**
+ * Recibo de cobro de UNA emisión/venta real de Gift Card (ajuste posterior,
+ * Recibo/Historial de Gift Cards, sin abrir una fase nueva). Forma reducida
+ * de `GiftCardIssue`, pensada para el único transporte disponible desde el
+ * cliente: las Functions `getGiftCardIssue`/`listGiftCardIssues`
+ * (`giftCardIssues` es admin-only en las Rules, plan §16.1 — ver el
+ * comentario largo de esas Functions en `functions/src/giftcards.ts`).
+ *
+ * Fuente de verdad SIEMPRE `giftCardIssues`, nunca `giftCards`: el
+ * monto/comprador ACTUALES de la tarjeta pueden pertenecer a un ciclo
+ * totalmente distinto para cuando alguien reimprime (plan §16.13, identidad
+ * ≠ monto) — por eso cada campo de aquí es el SNAPSHOT congelado del ciclo,
+ * nunca una relectura de `GiftCard`. Mismo documento, imprimir justo
+ * después de vender y reimprimir desde el Historial: nunca puede haber dos
+ * recibos distintos para el mismo ciclo.
+ */
+export interface GiftCardReceipt {
+    id: string; // del ID de `giftCardIssues/{id}`
+    cardCode: string;
+    cycleNumber: number;
+    amountCents: number;
+    buyerName: string | null;
+    activatedAt: Timestamp;
+    activatedByName: string;
+    dateKey: string;
+    payments: GiftCardIssuePayment[];
+}
+
 /** `giftCardIssues/{id}` — un CICLO de uso de una tarjeta física. Solo admin (Rules). */
 export interface GiftCardIssue {
     id: string;

@@ -1,0 +1,56 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="!$event && close()"
+    [modal]="true"
+    [style]="{ width: '28rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="'app.giftCards.history.detailTitle' | translate"
+    (onHide)="close()"
+>
+    @if (receipt(); as r) {
+    <div class="flex flex-col gap-3 text-sm">
+        <div class="flex justify-between">
+            <span class="text-gray-500">{{ "app.giftCards.history.columns.code" | translate }}</span>
+            <span class="font-mono">{{ r.cardCode }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-500">{{ "app.giftCards.history.columns.date" | translate }}</span>
+            <span>{{ formattedDate(r) }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-500">{{ "app.giftCards.history.columns.buyer" | translate }}</span>
+            <span>{{ r.buyerName || "—" }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-500">{{ "app.giftCards.history.columns.seller" | translate }}</span>
+            <span>{{ r.activatedByName }}</span>
+        </div>
+        <div class="flex justify-between font-medium">
+            <span>{{ "app.giftCards.history.columns.amount" | translate }}</span>
+            <span>{{ r.amountCents | money }}</span>
+        </div>
+        <div class="border-t pt-2">
+            <div class="text-gray-500 mb-1">{{ "app.sales.payment.title" | translate }}</div>
+            @for (p of r.payments; track p.method) {
+            <div class="flex justify-between">
+                <span>{{ ("app.sales.payment." + p.method) | translate }}</span>
+                <span>{{ p.amountCents | money }}</span>
+            </div>
+            }
+        </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-4">
+        <button pButton type="button" class="p-button-text" [label]="'app.common.close' | translate" (click)="close()"></button>
+        <button
+            pButton
+            type="button"
+            icon="fas fa-print"
+            [label]="'app.giftCards.history.reprint' | translate"
+            [loading]="printing()"
+            [disabled]="printing()"
+            (click)="print()"
+        ></button>
+    </div>
+    }
+</p-dialog>

@@ -2840,6 +2840,39 @@ vendidas de su vendedor y del rango.
   (`previousAmountCents`, `replacedByCode`, `replacesCode`) que solo esos tipos usan — un
   movimiento anterior a este ajuste simplemente no los tiene.
 
+### 16.14 Recibo de cobro y Historial de ventas de Gift Cards (ajuste posterior)
+
+Mismo concepto que el recibo/historial de Ventas, llevado a Gift Cards: una emisión/venta
+real de gift card SÍ representa dinero cobrado y merece comprobante y reimpresión; un
+`replaceGiftCard` NO (Bs 0 de ingreso nuevo, §16.13) y nunca genera recibo.
+
+- **Fuente de verdad del recibo: SIEMPRE `giftCardIssues/{issueId}`, nunca `giftCards`.** El
+  monto/comprador ACTUALES de la tarjeta pueden pertenecer a un ciclo totalmente distinto para
+  cuando alguien reimprime (identidad ≠ monto, §16.13) — cada recibo usa el snapshot congelado
+  del ciclo exacto que pagó, nunca una relectura del plástico.
+- **`getGiftCardIssue`/`listGiftCardIssues` (Functions nuevas, `functions/src/giftcards.ts`):**
+  `giftCardIssues` sigue siendo `allow get, list: if isAdmin()` en las Rules (§16.1) — sin
+  cambios, a propósito, para no abrir una vía de lectura directa solo por esta pantalla. Estas
+  dos Functions hacen la misma verificación de dueño que ya usa `sales` (`sellerId == uid`):
+  el vendedor solo puede leer/listar SUS PROPIAS emisiones; el admin, cualquiera. Un
+  `origin: 'replacement'` se rechaza en ambas: nunca tiene recibo de cobro.
+- **Historial, no `giftCards`:** una misma tarjeta física reutilizada son N emisiones
+  distintas en el Historial (ejemplo de §16.13: Camila/Bs 100 → Roberto/Bs 500 → María/Bs
+  1000 son tres filas, no una) — por eso la fuente es siempre `giftCardIssues`, paginado por
+  cursor, filtrando `origin: 'replacement'` en memoria (un `where`/`!=` de Firestore no sirve:
+  los ciclos de venta anteriores a este campo no lo tienen en absoluto, y se perderían).
+  **Sin filtro de fecha** (a diferencia de Ventas): a la escala de 20-40 tarjetas físicas no
+  aporta.
+- **Recibo inmediato tras vender:** después de `activateGiftCard`, el panel de venta no se
+  cierra — se relee la emisión recién creada vía `getGiftCardIssue` (misma Function que el
+  Historial) y ofrece `[Imprimir recibo]`, sin bloquear la operación si no se imprime.
+- **`GiftCardReceiptService`** (`src/app/features/gift-cards/gift-card-receipt.service.ts`) es
+  una réplica deliberada de `SaleReceiptService` (mismo logo, mismo encabezado de tienda, hoja
+  carta, `pdfmake().print()`) — infraestructura duplicada a propósito, no extraída a un
+  helper compartido: la geometría/el formato de Ventas ya se auditó como la referencia
+  directa, y Productos demostró en su momento que no conviene acoplar dos pantallas que
+  cambian con calendarios distintos.
+
 ---
 
 ## 17. Dinero y fechas

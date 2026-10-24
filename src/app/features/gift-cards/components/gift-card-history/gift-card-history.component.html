@@ -1,0 +1,100 @@
+<app-title-bar
+    [title]="'app.giftCards.history.title' | translate"
+    backPath="/giftcards"
+></app-title-bar>
+
+<div class="flex flex-col md:flex-row md:items-center gap-4 mb-4">
+    <app-search-bar
+        [placeholder]="'app.giftCards.history.searchPlaceholder'"
+        [compact]="true"
+        (onSearch)="onSearch($event)"
+    ></app-search-bar>
+
+    @if (isAdmin()) {
+    <div class="flex flex-col gap-1">
+        <label class="text-sm font-medium">{{ "app.giftCards.history.seller" | translate }}</label>
+        <p-dropdown
+            [options]="sellers()"
+            optionLabel="name"
+            optionValue="uid"
+            [showClear]="true"
+            [placeholder]="'app.giftCards.history.allSellers' | translate"
+            [ngModel]="sellerId()"
+            (ngModelChange)="onSellerChange($event)"
+            styleClass="w-full md:w-64"
+        ></p-dropdown>
+    </div>
+    }
+</div>
+
+@if (loading()) {
+<app-spinner></app-spinner>
+} @else if (!rows().length) {
+<app-items-not-found></app-items-not-found>
+} @else {
+<p-table [value]="rows()" [responsiveLayout]="'scroll'" styleClass="p-datatable-sm">
+    <ng-template pTemplate="header">
+        <tr>
+            <th>{{ "app.giftCards.history.columns.date" | translate }}</th>
+            <th>{{ "app.giftCards.history.columns.code" | translate }}</th>
+            <th>{{ "app.giftCards.history.columns.buyer" | translate }}</th>
+            <th>{{ "app.giftCards.history.columns.amount" | translate }}</th>
+            <th>{{ "app.giftCards.history.columns.payment" | translate }}</th>
+            @if (isAdmin()) {
+            <th>{{ "app.giftCards.history.columns.seller" | translate }}</th>
+            }
+            <th class="text-right">{{ "app.common.actions" | translate }}</th>
+        </tr>
+    </ng-template>
+    <ng-template pTemplate="body" let-receipt>
+        <tr>
+            <td>{{ receipt.activatedAt.toDate() | date: "dd/MM/yy HH:mm" }}</td>
+            <td class="font-mono">{{ receipt.cardCode }}</td>
+            <td>{{ receipt.buyerName || "—" }}</td>
+            <td>{{ receipt.amountCents | money }}</td>
+            <td>
+                @for (p of receipt.payments; track p.method) {
+                <p-tag
+                    [value]="(('app.sales.payment.' + p.method) | translate) + ': ' + (p.amountCents | money)"
+                    severity="secondary"
+                    class="mr-1"
+                ></p-tag>
+                }
+            </td>
+            @if (isAdmin()) {
+            <td>{{ receipt.activatedByName }}</td>
+            }
+            <td class="text-right">
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-eye"
+                    class="p-button-text p-button-rounded"
+                    [pTooltip]="'app.giftCards.viewDetail' | translate"
+                    (click)="openDetail(receipt)"
+                ></button>
+            </td>
+        </tr>
+    </ng-template>
+</p-table>
+}
+
+@if (hasLoadedOnce()) {
+<app-cards-paginator
+    [hasNextPage]="hasNext()"
+    [hasPreviousPage]="hasPrev()"
+    [total]="total()"
+    [currentCount]="rows().length"
+    [pageSizeOptions]="pageSizeOptions"
+    [pageSize]="pageSize()"
+    (onFirst)="goToFirstPage()"
+    (onNext)="onNextPage()"
+    (onPrevious)="onPrevPage()"
+    (onPageSizeChange)="onPageSizeChange($event)"
+></app-cards-paginator>
+}
+
+<app-gift-card-issue-detail-dialog
+    [receipt]="detailReceipt()"
+    (closed)="detailReceipt.set(null)"
+></app-gift-card-issue-detail-dialog>

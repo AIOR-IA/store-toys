@@ -11,11 +11,18 @@ import { InputTextModule } from 'primeng/inputtext';
 import { InputTextareaModule } from 'primeng/inputtextarea';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { TagModule } from 'primeng/tag';
+import { SpinnerComponent } from '@shared/components/ui';
 import { MoneyPipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
 import { fromCents, toCents } from '@core/utils';
-import { GiftCard, GiftCardIssuePaymentMethod, GiftCardMovement } from '../../gift-card.model';
+import { GiftCardReceiptService } from '../../gift-card-receipt.service';
+import {
+    GiftCard,
+    GiftCardIssuePaymentMethod,
+    GiftCardMovement,
+    GiftCardReceipt,
+} from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardLabelDialogComponent, GiftCardLabelTarget } from '../gift-card-label-dialog/gift-card-label-dialog.component';
 
@@ -44,6 +51,7 @@ type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel' | 'editAmount' | 're
         ConfirmDialogModule,
         TranslateModule,
         MoneyPipe,
+        SpinnerComponent,
         GiftCardLabelDialogComponent,
     ],
     providers: [ConfirmationService],
@@ -51,6 +59,7 @@ type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel' | 'editAmount' | 're
 })
 export class GiftCardDetailDialogComponent {
     private readonly giftCardsService = inject(GiftCardsService);
+    private readonly receiptService = inject(GiftCardReceiptService);
     private readonly sessionService = inject(SessionService);
     private readonly toast = inject(ToastService);
     private readonly translate = inject(TranslateService);
@@ -77,6 +86,20 @@ export class GiftCardDetailDialogComponent {
     /** Resultado del reemplazo, mientras el panel sigue abierto (ver `confirmReplace`). */
     replacedResult = signal<{ newCardCode: string; amountCents: number } | null>(null);
     saving = signal(false);
+
+    /**
+     * Recibo de la emisión recién vendida (ajuste posterior, Recibo/Historial
+     * de Gift Cards): mismo patrón que `replacedResult` arriba — al vender
+     * con éxito el panel NO se cierra, se queda mostrando `[Imprimir recibo]`
+     * (prompt §4: "NO bloquear la activación si el usuario decide no
+     * imprimir"). Se llena con una relectura real vía `getIssueReceipt`
+     * (nunca se construye a mano en el cliente): es la misma Function que
+     * reimprime después desde el Historial, así los dos caminos nunca pueden
+     * mostrar algo distinto para el mismo ciclo.
+     */
+    activatedReceipt = signal<GiftCardReceipt | null>(null);
+    loadingReceipt = signal(false);
+    printingReceipt = signal(false);
 
     /**
      * Snapshot refrescado tras `cancelGiftCard` (prompt §11): el `card()`
@@ -147,6 +170,7 @@ export class GiftCardDetailDialogComponent {
                 this.newAmountBs.set(null);
                 this.replaceReason.set('');
                 this.replacedResult.set(null);
+                this.activatedReceipt.set(null);
                 this.cardOverride.set(null);
                 this.movements.set([]);
                 this.labelTarget.set(null);
@@ -204,6 +228,16 @@ export class GiftCardDetailDialogComponent {
         this.labelTarget.set(null);
     }
 
+    /**
+     * Al vender con éxito, el panel NO se cierra (ajuste posterior,
+     * Recibo/Historial de Gift Cards — mismo patrón que `confirmReplace`):
+     * se queda mostrando `[Imprimir recibo]`, con una relectura real de la
+     * emisión (`getIssueReceipt`) para obtener la fecha/hora real del
+     * servidor — igual que `SalesPosComponent.onSaleCreated` vuelve a leer
+     * la venta con `getSale` después de `createSale`. Si esa relectura
+     * falla, la venta YA está completa igual (prompt §4): solo se informa y
+     * se cierra el panel, sin bloquear nada.
+     */
     confirmActivate(): void {
         const card = this.displayCard();
         if (!card) return;
@@ -216,14 +250,39 @@ export class GiftCardDetailDialogComponent {
                 payments: [{ method: this.activatePaymentMethod(), amountCents: card.amountCents }],
             })
             .subscribe({
-                next: () => {
+                next: ({ cycleId }) => {
                     this.saving.set(false);
                     this.toast.success('app.giftCards.messages.activated');
                     this.changed.emit();
-                    this.close();
+                    this.loadActivatedReceipt(cycleId);
                 },
                 error: (error) => this.onError(error),
             });
+    }
+
+    private loadActivatedReceipt(issueId: string): void {
+        this.loadingReceipt.set(true);
+        this.giftCardsService.getIssueReceipt(issueId).subscribe({
+            next: (receipt) => {
+                this.loadingReceipt.set(false);
+                this.activatedReceipt.set(receipt);
+            },
+            error: () => {
+                this.loadingReceipt.set(false);
+                this.close();
+            },
+        });
+    }
+
+    printActivatedReceipt(): void {
+        const receipt = this.activatedReceipt();
+        if (!receipt) return;
+
+        this.printingReceipt.set(true);
+        this.receiptService
+            .print(receipt)
+            .catch(() => this.toast.error('app.common.errors.general'))
+            .finally(() => this.printingReceipt.set(false));
     }
 
     /**

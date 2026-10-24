@@ -21,4 +21,11 @@ export default [
                 './components/gift-card-labels-sheet/gift-card-labels-sheet.component'
             ).then((m) => m.GiftCardLabelsSheetComponent),
     },
+    {
+        path: 'historial',
+        loadComponent: () =>
+            import('./components/gift-card-history/gift-card-history.component').then(
+                (m) => m.GiftCardHistoryComponent,
+            ),
+    },
 ] satisfies Routes;

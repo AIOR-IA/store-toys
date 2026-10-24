@@ -168,7 +168,29 @@
             }
         </div>
         }
-        } @else if (mode() === 'activate') {
+        } @else if (mode() === 'activate') { @if (activatedReceipt(); as receipt) {
+        <div class="flex flex-col gap-4">
+            <div class="text-sm font-medium text-success">{{ "app.giftCards.activate.successTitle" | translate }}</div>
+            <div class="border border-gray-200 rounded px-3 py-2 flex items-center justify-between">
+                <span class="font-mono font-medium">{{ receipt.cardCode }}</span>
+                <span class="text-sm text-gray-500">{{ receipt.amountCents | money }}</span>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.close' | translate" (click)="close()"></button>
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-print"
+                    [label]="'app.giftCards.activate.printReceipt' | translate"
+                    [loading]="printingReceipt()"
+                    [disabled]="printingReceipt()"
+                    (click)="printActivatedReceipt()"
+                ></button>
+            </div>
+        </div>
+        } @else if (loadingReceipt()) {
+        <app-spinner></app-spinner>
+        } @else {
         <form (ngSubmit)="confirmActivate()" class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium" for="buyerName">{{
@@ -216,7 +238,7 @@
                 <button pButton type="submit" [label]="'app.giftCards.actions.activate' | translate" [loading]="saving()" [disabled]="saving()"></button>
             </div>
         </form>
-        } @else if (mode() === 'suspend') {
+        } } @else if (mode() === 'suspend') {
         <form (ngSubmit)="confirmSuspend()" class="flex flex-col gap-4">
             <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium" for="suspendReason">{{

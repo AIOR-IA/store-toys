@@ -7,6 +7,7 @@ import { TranslateModule } from '@ngx-translate/core';
 import { of, throwError } from 'rxjs';
 import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
+import { GiftCardReceiptService } from '../../gift-card-receipt.service';
 import { GiftCard } from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardDetailDialogComponent } from './gift-card-detail-dialog.component';
@@ -64,6 +65,9 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
     let replaceGiftCard: jasmine.Spy;
     let cancelGiftCard: jasmine.Spy;
     let lookupByCode: jasmine.Spy;
+    let activateGiftCard: jasmine.Spy;
+    let getIssueReceipt: jasmine.Spy;
+    let printReceipt: jasmine.Spy;
 
     const setUp = async (card: GiftCard, role: 'admin' | 'user' = 'admin') => {
         sessionRole.set({ status: 'active', role });
@@ -75,6 +79,23 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         );
         cancelGiftCard = jasmine.createSpy('cancelGiftCard').and.returnValue(of({ cardCode: card.cardCode }));
         lookupByCode = jasmine.createSpy('lookupByCode').and.returnValue(of(null));
+        activateGiftCard = jasmine
+            .createSpy('activateGiftCard')
+            .and.returnValue(of({ cardCode: card.cardCode, cycleId: 'cyc-new', cycleNumber: 1 }));
+        getIssueReceipt = jasmine.createSpy('getIssueReceipt').and.returnValue(
+            of({
+                id: 'cyc-new',
+                cardCode: card.cardCode,
+                cycleNumber: 1,
+                amountCents: card.amountCents,
+                buyerName: null,
+                activatedAt: timestamp(),
+                activatedByName: 'Vendedor',
+                dateKey: '2026-10-24',
+                payments: [{ method: 'cash', amountCents: card.amountCents }],
+            }),
+        );
+        printReceipt = jasmine.createSpy('print').and.returnValue(Promise.resolve());
 
         await TestBed.configureTestingModule({
             imports: [GiftCardDetailDialogComponent, TranslateModule.forRoot()],
@@ -89,6 +110,8 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
                         replaceGiftCard,
                         cancelGiftCard,
                         lookupByCode,
+                        activateGiftCard,
+                        getIssueReceipt,
                     },
                 },
                 { provide: SessionService, useValue: { session: sessionRole } },
@@ -100,6 +123,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
                         errorMessage: jasmine.createSpy('errorMessage'),
                     },
                 },
+                { provide: GiftCardReceiptService, useValue: { print: printReceipt } },
             ],
         }).compileComponents();
 
@@ -320,6 +344,62 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             fixture.detectChanges();
 
             expect(component.displayCard()).toEqual(otherCard);
+        });
+    });
+
+    /**
+     * Recibo inmediato tras vender (ajuste posterior, Recibo/Historial de
+     * Gift Cards, prompt §4, §16, §21): mismo patrón de "no cerrar y mostrar
+     * un resultado" que `confirmReplace` arriba.
+     */
+    describe('confirmActivate — recibo inmediato (no cierra, permite imprimir)', () => {
+        const flush = () => new Promise((r) => setTimeout(r));
+
+        it('V) al vender con éxito: NO cierra el diálogo y relee el recibo real vía getIssueReceipt(cycleId)', async () => {
+            await setUp(baseCard({ status: 'AVAILABLE', amountCents: 50000 }), 'admin');
+
+            let closed = false;
+            component.visibleChange.subscribe(() => (closed = true));
+
+            component.openActivate();
+            component.buyerName.set('Camila');
+            component.activatePaymentMethod.set('qr');
+            component.confirmActivate();
+            await flush();
+
+            expect(activateGiftCard).toHaveBeenCalledOnceWith({
+                code: 'GC-000001',
+                buyerName: 'Camila',
+                payments: [{ method: 'qr', amountCents: 50000 }],
+            });
+            expect(getIssueReceipt).toHaveBeenCalledOnceWith('cyc-new');
+            expect(closed).toBeFalse();
+            expect(component.activatedReceipt()?.id).toBe('cyc-new');
+        });
+
+        it('W) imprimir recibo llama al MISMO GiftCardReceiptService.print con el snapshot recién leído', async () => {
+            await setUp(baseCard({ status: 'AVAILABLE', amountCents: 50000 }), 'admin');
+
+            component.openActivate();
+            component.confirmActivate();
+            await flush();
+
+            component.printActivatedReceipt();
+            expect(printReceipt).toHaveBeenCalledOnceWith(component.activatedReceipt());
+        });
+
+        it('X) no bloquea la venta si la relectura del recibo falla: la venta ya está completa, solo se cierra', async () => {
+            await setUp(baseCard({ status: 'AVAILABLE', amountCents: 50000 }), 'admin');
+            getIssueReceipt.and.returnValue(throwError(() => new Error('network')));
+
+            let closed = false;
+            component.visibleChange.subscribe(() => (closed = true));
+
+            component.openActivate();
+            expect(() => component.confirmActivate()).not.toThrow();
+            await flush();
+
+            expect(closed).toBeTrue();
         });
     });
 });

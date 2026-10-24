@@ -13,7 +13,7 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "test:functions": "npm --prefix functions run build && node tests/functions/sales.harness.js"
+    "test:functions": "npm --prefix functions run build && node tests/functions/sales.harness.js && node tests/functions/giftcard-issues.harness.js"
   },
   "private": true,
   "dependencies": {

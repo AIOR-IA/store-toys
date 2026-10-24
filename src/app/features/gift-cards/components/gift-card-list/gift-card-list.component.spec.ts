@@ -8,6 +8,7 @@ import { of } from 'rxjs';
 import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
 import { SAME_BARCODE_DEBOUNCE_MS } from '@shared/constants';
+import { GiftCardReceiptService } from '../../gift-card-receipt.service';
 import { GiftCard } from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardListComponent } from './gift-card-list.component';
@@ -58,6 +59,10 @@ describe('GiftCardListComponent — búsqueda por código con lector', () => {
                     useValue: { session: signal({ status: 'active', role: 'admin' }) },
                 },
                 { provide: ToastService, useValue: { error: jasmine.createSpy('error') } },
+                {
+                    provide: GiftCardReceiptService,
+                    useValue: { print: jasmine.createSpy('print').and.returnValue(Promise.resolve()) },
+                },
             ],
         }).compileComponents();
 
@@ -183,6 +188,10 @@ describe('GiftCardListComponent — filtro de monto (bug "TODAS + monto" → cer
                     useValue: { session: signal({ status: 'active', role: 'admin' }) },
                 },
                 { provide: ToastService, useValue: { error: jasmine.createSpy('error') } },
+                {
+                    provide: GiftCardReceiptService,
+                    useValue: { print: jasmine.createSpy('print').and.returnValue(Promise.resolve()) },
+                },
             ],
         }).compileComponents();
 
