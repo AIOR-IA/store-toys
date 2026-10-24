@@ -154,14 +154,6 @@
       "collectionGroup": "giftCardIssues",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "activatedAt", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "giftCardIssues",
-      "queryScope": "COLLECTION",
-      "fields": [
         { "fieldPath": "activatedBy", "order": "ASCENDING" },
         { "fieldPath": "activatedAt", "order": "DESCENDING" },
         { "fieldPath": "__name__", "order": "DESCENDING" }
