@@ -338,6 +338,36 @@
                     <div class="text-gray-500">{{ "app.giftCards.replace.transferAmount" | translate }}</div>
                     <div class="font-medium">{{ card.amountCents | money }}</div>
                 </div>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium">{{ "app.giftCards.replace.modeLabel" | translate }}</label>
+                <div class="flex gap-4">
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            name="replaceMode"
+                            value="generate"
+                            [ngModel]="replaceMode()"
+                            (ngModelChange)="onReplaceModeChange($event)"
+                            inputId="replaceModeGenerate"
+                        ></p-radioButton>
+                        <label for="replaceModeGenerate">{{ "app.giftCards.replace.modeGenerate" | translate }}</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            name="replaceMode"
+                            value="existing"
+                            [ngModel]="replaceMode()"
+                            (ngModelChange)="onReplaceModeChange($event)"
+                            inputId="replaceModeExisting"
+                        ></p-radioButton>
+                        <label for="replaceModeExisting">{{ "app.giftCards.replace.modeExisting" | translate }}</label>
+                    </div>
+                </div>
+            </div>
+
+            @if (replaceMode() === 'generate') {
+            <div class="grid grid-cols-2 gap-3 text-sm">
                 <div>
                     <div class="text-gray-500">{{ "app.giftCards.replace.newCode" | translate }}</div>
                     <div>{{ "app.giftCards.replace.newCodeHelp" | translate }}</div>
@@ -347,6 +377,112 @@
                     <div class="font-medium">{{ 0 | money }}</div>
                 </div>
             </div>
+            } @else {
+            <div class="flex flex-col gap-3">
+                <div class="text-sm font-medium">{{ "app.giftCards.replace.availableTitle" | translate }}</div>
+
+                @if (availableTargetsLoading()) {
+                <app-spinner></app-spinner>
+                } @else if (!availableTargets().length) {
+                <div class="text-sm text-gray-500">{{ "app.giftCards.replace.availableEmpty" | translate }}</div>
+                } @else {
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-gray-500">
+                            <th class="w-8"></th>
+                            <th>{{ "app.giftCards.code" | translate }}</th>
+                            <th>{{ "app.giftCards.replace.currentAmountColumn" | translate }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (target of availableTargets(); track target.cardCode) {
+                        <tr
+                            class="border-t border-gray-100 cursor-pointer hover:bg-gray-50"
+                            [class.bg-blue-50]="selectedTarget()?.cardCode === target.cardCode"
+                            (click)="selectTarget(target)"
+                        >
+                            <td class="py-1">
+                                <i
+                                    class="fas"
+                                    [class.fa-circle-check]="selectedTarget()?.cardCode === target.cardCode"
+                                    [class.text-primary]="selectedTarget()?.cardCode === target.cardCode"
+                                    [class.fa-circle]="selectedTarget()?.cardCode !== target.cardCode"
+                                    [class.text-gray-300]="selectedTarget()?.cardCode !== target.cardCode"
+                                ></i>
+                            </td>
+                            <td class="font-mono">{{ target.cardCode }}</td>
+                            <td>{{ target.amountCents | money }}</td>
+                        </tr>
+                        }
+                    </tbody>
+                </table>
+                <div class="flex items-center justify-between">
+                    <button
+                        pButton
+                        type="button"
+                        class="p-button-text p-button-sm"
+                        [label]="'app.giftCards.replace.clearSelection' | translate"
+                        [disabled]="!selectedTarget()"
+                        (click)="clearTargetSelection()"
+                    ></button>
+                    <div class="flex gap-1">
+                        <button
+                            pButton
+                            type="button"
+                            icon="fas fa-chevron-left"
+                            class="p-button-text p-button-sm"
+                            [disabled]="!availableTargetsHasPrev()"
+                            (click)="onTargetsPrevPage()"
+                        ></button>
+                        <button
+                            pButton
+                            type="button"
+                            icon="fas fa-chevron-right"
+                            class="p-button-text p-button-sm"
+                            [disabled]="!availableTargetsHasNext()"
+                            (click)="onTargetsNextPage()"
+                        ></button>
+                    </div>
+                </div>
+                }
+
+                @if (selectedTarget(); as target) {
+                <div class="border border-gray-200 rounded p-3 flex flex-col gap-2 text-sm">
+                    <div class="font-medium">{{ "app.giftCards.replace.selectedTitle" | translate }}</div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">{{ "app.giftCards.code" | translate }}</span>
+                        <span class="font-mono">{{ target.cardCode }}</span>
+                    </div>
+                    <div>{{ "app.giftCards.editAmount.currentAmount" | translate: { amount: (target.amountCents | money) } }}</div>
+
+                    <div class="border-t border-gray-100 pt-2 text-gray-500 font-medium">
+                        {{ "app.giftCards.replace.willInherit" | translate }}
+                    </div>
+                    @if (loadingSourceIssue()) {
+                    <div class="text-gray-500">{{ "app.common.loading" | translate }}</div>
+                    } @else {
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">{{ "app.giftCards.amount" | translate }}</span>
+                        <span class="font-medium">{{ card.amountCents | money }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">{{ "app.giftCards.buyer" | translate }}</span>
+                        <span>{{ sourceOriginalIssue()?.buyerName || ("app.sales.receipt.anonymous" | translate) }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">{{ "app.giftCards.activatedBy" | translate }}</span>
+                        <span>{{ sourceOriginalIssue()?.activatedByName || "—" }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">{{ "app.giftCards.replace.charge" | translate }}</span>
+                        <span class="font-medium">{{ 0 | money }}</span>
+                    </div>
+                    }
+                </div>
+                }
+            </div>
+            }
+
             <div class="flex flex-col gap-1">
                 <label class="text-sm font-medium" for="replaceReason">{{
                     "app.giftCards.replace.reasonLabel" | translate
@@ -363,7 +499,14 @@
             </div>
             <div class="flex justify-end gap-2">
                 <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
-                <button pButton type="submit" class="p-button-warning" [label]="'app.giftCards.actions.replace' | translate" [loading]="saving()" [disabled]="saving()"></button>
+                <button
+                    pButton
+                    type="submit"
+                    class="p-button-warning"
+                    [label]="'app.giftCards.actions.replace' | translate"
+                    [loading]="saving()"
+                    [disabled]="saving() || (replaceMode() === 'existing' && !selectedTarget())"
+                ></button>
             </div>
         </form>
         } }

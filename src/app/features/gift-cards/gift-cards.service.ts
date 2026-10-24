@@ -15,12 +15,14 @@ import { Functions, httpsCallable } from '@angular/fire/functions';
 import { Observable, firstValueFrom, from, map } from 'rxjs';
 import { PageResult, PageSize, CursorPager } from '@core/data';
 import { normalizeGiftCardCode } from '@core/utils';
-import { giftCardConverter, giftCardMovementConverter } from './gift-card.converter';
+import { giftCardConverter, giftCardIssueConverter, giftCardMovementConverter } from './gift-card.converter';
 import {
     GiftCard,
+    GiftCardIssue,
     GiftCardIssuePayment,
     GiftCardMovement,
     GiftCardReceipt,
+    GiftCardReplaceMode,
     GiftCardStatus,
 } from './gift-card.model';
 
@@ -162,6 +164,9 @@ export class GiftCardsService {
     private readonly giftCardsCollection = collection(this.firestore, 'giftCards').withConverter(
         giftCardConverter,
     );
+    private readonly giftCardIssuesCollection = collection(this.firestore, 'giftCardIssues').withConverter(
+        giftCardIssueConverter,
+    );
 
     /**
      * Paginador por cursores filtrado por estado (plan §12.1, prompt §32,
@@ -251,6 +256,22 @@ export class GiftCardsService {
                     }),
                 ).pipe(map((r) => r.data)),
             ),
+        );
+    }
+
+    /**
+     * Lectura directa de UN ciclo (admin, Rules `allow get: if isAdmin()`,
+     * plan §16.1 — mismo patrón ya usado por `reports.service.ts` para leer
+     * `giftCardIssues` directo desde Angular). Se usa SOLO para previsualizar,
+     * ANTES de confirmar, qué comprador/vendedor heredará una Gift Card
+     * `AVAILABLE` elegida en el modo "Usar tarjeta existente" de
+     * `replaceGiftCard` (prompt §11) — nunca reemplaza `getGiftCardIssue`,
+     * que sigue siendo la única vía del RECIBO financiero (un reemplazo
+     * nunca genera uno).
+     */
+    getIssue(issueId: string): Observable<GiftCardIssue | null> {
+        return from(getDoc(doc(this.giftCardIssuesCollection, issueId))).pipe(
+            map((snap) => (snap.exists() ? snap.data() : null)),
         );
     }
 
@@ -382,16 +403,27 @@ export class GiftCardsService {
     /**
      * `replaceGiftCard` (Function, solo admin — ajuste posterior): reemplaza
      * el plástico de una tarjeta dañada/perdida, transfiriendo su valor ya
-     * pagado a un código nuevo generado por el sistema, sin volver a cobrar.
+     * pagado SIN volver a cobrar. `options.mode` decide el destino:
+     * `'generate'` (default — sin `mode`, el callable manda `undefined`, que
+     * la Function trata exactamente igual) genera un código nuevo;
+     * `'existing'` reutiliza una Gift Card `AVAILABLE` ya registrada
+     * (`options.targetCode`, obligatorio en ese modo).
      */
     replaceGiftCard(
         code: string,
-        reason?: string,
+        options: { reason?: string; mode?: GiftCardReplaceMode; targetCode?: string } = {},
     ): Observable<{ cardCode: string; newCardCode: string; amountCents: number }> {
         const callable = httpsCallable<
-            { code: string; reason?: string },
+            { code: string; reason?: string; mode?: GiftCardReplaceMode; targetCode?: string },
             { cardCode: string; newCardCode: string; amountCents: number }
         >(this.functions, 'replaceGiftCard');
-        return from(callable({ code, reason })).pipe(map((r) => r.data));
+        return from(
+            callable({
+                code,
+                reason: options.reason,
+                mode: options.mode,
+                targetCode: options.targetCode,
+            }),
+        ).pipe(map((r) => r.data));
     }
 }

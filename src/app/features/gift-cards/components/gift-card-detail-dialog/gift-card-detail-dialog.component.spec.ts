@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { CurrencyPipe } from '@angular/common';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { ConfirmationService } from 'primeng/api';
-import { TranslateModule } from '@ngx-translate/core';
+import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { of, throwError } from 'rxjs';
 import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
@@ -68,6 +68,12 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
     let activateGiftCard: jasmine.Spy;
     let getIssueReceipt: jasmine.Spy;
     let printReceipt: jasmine.Spy;
+    let getIssue: jasmine.Spy;
+    let createPager: jasmine.Spy;
+    let pagerSpy: { first: jasmine.Spy; next: jasmine.Spy; prev: jasmine.Spy };
+
+    const makeTarget = (overrides: Partial<GiftCard> = {}): GiftCard =>
+        baseCard({ cardCode: 'GC-TARGET', status: 'AVAILABLE', amountCents: 5000, ...overrides });
 
     const setUp = async (card: GiftCard, role: 'admin' | 'user' = 'admin') => {
         sessionRole.set({ status: 'active', role });
@@ -96,6 +102,19 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             }),
         );
         printReceipt = jasmine.createSpy('print').and.returnValue(Promise.resolve());
+        getIssue = jasmine.createSpy('getIssue').and.returnValue(of(null));
+        pagerSpy = {
+            first: jasmine.createSpy('first').and.returnValue(
+                Promise.resolve({ rows: [], hasNext: false, hasPrev: false, total: 0 }),
+            ),
+            next: jasmine.createSpy('next').and.returnValue(
+                Promise.resolve({ rows: [], hasNext: false, hasPrev: false, total: 0 }),
+            ),
+            prev: jasmine.createSpy('prev').and.returnValue(
+                Promise.resolve({ rows: [], hasNext: false, hasPrev: false, total: 0 }),
+            ),
+        };
+        createPager = jasmine.createSpy('createPager').and.returnValue(pagerSpy);
 
         await TestBed.configureTestingModule({
             imports: [GiftCardDetailDialogComponent, TranslateModule.forRoot()],
@@ -112,6 +131,8 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
                         lookupByCode,
                         activateGiftCard,
                         getIssueReceipt,
+                        getIssue,
+                        createPager,
                     },
                 },
                 { provide: SessionService, useValue: { session: sessionRole } },
@@ -254,7 +275,11 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             component.openReplace();
             component.confirmReplace();
 
-            expect(replaceGiftCard).toHaveBeenCalledOnceWith('GC-000001', undefined);
+            expect(replaceGiftCard).toHaveBeenCalledOnceWith('GC-000001', {
+                reason: undefined,
+                mode: 'generate',
+                targetCode: undefined,
+            });
             expect(component.replacedResult()).toEqual({ newCardCode: 'GC-000099', amountCents: 100000 });
             expect(closed).toBeFalse();
         });
@@ -267,7 +292,11 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             component.replaceReason.set('  tarjeta dañada  ');
             component.confirmReplace();
 
-            expect(replaceGiftCard).toHaveBeenCalledOnceWith('GC-000001', 'tarjeta dañada');
+            expect(replaceGiftCard).toHaveBeenCalledOnceWith('GC-000001', {
+                reason: 'tarjeta dañada',
+                mode: 'generate',
+                targetCode: undefined,
+            });
         });
 
         it('R) printReplacementLabel abre la etiqueta de la tarjeta NUEVA, no la vieja', async () => {
@@ -279,6 +308,197 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             component.printReplacementLabel();
 
             expect(component.labelTarget()).toEqual({ code: 'GC-000099', amountCents: 100000 });
+        });
+    });
+
+    /**
+     * Segundo modo de reemplazo — "Usar tarjeta existente" (ajuste
+     * posterior, prompt §39, letras A-R). El servidor es la fuente de
+     * verdad de la elegibilidad/transacción (ver `tests/functions/
+     * sales.harness.js`, sección W); aquí solo se prueba que el FRONTEND
+     * ofrece los dos modos, pagina/selecciona correctamente, nunca permite
+     * confirmar sin selección, y manda exactamente lo que el servidor
+     * espera.
+     */
+    describe('reemplazo — modo "Usar tarjeta existente"', () => {
+        const flush = () => new Promise((r) => setTimeout(r));
+
+        const acceptImmediately = (fixture: ComponentFixture<GiftCardDetailDialogComponent>) => {
+            const confirmation = fixture.debugElement.injector.get(ConfirmationService);
+            spyOn(confirmation, 'confirm').and.callFake(((opts: { accept: () => void }) => opts.accept()) as never);
+        };
+
+        it('A) el panel ofrece los dos modos, "generate" por defecto', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            component.openReplace();
+            expect(component.replaceMode()).toBe('generate');
+        });
+
+        it('B) modo "generate" no carga el selector (conserva la UI actual)', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            component.openReplace();
+            expect(createPager).not.toHaveBeenCalled();
+        });
+
+        it('C) cambiar a "existing" pide SOLO tarjetas AVAILABLE, 5 por página', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+
+            expect(createPager).toHaveBeenCalledOnceWith('AVAILABLE', 5);
+        });
+
+        it('D) muestra las filas que devuelve el pager', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            const t1 = makeTarget({ cardCode: 'GC-000050' });
+            pagerSpy.first.and.returnValue(Promise.resolve({ rows: [t1], hasNext: false, hasPrev: false, total: 1 }));
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+
+            expect(component.availableTargets()).toEqual([t1]);
+        });
+
+        it('E) selección única: elegir otra tarjeta reemplaza la anterior', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            const t1 = makeTarget({ cardCode: 'GC-000050' });
+            const t2 = makeTarget({ cardCode: 'GC-000051' });
+
+            component.selectTarget(t1);
+            expect(component.selectedTarget()).toEqual(t1);
+            component.selectTarget(t2);
+            expect(component.selectedTarget()).toEqual(t2);
+        });
+
+        it('F) elegir la MISMA tarjeta otra vez la deselecciona (toggle)', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            const t1 = makeTarget({ cardCode: 'GC-000050' });
+
+            component.selectTarget(t1);
+            component.selectTarget(t1);
+            expect(component.selectedTarget()).toBeNull();
+        });
+
+        it('G) "Quitar selección" limpia la selección', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            component.selectTarget(makeTarget());
+            component.clearTargetSelection();
+            expect(component.selectedTarget()).toBeNull();
+        });
+
+        it('H) sin selección, confirmar no llama al servicio y avisa', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+            component.confirmReplace();
+
+            expect(replaceGiftCard).not.toHaveBeenCalled();
+        });
+
+        it('I) con selección, confirma y manda mode="existing" + targetCode', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true, amountCents: 100000 }), 'admin');
+            acceptImmediately(fixture);
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+
+            const target = makeTarget({ cardCode: 'GC-000050' });
+            component.selectTarget(target);
+            component.confirmReplace();
+
+            expect(replaceGiftCard).toHaveBeenCalledOnceWith('GC-000001', {
+                reason: undefined,
+                mode: 'existing',
+                targetCode: 'GC-000050',
+            });
+        });
+
+        it('J) la confirmación pide el texto con el código ORIGEN y el código DESTINO elegido como parámetros', async () => {
+            // `TranslateModule.forRoot()` sin loader no interpola (mismo criterio que el
+            // resto de specs de este repo): se verifica que `instant` se llamó con la
+            // clave y los parámetros correctos, no el texto ya traducido.
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            const confirmation = fixture.debugElement.injector.get(ConfirmationService);
+            spyOn(confirmation, 'confirm').and.callFake(((opts: { accept: () => void }) => opts.accept()) as never);
+            const translate = fixture.debugElement.injector.get(TranslateService);
+            const instantSpy = spyOn(translate, 'instant').and.callThrough();
+
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+            component.selectTarget(makeTarget({ cardCode: 'GC-000050' }));
+            component.confirmReplace();
+
+            expect(instantSpy).toHaveBeenCalledWith('app.giftCards.messages.confirmReplaceExisting', {
+                sourceCode: 'GC-000001',
+                targetCode: 'GC-000050',
+            });
+        });
+
+        it('K) previsualiza lo que el destino heredará (comprador/vendedor del ciclo ORIGINAL, vía getIssue)', async () => {
+            await setUp(
+                baseCard({ status: 'CANCELLED', pendingReplacement: true, lastCycleId: 'cyc-orig' }),
+                'admin',
+            );
+            getIssue.and.returnValue(
+                of({
+                    id: 'cyc-orig',
+                    buyerName: 'Camila',
+                    activatedByName: 'Lenar Lima',
+                } as never),
+            );
+            component.openReplace();
+            await flush();
+
+            expect(getIssue).toHaveBeenCalledOnceWith('cyc-orig');
+            expect(component.sourceOriginalIssue()?.buyerName).toBe('Camila');
+            expect(component.sourceOriginalIssue()?.activatedByName).toBe('Lenar Lima');
+        });
+
+        it('L) datos heredados no son inputs editables: no existe ningún setter de monto/comprador para el destino', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            // El componente no expone ninguna señal de "monto/comprador del destino" escribible —
+            // lo único escribible por el usuario en este modo es la SELECCIÓN de la tarjeta.
+            expect((component as unknown as Record<string, unknown>)['targetAmountBs']).toBeUndefined();
+            expect((component as unknown as Record<string, unknown>)['targetBuyerName']).toBeUndefined();
+        });
+
+        it('M) éxito: mismo panel de resultado que el modo "generate" (código + monto, sin ofrecer recibo)', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true, amountCents: 100000 }), 'admin');
+            acceptImmediately(fixture);
+            replaceGiftCard.and.returnValue(of({ cardCode: 'GC-000001', newCardCode: 'GC-000050', amountCents: 100000 }));
+
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+            component.selectTarget(makeTarget({ cardCode: 'GC-000050' }));
+            component.confirmReplace();
+
+            expect(component.replacedResult()).toEqual({ newCardCode: 'GC-000050', amountCents: 100000 });
+        });
+
+        it('N) error del servidor (carrera: ya no está AVAILABLE) limpia la selección y refresca el listado', async () => {
+            await setUp(baseCard({ status: 'CANCELLED', pendingReplacement: true }), 'admin');
+            acceptImmediately(fixture);
+            replaceGiftCard.and.returnValue(
+                throwError(() => ({
+                    code: 'functions/failed-precondition',
+                    message: 'La tarjeta seleccionada ya no está disponible. Selecciona otra tarjeta.',
+                })),
+            );
+
+            component.openReplace();
+            component.onReplaceModeChange('existing');
+            await flush();
+            component.selectTarget(makeTarget({ cardCode: 'GC-000050' }));
+            createPager.calls.reset();
+            component.confirmReplace();
+
+            expect(component.selectedTarget()).toBeNull();
+            expect(createPager).toHaveBeenCalledOnceWith('AVAILABLE', 5);
+            expect(component.mode()).toBe('replace'); // sigue abierto, nunca se cierra en silencio
         });
     });
 

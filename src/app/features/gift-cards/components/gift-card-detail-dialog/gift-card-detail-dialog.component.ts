@@ -16,12 +16,15 @@ import { MoneyPipe } from '@shared/pipes';
 import { SessionService } from '@core/session';
 import { ToastService } from '@core/services';
 import { fromCents, toCents } from '@core/utils';
+import { CursorPager } from '@core/data';
 import { GiftCardReceiptService } from '../../gift-card-receipt.service';
 import {
     GiftCard,
+    GiftCardIssue,
     GiftCardIssuePaymentMethod,
     GiftCardMovement,
     GiftCardReceipt,
+    GiftCardReplaceMode,
 } from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardLabelDialogComponent, GiftCardLabelTarget } from '../gift-card-label-dialog/gift-card-label-dialog.component';
@@ -86,6 +89,37 @@ export class GiftCardDetailDialogComponent {
     /** Resultado del reemplazo, mientras el panel sigue abierto (ver `confirmReplace`). */
     replacedResult = signal<{ newCardCode: string; amountCents: number } | null>(null);
     saving = signal(false);
+
+    /**
+     * Segundo modo de reemplazo (ajuste posterior, prompt §4-§6): por
+     * defecto `'generate'` — conserva EXACTAMENTE el comportamiento de
+     * siempre. `'existing'` abre el selector de abajo.
+     */
+    replaceMode = signal<GiftCardReplaceMode>('generate');
+    /** Página actual del selector (prompt §7-§10): 5 por página, server-side (`giftCards`, admin/staff puede leer). */
+    availableTargets = signal<GiftCard[]>([]);
+    availableTargetsLoading = signal(false);
+    availableTargetsHasNext = signal(false);
+    availableTargetsHasPrev = signal(false);
+    /**
+     * Selección ÚNICA (prompt §8-§10): se guarda el objeto completo, no solo
+     * el código — así "Monto actual" de la tarjeta elegida sigue visible
+     * aunque el usuario avance de página y la fila ya no esté en `availableTargets()`.
+     */
+    selectedTarget = signal<GiftCard | null>(null);
+    private targetsPager: CursorPager<GiftCard> | null = null;
+
+    /**
+     * Snapshot del ciclo ORIGINAL de la tarjeta a reemplazar (prompt §11,
+     * §13): es la única forma de previsualizar, ANTES de confirmar, qué
+     * comprador/vendedor heredará el destino elegido — `displayCard()` (la
+     * fuente, ya `CANCELLED`) tiene esos campos en `null` desde que
+     * `cancelGiftCard` los limpió. Lectura directa de `giftCardIssues`
+     * (admin-only en las Rules, mismo patrón ya usado por
+     * `reports.service.ts`) vía `card.lastCycleId`.
+     */
+    sourceOriginalIssue = signal<GiftCardIssue | null>(null);
+    loadingSourceIssue = signal(false);
 
     /**
      * Recibo de la emisión recién vendida (ajuste posterior, Recibo/Historial
@@ -170,6 +204,13 @@ export class GiftCardDetailDialogComponent {
                 this.newAmountBs.set(null);
                 this.replaceReason.set('');
                 this.replacedResult.set(null);
+                this.replaceMode.set('generate');
+                this.selectedTarget.set(null);
+                this.availableTargets.set([]);
+                this.availableTargetsHasNext.set(false);
+                this.availableTargetsHasPrev.set(false);
+                this.targetsPager = null;
+                this.sourceOriginalIssue.set(null);
                 this.activatedReceipt.set(null);
                 this.cardOverride.set(null);
                 this.movements.set([]);
@@ -212,9 +253,89 @@ export class GiftCardDetailDialogComponent {
         this.mode.set('editAmount');
     }
     openReplace(): void {
+        const card = this.displayCard();
         this.replaceReason.set('');
         this.replacedResult.set(null);
+        this.replaceMode.set('generate');
+        this.selectedTarget.set(null);
+        this.availableTargets.set([]);
+        this.availableTargetsHasNext.set(false);
+        this.availableTargetsHasPrev.set(false);
+        this.targetsPager = null;
+        this.sourceOriginalIssue.set(null);
         this.mode.set('replace');
+
+        // Previsualización de lo que heredará el destino (prompt §11): se
+        // carga de una vez, para los dos modos (el modo "existing" la
+        // necesita; pedirla solo al cambiar de modo no aporta nada, es una
+        // sola lectura admin-only, igual que `getMovements` arriba).
+        if (card?.lastCycleId) {
+            this.loadingSourceIssue.set(true);
+            this.giftCardsService.getIssue(card.lastCycleId).subscribe({
+                next: (issue) => {
+                    this.loadingSourceIssue.set(false);
+                    this.sourceOriginalIssue.set(issue);
+                },
+                error: () => this.loadingSourceIssue.set(false),
+            });
+        }
+    }
+
+    /** Cambia de modo (prompt §4-§6): carga el selector de disponibles la primera vez que se entra a `'existing'`. */
+    onReplaceModeChange(mode: GiftCardReplaceMode): void {
+        this.replaceMode.set(mode);
+        if (mode === 'existing' && this.targetsPager === null) {
+            this.loadAvailableTargets();
+        }
+    }
+
+    private loadAvailableTargets(): void {
+        this.availableTargetsLoading.set(true);
+        this.targetsPager = this.giftCardsService.createPager('AVAILABLE', 5);
+        this.targetsPager
+            .first()
+            .then((result) => this.applyTargetsResult(result))
+            .catch(() => this.onTargetsLoadError());
+    }
+
+    onTargetsNextPage(): void {
+        if (!this.targetsPager) return;
+        this.availableTargetsLoading.set(true);
+        this.targetsPager
+            .next()
+            .then((result) => this.applyTargetsResult(result))
+            .catch(() => this.onTargetsLoadError());
+    }
+
+    onTargetsPrevPage(): void {
+        if (!this.targetsPager) return;
+        this.availableTargetsLoading.set(true);
+        this.targetsPager
+            .prev()
+            .then((result) => this.applyTargetsResult(result))
+            .catch(() => this.onTargetsLoadError());
+    }
+
+    private applyTargetsResult(result: { rows: GiftCard[]; hasNext: boolean; hasPrev: boolean }): void {
+        this.availableTargets.set(result.rows);
+        this.availableTargetsHasNext.set(result.hasNext);
+        this.availableTargetsHasPrev.set(result.hasPrev);
+        this.availableTargetsLoading.set(false);
+    }
+
+    private onTargetsLoadError(): void {
+        this.availableTargetsLoading.set(false);
+        this.toast.error('app.common.errors.general');
+    }
+
+    /** Selección única con "toggle" (prompt §8-§9): elegir la misma fila otra vez la deselecciona. */
+    selectTarget(card: GiftCard): void {
+        const current = this.selectedTarget();
+        this.selectedTarget.set(current?.cardCode === card.cardCode ? null : card);
+    }
+
+    clearTargetSelection(): void {
+        this.selectedTarget.set(null);
     }
     backToView(): void {
         this.mode.set('view');
@@ -333,15 +454,34 @@ export class GiftCardDetailDialogComponent {
         const card = this.displayCard();
         if (!card) return;
 
+        const mode = this.replaceMode();
+        const target = this.selectedTarget();
+        if (mode === 'existing' && !target) {
+            this.toast.error('app.giftCards.messages.selectTargetRequired');
+            return;
+        }
+
+        const message =
+            mode === 'existing' && target
+                ? this.translate.instant('app.giftCards.messages.confirmReplaceExisting', {
+                      sourceCode: card.cardCode,
+                      targetCode: target.cardCode,
+                  })
+                : this.translate.instant('app.giftCards.messages.confirmReplace');
+
         this.confirmationService.confirm({
             header: this.translate.instant('app.common.confirm'),
-            message: this.translate.instant('app.giftCards.messages.confirmReplace'),
+            message,
             icon: 'fas fa-retweet',
             acceptButtonStyleClass: 'p-button-warning',
             accept: () => {
                 this.saving.set(true);
                 this.giftCardsService
-                    .replaceGiftCard(card.cardCode, this.replaceReason().trim() || undefined)
+                    .replaceGiftCard(card.cardCode, {
+                        reason: this.replaceReason().trim() || undefined,
+                        mode,
+                        targetCode: mode === 'existing' ? target!.cardCode : undefined,
+                    })
                     .subscribe({
                         next: ({ newCardCode, amountCents }) => {
                             this.saving.set(false);
@@ -349,10 +489,24 @@ export class GiftCardDetailDialogComponent {
                             this.changed.emit();
                             this.replacedResult.set({ newCardCode, amountCents });
                         },
-                        error: (error) => this.onError(error),
+                        error: (error) => this.onReplaceError(error),
                     });
             },
         });
+    }
+
+    /**
+     * Carrera/selección invalidada (prompt §15, §36-§37): además del toast
+     * genérico de `onError` (ya muestra el mensaje server-side), en modo
+     * `'existing'` limpia la selección y refresca el listado de disponibles
+     * — nunca cierra el panel en silencio.
+     */
+    private onReplaceError(error: unknown): void {
+        this.onError(error);
+        if (this.replaceMode() === 'existing') {
+            this.selectedTarget.set(null);
+            this.loadAvailableTargets();
+        }
     }
 
     printReplacementLabel(): void {

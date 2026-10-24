@@ -881,6 +881,128 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('VG. ingreso total de la cadena = solo Camila (250, cash) + Roberto (250, qr) = Bs 500; los reemplazos no suman nada',
         dV.giftCardsIssuedCents === 50000 && dV.giftCardIssuesCashCents === 25000 && dV.giftCardIssuesQrCents === 25000, JSON.stringify(dV));
 
+    // ---- Segundo modo de replaceGiftCard: reutilizar una Gift Card existente ----
+    console.log('\nW. replaceGiftCard mode="existing": reutilizar una Gift Card AVAILABLE');
+
+    // A) éxito básico: hereda monto/comprador/vendedor; fuente queda CANCELLED con replacedByCode = target.
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 100000, codeMode: 'generated' }));
+    const WSrc = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: WSrc, buyerName: 'Camila', payments: [{ method: 'cash', amountCents: 100000 }] });
+    await call(cancelGiftCard, 'admin', { code: WSrc, reason: 'dañada' });
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const WTgt = rg.value.cardCode; // AVAILABLE, Bs 100 configurados
+    const beforeW = freezeSummary();
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WSrc, mode: 'existing', targetCode: WTgt, reason: 'reemplazo con tarjeta existente' }));
+    check('WA1. éxito, SIN ingreso nuevo (resumen intacto)', r.ok && freezeSummary() === beforeW, r.message);
+    check('WA2. newCardCode = targetCode (el código del destino NUNCA cambia)', r.ok && r.value.newCardCode === WTgt);
+    check('WA3. fuente CANCELLED, replacedByCode = destino', store.get(`giftCards/${WSrc}`).status === 'CANCELLED' && store.get(`giftCards/${WSrc}`).replacedByCode === WTgt);
+
+    // B) el destino hereda monto/comprador/vendedor ORIGINALES (no los del admin ni su propio monto previo).
+    check('WB1. destino ACTIVE', store.get(`giftCards/${WTgt}`).status === 'ACTIVE');
+    check('WB2. destino.amountCents = 1000 (el de la FUENTE, no los 100 que tenía configurados)', store.get(`giftCards/${WTgt}`).amountCents === 100000);
+    check('WB3. destino.currentBuyerName = Camila (comprador original)', store.get(`giftCards/${WTgt}`).currentBuyerName === 'Camila');
+    check('WB4. destino.activatedByName = Vend Edor (vendedor original, NUNCA el admin que ejecuta el reemplazo)', store.get(`giftCards/${WTgt}`).activatedByName === 'Vend Edor');
+    check('WB5. destino.replacesCode = fuente, destino.replacedByCode = null', store.get(`giftCards/${WTgt}`).replacesCode === WSrc && store.get(`giftCards/${WTgt}`).replacedByCode === null);
+    check('WB6. destino.cardCode (identidad física) sigue siendo WTgt: nunca cambia', WTgt === WTgt);
+
+    // C) el código del destino NUNCA cambia (es el mismo documento, reutilizado) — su cycleNumber avanza desde 0.
+    check('WC. destino.cycleNumber = 1 (primera activación real de este plástico)', store.get(`giftCards/${WTgt}`).cycleNumber === 1);
+
+    // D) ciclos/movimientos: origin='replacement', payments=[], NO toca dailySummaries.
+    const newIssueWD = [...store].find(([k, v]) => k.startsWith('giftCardIssues/') && v.cardCode === WTgt);
+    check('WD1. nuevo giftCardIssues: origin=replacement, payments=[]', !!newIssueWD && newIssueWD[1].origin === 'replacement' && JSON.stringify(newIssueWD[1].payments) === '[]');
+    check('WD2. giftCardsIssuedCents NO aumentó (resumen ya comprobado intacto arriba)', freezeSummary() === beforeW);
+
+    // E) movimientos auditables en ambos lados (prompt §21).
+    const movWD = [...store].filter(([k]) => k.startsWith('giftCardMovements/')).map(([, v]) => v);
+    check('WE1. movimiento REPLACED en la fuente, con replacedByCode = destino', movWD.some((m) => m.type === 'REPLACED' && m.giftCardId === WSrc && m.replacedByCode === WTgt));
+    check('WE2. movimiento REPLACEMENT_CREATED en el destino, con replacesCode = fuente', movWD.some((m) => m.type === 'REPLACEMENT_CREATED' && m.giftCardId === WTgt && m.replacesCode === WSrc));
+
+    // F) un reemplazo con destino existente NUNCA aparece en el historial financiero (origin='replacement' ya probado arriba en D1).
+    check('WF. no aparece como venta: origin ya confirmado "replacement", no "sale"', newIssueWD[1].origin !== 'sale');
+
+    // G) rechazos de elegibilidad del DESTINO — mismo texto de error que pide el prompt §36.
+    const seedTargetWithStatus = (code, status, extra = {}) =>
+        store.set(`giftCards/${code}`, { status, amountCents: 20000, cycleNumber: 0, activeCycleId: null, currentBuyerName: null, replacedByCode: null, ...extra });
+
+    const makeEligibleSource = async (amountCents) => {
+        rg = await outcome(call(registerGiftCard, 'admin', { amountCents, codeMode: 'generated' }));
+        const code = rg.value.cardCode;
+        await call(activateGiftCard, 'seller', { code, payments: [{ method: 'cash', amountCents }] });
+        await call(cancelGiftCard, 'admin', { code, reason: 'dañada' });
+        return code;
+    };
+
+    base(); seedProducts();
+    const WG = await makeEligibleSource(30000);
+
+    // G1) destino ACTIVE: rechazado.
+    seedTargetWithStatus('WG-ACTIVE', 'ACTIVE');
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: 'WG-ACTIVE' }));
+    check('WG1. destino ACTIVE: RECHAZADO, mensaje claro, fuente NO queda marcada', !r.ok && /ya no está disponible/.test(r.message) && store.get(`giftCards/${WG}`).replacedByCode === null, r.message);
+
+    // G2) destino SUSPENDED: rechazado.
+    seedTargetWithStatus('WG-SUSP', 'SUSPENDED');
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: 'WG-SUSP' }));
+    check('WG2. destino SUSPENDED: RECHAZADO', !r.ok && store.get(`giftCards/${WG}`).replacedByCode === null, r.message);
+
+    // G3) destino CANCELLED: rechazado.
+    seedTargetWithStatus('WG-CANC', 'CANCELLED');
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: 'WG-CANC' }));
+    check('WG3. destino CANCELLED: RECHAZADO', !r.ok && store.get(`giftCards/${WG}`).replacedByCode === null, r.message);
+
+    // G4) destino inexistente: rechazado.
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: 'WG-NOEXISTE' }));
+    check('WG4. destino inexistente: RECHAZADO (not-found)', !r.ok && r.code === 'not-found', r.message);
+
+    // G5) destino == fuente: rechazado defensivamente, server-side.
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: WG }));
+    check('WG5. destino == fuente: RECHAZADO', !r.ok, r.message);
+
+    // H) éxito tras los rechazos de arriba: eligiendo OTRA tarjeta (realmente AVAILABLE) sí funciona,
+    // mismo origen `WG` (ninguno de los rechazos de G lo dejó marcado).
+    seedTargetWithStatus('WG-OK', 'AVAILABLE');
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: 'WG-OK' }));
+    check('WH. tras los rechazos de arriba, eligiendo una tarjeta SÍ disponible: ÉXITO', r.ok && store.get(`giftCards/${WG}`).replacedByCode === 'WG-OK' && store.get('giftCards/WG-OK').status === 'ACTIVE', r.message);
+
+    // I) la tarjeta reutilizada puede canjearse después exactamente igual que cualquier otra (createSale real):
+    // 'cheap' cuesta Bs 5 (500), bien por debajo del valor heredado (Bs 300 = 30000) — paga el total exacto y pierde el sobrante.
+    const cycleWI = store.get('giftCards/WG-OK').activeCycleId;
+    r = await outcome(call(createSale, 'seller', { saleId: 'W-sale', items: [{ productId: 'cheap', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 500, giftCardId: 'WG-OK', giftCardCycleId: cycleWI }] }));
+    check('WI. la tarjeta reutilizada se canjea con normalidad (vuelve a AVAILABLE)', r.ok && store.get('giftCards/WG-OK').status === 'AVAILABLE', r.message);
+
+    // G6) fuente no CANCELLED / sin pendingReplacement: mismos rechazos que el modo "generate" (regla compartida) — escenario aparte, reset propio.
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 20000, codeMode: 'generated' }));
+    const WAvail = rg.value.cardCode;
+    seedTargetWithStatus('WG-OK1', 'AVAILABLE');
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WAvail, mode: 'existing', targetCode: 'WG-OK1' }));
+    check('WG6. fuente AVAILABLE (nunca cancelada): RECHAZADO', !r.ok, r.message);
+
+    // J) ciclos ANTERIORES del destino (previos a ser reutilizado como reemplazo) quedan intactos — prompt §18.
+    base(); seedProducts();
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 40000, codeMode: 'generated' }));
+    const WJTgt = rg.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: WJTgt, buyerName: 'Roberto', payments: [{ method: 'qr', amountCents: 40000 }] });
+    const cycleWJold = store.get(`giftCards/${WJTgt}`).activeCycleId;
+    await call(createSale, 'seller', { saleId: 'WJ-sale', items: [{ productId: 'cheap', quantity: 1 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 500, giftCardId: WJTgt, giftCardCycleId: cycleWJold }] }); // canjeada (parcial, sobrante perdido) → AVAILABLE
+    check('WJ1. WJTgt de vuelta AVAILABLE tras canjearse (ciclo 1 cerrado)', store.get(`giftCards/${WJTgt}`).status === 'AVAILABLE' && store.get(`giftCards/${WJTgt}`).cycleNumber === 1);
+    const WJSrc = await makeEligibleSource(90000);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WJSrc, mode: 'existing', targetCode: WJTgt }));
+    check('WJ2. se reutiliza como destino de un reemplazo: ÉXITO, ciclo avanza a 2 (no se reinicia a 1)', r.ok && store.get(`giftCards/${WJTgt}`).cycleNumber === 2, r.message);
+    const oldIssueWJ = store.get(`giftCardIssues/${cycleWJold}`);
+    check('WJ3. el giftCardIssues del CICLO 1 (Roberto, QR) sigue intacto, nadie lo tocó', oldIssueWJ.status === 'redeemed' && oldIssueWJ.buyerName === 'Roberto' && JSON.stringify(oldIssueWJ.payments) === JSON.stringify([{ method: 'qr', amountCents: 40000 }]));
+    check('WJ4. el ciclo 2 (reemplazo) ya NO muestra a Roberto: muestra el comprador de la fuente del reemplazo', store.get(`giftCards/${WJTgt}`).currentBuyerName !== 'Roberto');
+
+    // K) backward-compat: llamar replaceGiftCard SIN `mode` (callers anteriores a este ajuste) sigue siendo 'generate'.
+    base(); seedProducts();
+    const WK = await makeEligibleSource(15000);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: WK, reason: 'sin mode, como antes' }));
+    check('WK. sin "mode": comportamiento IDÉNTICO al modo generate (código nuevo, nunca el mismo que una tarjeta ya registrada)', r.ok && r.value.newCardCode !== WK && !store.get(`giftCards/${r.value.newCardCode}`) === false, r.message);
+
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);
 })();

@@ -50,6 +50,15 @@ export type GiftCardStatus = 'AVAILABLE' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
  */
 export type GiftCardCodeMode = 'manual' | 'generated';
 
+/**
+ * Modo de `replaceGiftCard` (ajuste posterior: "reemplazar usando una Gift
+ * Card existente"). `'generate'` (default, sin cambios) — código nuevo
+ * generado por el sistema. `'existing'` — reutiliza un plástico YA
+ * REGISTRADO, `AVAILABLE`, elegido en el panel de reemplazo — ver
+ * `functions/src/giftcards.ts` para la validación/transacción real.
+ */
+export type GiftCardReplaceMode = 'generate' | 'existing';
+
 export interface GiftCard {
     cardCode: string; // del ID del documento — NO se guarda en el documento
     amountCents: number; // monto configurado ACTUAL (editable solo admin + AVAILABLE; ver comentario de cabecera)

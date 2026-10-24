@@ -2873,6 +2873,37 @@ real de gift card SÍ representa dinero cobrado y merece comprobante y reimpresi
   directa, y Productos demostró en su momento que no conviene acoplar dos pantallas que
   cambian con calendarios distintos.
 
+### 16.15 Reemplazo de plástico — segundo modo, reutilizar una Gift Card existente (ajuste posterior)
+
+`replaceGiftCard` (§16.13) ganó un segundo modo. **El modo original no cambió en absoluto** —
+sigue siendo el default (`mode` ausente/`'generate'`), sin ninguna migración para quien ya lo
+llamaba así.
+
+- **`mode: 'generate' | 'existing'`** — `'generate'` (default): código nuevo, sin cambios.
+  `'existing'`: reutiliza un plástico YA REGISTRADO (`targetCode`), elegido por el admin entre
+  las Gift Cards `AVAILABLE` (hasta ~50 tarjetas físicas: una lista paginada de 5, reutilizando
+  `GiftCardsService.createPager('AVAILABLE', 5)` — la misma query que ya usa el listado
+  principal, sin índice nuevo).
+- **Una sola Function, un solo concepto** (no se duplicó la lógica): ambos modos comparten
+  identidad del entitlement, `origin: 'replacement'`, cero impacto en `dailySummaries`/reportes
+  y un solo salto de lineage. La única diferencia real es si el documento destino se `create()`
+  (nace con `cycleNumber: 1`) o se `update()` (el plástico ya existía, con su propio historial
+  de ciclos anteriores — intacto; solo avanza su `cycleNumber`, igual que `activateGiftCard`).
+- **El código del destino nunca cambia** en modo `'existing'` (es el mismo documento físico de
+  siempre) — solo cambian su estado/ciclo/datos actuales. `replacesCode` se sobreescribe con el
+  origen de ESTE reemplazo (un puntero de un solo salto al más reciente, mismo criterio que
+  `activeCycleId`; la cadena completa, si hiciera falta, sigue viva en `giftCardMovements`).
+- **Protección contra carrera:** la Function relee `targetCode` DENTRO de la misma transacción
+  y exige `status === 'AVAILABLE'` en ese instante — si otra operación se la llevó entre que se
+  mostró en pantalla y se confirmó, se rechaza limpio (sin dejar el origen marcado como
+  reemplazado) con un mensaje claro; el frontend limpia la selección y refresca el listado.
+- **Datos heredados, nunca editables:** monto/comprador/vendedor que mostrará el destino se
+  leen de `giftCardIssues/{origen.lastCycleId}` (lectura directa admin-only, mismo patrón que
+  `reports.service.ts`) solo para previsualizar ANTES de confirmar — nunca hay un input para
+  escribirlos a mano.
+- **Rules/índices: sin cambios.** El selector reutiliza el índice compuesto `giftCards(status,
+  cardCode)` que ya existía para el listado principal.
+
 ---
 
 ## 17. Dinero y fechas

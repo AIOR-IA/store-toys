@@ -145,9 +145,19 @@ interface UpdateGiftCardAmountData {
     amountCents: number;
 }
 
+/**
+ * `'generate'` (default, sin cambios) — código nuevo generado por el sistema.
+ * `'existing'` — reutiliza una Gift Card física YA REGISTRADA, `AVAILABLE`
+ * (ajuste posterior, prompt "reemplazar usando una Gift Card existente").
+ */
+type ReplaceGiftCardMode = 'generate' | 'existing';
+
 interface ReplaceGiftCardData {
     code: string;
     reason?: string;
+    mode?: ReplaceGiftCardMode;
+    /** Obligatorio (y solo válido) cuando `mode === 'existing'`. */
+    targetCode?: string;
 }
 
 interface ActivateGiftCardData {
@@ -356,6 +366,18 @@ const DEFAULT_REPLACEMENT_REASON = 'Reemplazo de tarjeta física (código anteri
 function optionalReplacementReason(value: unknown): string {
     if (typeof value !== 'string' || !value.trim()) return DEFAULT_REPLACEMENT_REASON;
     return value.trim().slice(0, MAX_REASON_LENGTH);
+}
+
+/**
+ * `undefined`/`null` (callable serializa `undefined` como `null`, ver
+ * `sales.harness.js`) → `'generate'`: así cualquier caller anterior a este
+ * ajuste (que nunca mandó `mode`) sigue comportándose EXACTAMENTE igual, sin
+ * ninguna migración (prompt §29).
+ */
+function requireReplaceMode(value: unknown): ReplaceGiftCardMode {
+    if (value === undefined || value === null) return 'generate';
+    if (value === 'generate' || value === 'existing') return value;
+    throw new HttpsError('invalid-argument', 'El modo de reemplazo no es válido.');
 }
 
 function optionalBuyerName(value: unknown): string | null {
@@ -1197,6 +1219,30 @@ export const updateGiftCardAmount = onCall<UpdateGiftCardAmountData>({ region: R
  * Atómico de punta a punta (prompt §16): reservar y crear el código nuevo,
  * marcar el viejo como reemplazado, abrir el ciclo nuevo y los movimientos
  * de auditoría ocurren en una sola transacción.
+ *
+ * SEGUNDO MODO (ajuste posterior: "reemplazar usando una Gift Card
+ * existente"): `mode` decide hacia dónde se transfiere el valor —
+ * `'generate'` (default, sin cambios: cualquier caller que nunca mandó este
+ * campo sigue exactamente igual, prompt §29) crea un código nuevo; `'existing'`
+ * reutiliza un plástico YA REGISTRADO (`targetCode`), `AVAILABLE` en el
+ * momento de leerlo DENTRO de esta misma transacción (protección contra
+ * carrera: si entre que el admin eligió la tarjeta en pantalla y confirmó
+ * otra venta se la llevó, esta relectura la encuentra `ACTIVE` y la
+ * transacción se rechaza sin tocar nada — prompt §15-§16, §36-§37). Ambos
+ * modos comparten TODO lo demás (identidad del entitlement, `origin:
+ * 'replacement'`, cero impacto en `dailySummaries`/reportes, un solo hop de
+ * lineage en `replacedByCode`/`replacesCode`) — la única diferencia real es
+ * si el documento destino se `create()` (modo `'generate'`, nace con
+ * `cycleNumber: 1`) o se `update()` (modo `'existing'`: el plástico ya tenía
+ * su propio historial de ciclos anteriores, que esta Function NUNCA borra ni
+ * reabre — solo avanza su `cycleNumber` igual que `activateGiftCard` ya hace
+ * con cualquier activación real, prompt §18). En modo `'existing'` el código
+ * del documento (`targetCode`) nunca cambia (prompt §17); `replacesCode` se
+ * sobreescribe con el código de la fuente de ESTE reemplazo — es, por
+ * diseño, un puntero de un solo salto al origen MÁS RECIENTE del valor que
+ * trae la tarjeta (mismo criterio que `activeCycleId`/`lastCycleId`: estado
+ * corriente denormalizado, nunca una lista — la cadena completa, si hiciera
+ * falta reconstruirla, sigue viva en `giftCardMovements`, append-only).
  */
 export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, async (request) => {
     const adminSnap = await assertAdmin(request.auth);
@@ -1205,6 +1251,18 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
 
     const oldCode = requireCode(request.data.code);
     const reason = optionalReplacementReason(request.data.reason);
+    const mode = requireReplaceMode(request.data.mode);
+    const targetCode = mode === 'existing' ? requireCode(request.data.targetCode, 'targetCode') : null;
+    if (targetCode && targetCode === oldCode) {
+        // Defensivo (prompt §26): la fuente está CANCELLED y por lo tanto
+        // nunca aparece en el listado de tarjetas AVAILABLE que alimenta el
+        // selector, pero una Function nunca confía solo en lo que el cliente
+        // mandó.
+        throw new HttpsError(
+            'invalid-argument',
+            'La tarjeta seleccionada no puede ser la misma que la tarjeta a reemplazar.',
+        );
+    }
 
     const settingsSnap = await db.doc('settings/app').get();
     const timezone = (settingsSnap.get('timezone') as string) || 'America/La_Paz';
@@ -1264,13 +1322,54 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         const originalActivatedBy = originalIssueSnap.get('activatedBy') as string;
         const originalActivatedByName = originalIssueSnap.get('activatedByName') as string;
 
-        const { codes, counterRef, counterExists, finalSeq } = await reserveGeneratedCodes(tx, 1);
-        newCode = codes[0];
-        const newCardRef = db.doc(`giftCards/${newCode}`);
+        // Resolución del destino — TODAS las lecturas (incluida la del
+        // plástico existente, si aplica) ocurren antes de cualquier
+        // escritura, regla de las transacciones de Firestore (prompt §16).
+        let targetCardRef: FirebaseFirestore.DocumentReference;
+        let newCycleNumber: number;
+        let counterRef: FirebaseFirestore.DocumentReference | null = null;
+        let counterExists = false;
+        let finalSeq = 0;
+
+        if (mode === 'existing') {
+            targetCardRef = db.doc(`giftCards/${targetCode}`);
+            const targetCardSnap = await tx.get(targetCardRef);
+            if (!targetCardSnap.exists) {
+                throw new HttpsError('not-found', 'La tarjeta seleccionada no existe.');
+            }
+            // Relectura fresca DENTRO de la transacción = la protección
+            // contra carrera (prompt §15, §36): si otra operación la vendió
+            // entre que se mostró en pantalla y se confirmó, esto la
+            // encuentra ya `ACTIVE`/`SUSPENDED`/`CANCELLED` y rechaza limpio,
+            // sin dejar la fuente marcada como reemplazada (sin escritura
+            // parcial — prompt §16).
+            if (targetCardSnap.get('status') !== 'AVAILABLE') {
+                throw new HttpsError(
+                    'failed-precondition',
+                    'La tarjeta seleccionada ya no está disponible. Selecciona otra tarjeta.',
+                );
+            }
+            newCode = targetCode as string;
+            // El plástico puede traer ciclos anteriores (prompt §18): se
+            // avanza su propio contador, igual que `activateGiftCard` — NUNCA
+            // se reinicia a 1 como si fuera una tarjeta recién nacida.
+            newCycleNumber = ((targetCardSnap.get('cycleNumber') as number) ?? 0) + 1;
+        } else {
+            const reserved = await reserveGeneratedCodes(tx, 1);
+            newCode = reserved.codes[0];
+            counterRef = reserved.counterRef;
+            counterExists = reserved.counterExists;
+            finalSeq = reserved.finalSeq;
+            targetCardRef = db.doc(`giftCards/${newCode}`);
+            newCycleNumber = 1;
+        }
+
         const newIssueRef = db.collection('giftCardIssues').doc();
 
         // Solo escrituras de aquí en adelante.
-        writeGeneratedCodeCounter(tx, counterRef, counterExists, finalSeq);
+        if (counterRef) {
+            writeGeneratedCodeCounter(tx, counterRef, counterExists, finalSeq);
+        }
 
         // La tarjeta vieja ya estaba CANCELLED (la dejó así `cancelGiftCard`):
         // solo se marca hacia dónde se transfirió el valor, sin reabrir ni
@@ -1281,37 +1380,64 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             updatedAt: FieldValue.serverTimestamp(),
         });
 
-        tx.create(newCardRef, {
-            cardCode: newCode,
-            amountCents,
-            status: 'ACTIVE' as const,
-            cycleNumber: 1,
-            activeCycleId: newIssueRef.id,
-            lastCycleId: newIssueRef.id,
-            replacedByCode: null,
-            replacesCode: oldCode,
-            pendingReplacement: false,
-            currentBuyerName: originalBuyerName,
-            activatedAt: originalActivatedAt,
-            activatedBy: originalActivatedBy,
-            activatedByName: originalActivatedByName,
-            suspendedAt: null,
-            suspendedBy: null,
-            suspendedByName: null,
-            suspensionReason: null,
-            cancelledAt: null,
-            cancelledBy: null,
-            cancelledByName: null,
-            cancelReason: null,
-            createdAt: FieldValue.serverTimestamp(),
-            createdBy: uid,
-            createdByName: name,
-            updatedAt: FieldValue.serverTimestamp(),
-        });
+        if (mode === 'existing') {
+            // `update()`, nunca `create()`: es el MISMO documento físico de
+            // siempre (prompt §17) — sus ciclos ya cerrados en `giftCardIssues`
+            // y sus `giftCardMovements` históricos quedan intocados (prompt
+            // §18). `createdAt`/`createdBy`/`createdByName` tampoco se tocan:
+            // son del registro original del plástico, no de este ciclo.
+            tx.update(targetCardRef, {
+                amountCents,
+                status: 'ACTIVE' as const,
+                cycleNumber: newCycleNumber,
+                activeCycleId: newIssueRef.id,
+                lastCycleId: newIssueRef.id,
+                replacedByCode: null,
+                replacesCode: oldCode,
+                pendingReplacement: false,
+                currentBuyerName: originalBuyerName,
+                activatedAt: originalActivatedAt,
+                activatedBy: originalActivatedBy,
+                activatedByName: originalActivatedByName,
+                suspendedAt: null,
+                suspendedBy: null,
+                suspendedByName: null,
+                suspensionReason: null,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        } else {
+            tx.create(targetCardRef, {
+                cardCode: newCode,
+                amountCents,
+                status: 'ACTIVE' as const,
+                cycleNumber: newCycleNumber,
+                activeCycleId: newIssueRef.id,
+                lastCycleId: newIssueRef.id,
+                replacedByCode: null,
+                replacesCode: oldCode,
+                pendingReplacement: false,
+                currentBuyerName: originalBuyerName,
+                activatedAt: originalActivatedAt,
+                activatedBy: originalActivatedBy,
+                activatedByName: originalActivatedByName,
+                suspendedAt: null,
+                suspendedBy: null,
+                suspendedByName: null,
+                suspensionReason: null,
+                cancelledAt: null,
+                cancelledBy: null,
+                cancelledByName: null,
+                cancelReason: null,
+                createdAt: FieldValue.serverTimestamp(),
+                createdBy: uid,
+                createdByName: name,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        }
 
         tx.create(newIssueRef, {
             cardCode: newCode,
-            cycleNumber: 1,
+            cycleNumber: newCycleNumber,
             amountCents,
             status: 'active',
             buyerName: originalBuyerName,
@@ -1358,7 +1484,7 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             giftCardId: newCode,
             codeSnapshot: newCode,
             amountCents,
-            cycleNumber: 1,
+            cycleNumber: newCycleNumber,
             cycleId: newIssueRef.id,
             type: 'REPLACEMENT_CREATED' as const,
             createdAt: FieldValue.serverTimestamp(),

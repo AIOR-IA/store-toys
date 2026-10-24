@@ -446,7 +446,16 @@
         "reasonLabel": "Motivo (opcional)",
         "successTitle": "Tarjeta reemplazada. Código nuevo:",
         "replacedByLabel": "Reemplazada por",
-        "replacesLabel": "Reemplazo de"
+        "replacesLabel": "Reemplazo de",
+        "modeLabel": "Reemplazar con",
+        "modeGenerate": "Generar código nuevo",
+        "modeExisting": "Usar tarjeta existente",
+        "availableTitle": "Tarjetas disponibles",
+        "availableEmpty": "No hay tarjetas disponibles para reutilizar.",
+        "currentAmountColumn": "Monto actual",
+        "clearSelection": "Quitar selección",
+        "selectedTitle": "Tarjeta seleccionada",
+        "willInherit": "Esta tarjeta heredará"
       },
       "register": {
         "action": "Registrar tarjeta",
@@ -499,7 +508,9 @@
         "reasonRequired": "Escribe un motivo.",
         "confirmReactivate": "¿Reactivar esta tarjeta? Vuelve a estar habilitada para canjearse.",
         "confirmCancel": "¿Dar de baja esta tarjeta de forma definitiva? No se puede deshacer.",
-        "confirmReplace": "¿Reemplazar esta tarjeta? El código anterior quedará cancelado para siempre y el valor ya pagado se transferirá a una tarjeta nueva. No se registra un nuevo cobro."
+        "confirmReplace": "¿Reemplazar esta tarjeta? El código anterior quedará cancelado para siempre y el valor ya pagado se transferirá a una tarjeta nueva. No se registra un nuevo cobro.",
+        "confirmReplaceExisting": "¿Deseas utilizar la tarjeta {{targetCode}} como reemplazo de {{sourceCode}}? La tarjeta seleccionada pasará a estado ACTIVA. No se registrará un nuevo cobro.",
+        "selectTargetRequired": "Selecciona una tarjeta disponible para continuar."
       },
       "labels": {
         "print": "Imprimir etiqueta",
