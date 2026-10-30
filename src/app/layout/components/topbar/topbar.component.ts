@@ -15,8 +15,6 @@ import { OverlayPanel, OverlayPanelModule } from 'primeng/overlaypanel';
 import { TranslateModule } from '@ngx-translate/core';
 import { filter } from 'rxjs';
 import { LayoutService } from '../../services/app.layout.service';
-import { environment } from '../../../../environments/environment';
-import { FIREBASE_DEV_PROJECT_ID } from '../../../../environments/environment.model';
 import { SessionService } from '@core/session';
 import { ChangePasswordDialogComponent } from '../../../features/profile/components/change-password-dialog/change-password-dialog.component';
 
@@ -27,16 +25,6 @@ import { ChangePasswordDialogComponent } from '../../../features/profile/compone
  * ofrece "Cerrar sesión" real contra `SessionService.logout()`
  * (docs/architecture/mi-pimpollito-plan.md §6). Todavía no hay navegación por
  * rol ni enlace a un perfil editable — eso es de fases posteriores.
- *
- * FASE 0B: badge de ambiente. **No se basa en `environment.name` ni en
- * `environment.production`** — esos describen qué configuración de Angular
- * generó el build, no contra qué Firebase habla. Se basa en
- * `environment.firebase.projectId`, porque eso es lo que de verdad importa:
- * mientras `mi-pimpollito` (PROD) no exista, un build de **producción** de
- * Angular sigue hablando con el Firebase de **DEV** (plan §5.5, decisión del
- * 2026-09-12), y el badge tiene que seguir viéndose para que eso sea obvio.
- * El día que `environment.production.ts` tenga el `projectId` real de
- * `mi-pimpollito`, el badge desaparece solo, sin tocar este componente.
  */
 @Component({
     selector: 'app-topbar',
@@ -57,8 +45,6 @@ export class AppTopbarComponent implements OnInit {
     showProfile = input<boolean>(true);
     isDarkTheme = signal(false);
     changePasswordVisible = signal(false);
-    isDevFirebase = environment.firebase.projectId === FIREBASE_DEV_PROJECT_ID;
-    firebaseProjectId = environment.firebase.projectId;
 
     readonly initials = computed(() => {
         const s = this.sessionService.session();
