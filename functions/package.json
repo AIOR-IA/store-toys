@@ -3,7 +3,7 @@
   "description": "Cloud Functions de Mi Pimpollito — solo lo privilegiado (ver docs/architecture/mi-pimpollito-plan.md §7).",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "lib/index.js",
   "scripts": {
