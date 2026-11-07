@@ -44,9 +44,10 @@ export type GiftCardStatus = 'AVAILABLE' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
  * `functions/src/giftcards.ts`, comentario de cabecera).
  *
  * - `'manual'` — el código viene de la imprenta, tecleado por quien registra.
- * - `'generated'` — el servidor lo decide: `GC-{secuencia global}` (ajuste
+ * - `'generated'` — el servidor lo decide: `GC{secuencia global}` (ajuste
  *   posterior, identidad ≠ monto: ya NO codifica la denominación — ver plan
- *   §16.13).
+ *   §16.13; sin guion desde el plan §16.16, por incompatibilidad con el
+ *   lector físico).
  */
 export type GiftCardCodeMode = 'manual' | 'generated';
 

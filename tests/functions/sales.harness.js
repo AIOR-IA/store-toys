@@ -463,44 +463,59 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('H. general = 1500 (1000 efectivo + 500 QR)', JSON.stringify(issuesOf(summary())) === JSON.stringify({ issued: 150000, cash: 100000, qr: 50000 }), JSON.stringify(summary()));
 
     // ---- Identidad ≠ monto: código GLOBAL generado, independiente de la denominación ----
-    console.log('\nL. Códigos generados: contador global (NO por denominación)');
+    // Formato SIN guion desde el plan §16.16 (el lector USB HID ZKTeco ZKB209
+    // transforma '-' en "'" al escanear un CODE128) — antes era `GC-000001`.
+    console.log('\nL. Códigos generados: contador global (NO por denominación), sin guion');
     base();
     let rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
-    check('L1. primer código generado: GC-000001', rg.ok && rg.value.cardCode === 'GC-000001', JSON.stringify(rg));
+    check('L1. primer código generado: GC000001', rg.ok && rg.value.cardCode === 'GC000001', JSON.stringify(rg));
     rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 100000, codeMode: 'generated' }));
-    check('L2. segundo código (denominación DISTINTA) sigue la MISMA secuencia: GC-000002',
-        rg.ok && rg.value.cardCode === 'GC-000002', JSON.stringify(rg));
+    check('L2. segundo código (denominación DISTINTA) sigue la MISMA secuencia: GC000002',
+        rg.ok && rg.value.cardCode === 'GC000002', JSON.stringify(rg));
     let rb = await outcome(call(registerGiftCardBatch, 'admin', { amountCents: 50000, codeMode: 'generated', quantity: 3 }));
-    check('L3. lote de 3: GC-000003..GC-000005, continuando la secuencia',
-        rb.ok && JSON.stringify(rb.value.cardCodes) === JSON.stringify(['GC-000003', 'GC-000004', 'GC-000005']), JSON.stringify(rb));
+    check('L3. lote de 3: GC000003..GC000005, continuando la secuencia',
+        rb.ok && JSON.stringify(rb.value.cardCodes) === JSON.stringify(['GC000003', 'GC000004', 'GC000005']), JSON.stringify(rb));
     check('L4. ningún código generado contiene el monto (ni "100", ni "500", ni "1000")',
-        [rg, rb].every(() => true) && !['GC-000001', 'GC-000002', ...rb.value.cardCodes].some((c) => /GC(100|500|1000)/.test(c)));
+        [rg, rb].every(() => true) && !['GC000001', 'GC000002', ...rb.value.cardCodes].some((c) => /GC(100|500|1000)/.test(c)));
     let rm = await outcome(call(registerGiftCard, 'admin', { code: 'GC500-ANT', amountCents: 50000, codeMode: 'manual' }));
-    check('L5. código manual (formato viejo, con denominación en el texto) sigue funcionando sin cambios',
+    check('L5. código manual (formato viejo, con denominación y guion en el texto) sigue funcionando sin cambios',
         rm.ok && rm.value.cardCode === 'GC500-ANT', JSON.stringify(rm));
-    // Colisión: alguien registró a mano justo el siguiente candidato de la secuencia.
-    await call(registerGiftCard, 'admin', { code: 'GC-000006', amountCents: 99900, codeMode: 'manual' });
+    // Colisión: alguien registró a mano justo el siguiente candidato de la secuencia
+    // (mismo string que produciría el generador: sin guion).
+    await call(registerGiftCard, 'admin', { code: 'GC000006', amountCents: 99900, codeMode: 'manual' });
     rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 20000, codeMode: 'generated' }));
-    check('L6. candidato ocupado (GC-000006, manual) se salta sin pisarlo: siguiente generado es GC-000007',
-        rg.ok && rg.value.cardCode === 'GC-000007' && store.get('giftCards/GC-000006').amountCents === 99900, JSON.stringify(rg));
+    check('L6. candidato ocupado (GC000006, manual) se salta sin pisarlo: siguiente generado es GC000007',
+        rg.ok && rg.value.cardCode === 'GC000007' && store.get('giftCards/GC000006').amountCents === 99900, JSON.stringify(rg));
     rg = await outcome(call(registerGiftCard, 'admin', { code: 'x', amountCents: 10000 }));
     check('L7. como vendedor (no admin), registrar se rechaza', !(await outcome(call(registerGiftCard, 'seller', { code: 'y', amountCents: 100 }))).ok);
 
-    // Contador global TODAVÍA NO EXISTE, pero YA hay códigos GC-000001/GC-000002
+    // Contador global TODAVÍA NO EXISTE, pero YA hay códigos GC000001/GC000002
     // registrados a mano (datos previos a este ajuste, o una imprenta que
-    // coincidió con el formato nuevo) — el generador debe arrancar en 0,
-    // detectar la colisión en el PRIMER candidato (no solo en uno intermedio
-    // como L6) y saltar hasta encontrar uno libre, sin sobreescribir nada.
-    console.log('\nL8. Contador global nuevo + GC-000001/GC-000002 ya existentes (manual): sin colisión, sin sobreescritura');
+    // coincidió con el formato nuevo, sin guion) — el generador debe arrancar
+    // en 0, detectar la colisión en el PRIMER candidato (no solo en uno
+    // intermedio como L6) y saltar hasta encontrar uno libre, sin
+    // sobreescribir nada.
+    console.log('\nL8. Contador global nuevo + GC000001/GC000002 ya existentes (manual): sin colisión, sin sobreescritura');
     base();
-    await call(registerGiftCard, 'admin', { code: 'GC-000001', amountCents: 30000, codeMode: 'manual' });
-    await call(registerGiftCard, 'admin', { code: 'GC-000002', amountCents: 40000, codeMode: 'manual' });
+    await call(registerGiftCard, 'admin', { code: 'GC000001', amountCents: 30000, codeMode: 'manual' });
+    await call(registerGiftCard, 'admin', { code: 'GC000002', amountCents: 40000, codeMode: 'manual' });
     check('L8a. el contador global aún no existe', !store.has('giftCardCodeCounters/global'));
     rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
-    check('L8b. el generado NO es GC-000001 ni GC-000002 (ambos ocupados): es GC-000003',
-        rg.ok && rg.value.cardCode === 'GC-000003', JSON.stringify(rg));
+    check('L8b. el generado NO es GC000001 ni GC000002 (ambos ocupados): es GC000003',
+        rg.ok && rg.value.cardCode === 'GC000003', JSON.stringify(rg));
     check('L8c. los códigos manuales preexistentes NO se sobreescribieron (conservan su propio monto)',
-        store.get('giftCards/GC-000001').amountCents === 30000 && store.get('giftCards/GC-000002').amountCents === 40000);
+        store.get('giftCards/GC000001').amountCents === 30000 && store.get('giftCards/GC000002').amountCents === 40000);
+
+    // Capacidad GENÉRICA del modo manual (plan §16.16, prompt §10-J): CODE_PATTERN
+    // sigue aceptando "-" para cualquier código que traiga la imprenta — esto NO
+    // es compatibilidad con las Gift Cards de prueba actuales (esas se eliminan
+    // por completo, nunca se migran, plan §16.16): es simplemente que el modo
+    // manual nunca exigió un formato alfanumérico puro.
+    console.log('\nL9. Modo manual: CODE_PATTERN sigue aceptando un guion (capacidad genérica, no histórica)');
+    base();
+    await call(registerGiftCard, 'admin', { code: 'GC-000001', amountCents: 77700, codeMode: 'manual' });
+    check('L9. un código manual con guion se registra y queda intacto',
+        store.get('giftCards/GC-000001')?.amountCents === 77700);
 
     // ---- Monto configurado: editable solo ADMIN + AVAILABLE (caso integral §45) ----
     console.log('\nM. Monto editable (solo admin + AVAILABLE) — caso integral');

@@ -470,7 +470,7 @@
         "codeModeLabel": "Código de la tarjeta",
         "codeModeManual": "Ingresar código",
         "codeModeGenerated": "Generar automáticamente",
-        "generatedHelp": "El sistema genera el código automáticamente (ej. GC-000001) al registrar: es solo un identificador, no incluye el monto.",
+        "generatedHelp": "El sistema genera el código automáticamente (ej. GC000001) al registrar: es solo un identificador, no incluye el monto.",
         "quantity": "Cantidad",
         "generatedResult": "Tarjeta registrada. Código generado:",
         "generatedResultBatch": "Tarjetas registradas. Códigos generados:"

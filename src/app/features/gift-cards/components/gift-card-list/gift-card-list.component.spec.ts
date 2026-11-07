@@ -111,6 +111,16 @@ describe('GiftCardListComponent — búsqueda por código con lector', () => {
         expect(component.searchTerm()).toBe(B);
         expect(lookupByCode).not.toHaveBeenCalledWith(A + B);
     });
+
+    it('I) formato nuevo sin guion (plan §16.16, GC000001) se busca exactamente igual, sea tecleado o escaneado', () => {
+        lookupByCode.and.callFake((code: string) =>
+            of(code === 'GC000001' ? ({ cardCode: 'GC000001', amountCents: 10000, status: 'AVAILABLE' } as unknown as GiftCard) : null),
+        );
+        component.onSearch('GC000001');
+        expect(lookupByCode).toHaveBeenCalledOnceWith('GC000001');
+        expect(component.singleResultMode()).toBeTrue();
+        expect(component.rows()).toEqual([{ cardCode: 'GC000001', amountCents: 10000, status: 'AVAILABLE' } as unknown as GiftCard]);
+    });
 });
 
 /**

@@ -95,6 +95,15 @@ describe('printBarcodeLabel — lifecycle del popup de impresión', () => {
         expect(popup.print).toHaveBeenCalledTimes(1);
     });
 
+    it('3b. formato nuevo de Gift Card generada (sin guion, plan §16.16) codifica igual', async () => {
+        const popup = fakePopup();
+        openSpy.and.returnValue(popup as unknown as Window);
+
+        const ok = await printBarcodeLabel({ code: 'GC000001', primaryText: 'GC000001' });
+        expect(ok).toBeTrue();
+        expect(popup.document.write.calls.mostRecent().args[0]).toContain('GC000001');
+    });
+
     it('4. afterprint cierra el popup', async () => {
         const popup = fakePopup();
         openSpy.and.returnValue(popup as unknown as Window);

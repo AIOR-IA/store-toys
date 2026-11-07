@@ -281,13 +281,18 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   plástico nuevo y cancelar definitivamente es solo del admin.
 - **Código: manual O generado** (ajuste posterior a la Fase 6, admin-only en ambos). Manual:
   el código lo trae la imprenta, tecleado tal cual. Generado: el servidor decide
-  `GC-{secuencia global}` (mín. 6 dígitos, p. ej. `GC-000001` — **ajuste posterior, plan
-  §16.13: ya NO codifica la denominación**, reemplaza el `GC{denominación}-{secuencia}`
+  `GC{secuencia global}` (mín. 6 dígitos, p. ej. `GC000001` — **ajuste posterior, plan §16.16:
+  sin guion**, porque el lector USB HID ZKTeco ZKB209 transforma `-` en `'` al escanear un
+  CODE128, lo que hacía que una tarjeta físicamente correcta nunca se encontrara; antes de eso,
+  plan §16.13: ya NO codifica la denominación, reemplazando el `GC{denominación}-{secuencia}`
   original), atómico dentro de la transacción de `registerGiftCard`/`registerGiftCardBatch`
   (`codeMode`), con UN solo contador `giftCardCodeCounters/global` — la unicidad real siempre
-  se verifica contra `giftCards/{code}` antes de aceptar un candidato. Los códigos con el
-  formato viejo (por denominación) siguen funcionando sin migrarse. El código (de cualquier
-  origen) es el mismo durante todos los ciclos de la tarjeta. Detalle completo: plan §16.12-§16.13.
+  se verifica contra `giftCards/{code}` antes de aceptar un candidato. El mecanismo de
+  normalización/lookup es agnóstico al formato (acepta cualquier string), pero eso no implica
+  conservar datos: las Gift Cards de prueba con el formato viejo (`GC-{secuencia}`) se
+  **eliminan por completo**, no se migran — no hay nada que conservar de ese lote (plan
+  §16.16). El código (de cualquier origen) es el mismo durante todos los ciclos de la tarjeta.
+  Detalle completo: plan §16.12-§16.13, §16.16.
 - Todo cambio de estado nace con su movimiento **en la misma transacción**.
 - `cancelSale` revierte una gift card **solo si el ciclo sigue intacto** desde la redención
   (nadie lo reactivó desde entonces); si ya se reutilizó, la anulación completa se rechaza

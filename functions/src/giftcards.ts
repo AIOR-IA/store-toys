@@ -69,12 +69,17 @@ import { normalizeGiftCardCode } from './normalize';
  * ya NO codifica la denominación (`GC{monto}-{secuencia}`, p. ej.
  * `GC1000-010`) — ese formato ataba el código al valor, y el valor de una
  * tarjeta reutilizable puede cambiar entre un ciclo y el siguiente. El
- * formato nuevo es `GC-{secuencia global}` (`GC-000001`, `GC-000002`...),
- * con UN solo contador (`giftCardCodeCounters/global`), independiente de
- * cuánto valga la tarjeta. Los códigos antiguos con el formato viejo (y los
+ * formato nuevo es `GC{secuencia global}` (`GC000001`, `GC000002`...), con
+ * UN solo contador (`giftCardCodeCounters/global`), independiente de cuánto
+ * valga la tarjeta. Los códigos antiguos con el formato viejo (y los
  * manuales, de cualquier formato) siguen funcionando exactamente igual —
  * nunca se migran (ver el comentario de `buildGeneratedCode` para el
  * detalle completo, y plan §16.13).
+ *
+ * TERCER AJUSTE POSTERIOR (plan §16.16): el formato intermedio
+ * `GC-{secuencia global}` (con guion) quedó reemplazado por `GC{secuencia}`
+ * (sin guion) — el lector USB HID ZKTeco ZKB209 transforma `-` en `'` al
+ * escanear un CODE128. Ver el comentario de `buildGeneratedCode`.
  *
  * El mismo ajuste agrega dos operaciones nuevas, ambas admin-only y
  * server-side (nunca solo un botón oculto en el frontend):
@@ -255,23 +260,35 @@ function requireBatchQuantity(value: unknown): number {
  */
 const GLOBAL_CODE_COUNTER_ID = 'global';
 /**
- * Mínimo de dígitos del código generado (`GC-000001`...`GC-001000`...), sin
+ * Mínimo de dígitos del código generado (`GC000001`...`GC001000`...), sin
  * techo: `padStart` nunca trunca, solo rellena por la izquierda.
  */
 const GLOBAL_CODE_MIN_DIGITS = 6;
 
 /**
- * `GC-{secuencia}` — el código ya NO codifica el monto (ajuste posterior,
- * prompt §1-§2): antes era `GC{denominación}-{secuencia}` (p. ej.
- * `GC1000-010`), un formato que atrapaba la identidad de la tarjeta junto a
- * su valor, imposible de sostener ahora que el valor es editable. Los
- * códigos viejos con ese formato (manuales o generados antes de este
- * ajuste) siguen siendo códigos válidos y funcionan exactamente igual — solo
- * son strings opacos (§16.3) — pero su monto YA NO SE INFIERE del texto del
- * código en ningún punto del sistema; solo cuenta `giftCards.amountCents`.
+ * `GC{secuencia}` — SIN guion (ajuste posterior, plan §16.16): el lector USB
+ * HID ZKTeco ZKB209 transforma el carácter `-` en `'` al decodificar un
+ * CODE128 (`GC-000002` se leía como `GC'000002`), así que una tarjeta
+ * físicamente correcta nunca calzaba contra su propio documento al
+ * escanearla — solo al teclearla a mano. Las tarjetas de este lote no se
+ * habían impreso todavía, así que el formato se corrige ANTES de fabricar
+ * el plástico, sin ningún código real que migrar.
+ *
+ * Antes de esto, el código ya NO codificaba el monto (ajuste posterior,
+ * prompt §1-§2 de esa ronda): previamente era `GC{denominación}-{secuencia}`
+ * (p. ej. `GC1000-010`), un formato que atrapaba la identidad de la tarjeta
+ * junto a su valor, imposible de sostener ahora que el valor es editable.
+ *
+ * El lookup/scanner tratan CUALQUIER código como un string opaco (§16.3), sin
+ * asumir su forma — eso es una propiedad genérica del mecanismo, no una
+ * garantía de retener datos: el lote de prueba con el formato
+ * `GC-{secuencia}` (con guion) se BORRA por completo antes de fabricar el
+ * plástico real (plan §16.16), nunca se migra. El monto nunca se infiere del
+ * texto del código en ningún punto del sistema, tenga o no guion; solo cuenta
+ * `giftCards.amountCents`.
  */
 function buildGeneratedCode(seq: number): string {
-    return `GC-${String(seq).padStart(GLOBAL_CODE_MIN_DIGITS, '0')}`;
+    return `GC${String(seq).padStart(GLOBAL_CODE_MIN_DIGITS, '0')}`;
 }
 
 /**

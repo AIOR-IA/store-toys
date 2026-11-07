@@ -2779,6 +2779,14 @@ vendidas de su vendedor y del rango.
 
 ### 16.13 Identidad ≠ monto — código global, monto editable, reemplazo sin nuevo ingreso (ajuste posterior)
 
+> **Superado en parte por §16.16 (ajuste posterior, incompatibilidad real con el lector
+> ZKTeco ZKB209):** el formato `GC-{secuencia}` descrito abajo quedó reemplazado por
+> `GC{secuencia}` (sin guion) para todo código GENERADO desde ahora — el lector transforma el
+> carácter `-` en `'` al leer un CODE128 por USB HID, así que una tarjeta escaneada nunca
+> calzaba con su propio documento aunque el texto impreso fuera correcto. Esta sección se
+> conserva porque el mecanismo (`codeMode`, contador único, identidad ≠ monto, atomicidad) no
+> cambió — solo cambió la forma exacta del código. Ver §16.16 para el diseño vigente.
+
 > **Motivo (sin abrir una fase nueva):** el cliente confirmó que el código impreso en el
 > plástico (o generado por el sistema) identifica SOLO la tarjeta física — nunca su valor. La
 > misma `GC-000001` puede venderse hoy por Bs 100, canjearse, y venderse después por Bs 500: el
@@ -2903,6 +2911,43 @@ llamaba así.
   escribirlos a mano.
 - **Rules/índices: sin cambios.** El selector reutiliza el índice compuesto `giftCards(status,
   cardCode)` que ya existía para el listado principal.
+
+### 16.16 Código GENERADO sin guion — incompatibilidad real con el lector físico (ajuste posterior)
+
+> **Motivo (sin abrir una fase nueva):** antes de imprimir físicamente el primer lote (~40
+> tarjetas), el cliente reportó que el lector USB HID ZKTeco ZKB209 transforma el carácter
+> `-` (hyphen-minus, U+002D) en `'` al decodificar un CODE128: `GC-000002` se leía como
+> `GC'000002`. El texto bajo el barcode y el documento en Firestore eran correctos — el
+> problema era exclusivamente el carácter especial dentro del payload escaneado. Las tarjetas
+> de este lote **no se habían impreso todavía**, así que no hubo que migrar ningún código real:
+> se cambia el formato ANTES de fabricar el plástico.
+
+- **Código generado, formato nuevo:** `GC{secuencia}` (`GC000001`, `GC000002`...; mismo
+  mínimo de 6 dígitos, mismo contador único `giftCardCodeCounters/global`, mismo mecanismo de
+  `reserveGeneratedCodes` de §16.13) — **100% alfanumérico, sin ningún carácter de puntuación**.
+  Afecta un solo punto de generación (`buildGeneratedCode`, `functions/src/giftcards.ts`),
+  compartido por `registerGiftCard`/`registerGiftCardBatch` (modo `'generated'`) y por
+  `replaceGiftCard` (modo `'generate'`, §16.15) — los tres dejan de producir el guion
+  automáticamente, sin tocar nada más de su lógica.
+- **El mecanismo sigue siendo agnóstico al formato — pero no hay nada que migrar:** el
+  lookup/scanner/etiquetas funcionan por diseño con CUALQUIER string (`normalizeGiftCardCode`/
+  `CODE_PATTERN`, que sigue aceptando `-`, `.`, `_` para código **manual**, no cambiaron). Eso
+  significa que un código manual con guion seguiría funcionando si algún día una imprenta lo
+  trae así — es una propiedad genérica del diseño, no una garantía de compatibilidad para datos
+  existentes. **Decisión explícita (ajuste posterior a este mismo cambio):** las ~40 Gift Cards
+  de prueba generadas con el formato `GC-{secuencia}` **se van a borrar por completo** junto con
+  el resto de las colecciones del módulo (`giftCards`, `giftCardIssues`, `giftCardMovements`,
+  `giftCardCodeCounters`) antes de fabricar el plástico real — nunca se migran, porque no son
+  datos que haya que conservar. El monto sigue sin inferirse nunca del texto del código
+  (§16.13), tenga o no guion.
+- **Scanner/POS, etiquetas, recibos, Historial: sin cambios de lógica.** Todos resuelven por
+  lectura directa `giftCards/{code}` sobre el string normalizado (`trim().toUpperCase()`) sin
+  asumir una posición de guion ni ningún separador — un código sin `-` pasa por el mismo camino
+  que uno con `-`. Las etiquetas (individual y masiva) imprimen/codifican el `cardCode` tal
+  cual sale de Firestore, sin transformación — ya producían el formato correcto en cuanto
+  `buildGeneratedCode` cambió, sin tocar esos componentes.
+- **Rules/índices: sin cambios** — no hay ninguna validación de formato de `cardCode` en las
+  Rules (solo control de acceso), así que no hay nada que actualizar ahí.
 
 ---
 

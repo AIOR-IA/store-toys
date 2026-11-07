@@ -315,10 +315,12 @@ export class GiftCardsService {
 
     /**
      * `registerGiftCard` en modo `'generated'` (Function, admin — ajuste
-     * posterior a la Fase 6): el servidor decide el código (`GC-{secuencia
-     * global}`, independiente del monto — plan §16.13), atómico dentro de la
-     * misma transacción que crea la tarjeta. No toca `registerGiftCard(code, ...)`
-     * de arriba — ese sigue siendo exactamente el modo manual de siempre.
+     * posterior a la Fase 6): el servidor decide el código (`GC{secuencia
+     * global}`, independiente del monto — plan §16.13; sin guion desde el
+     * plan §16.16, por incompatibilidad con el lector físico), atómico
+     * dentro de la misma transacción que crea la tarjeta. No toca
+     * `registerGiftCard(code, ...)` de arriba — ese sigue siendo exactamente
+     * el modo manual de siempre.
      */
     generateGiftCard(amountCents: number): Observable<{ cardCode: string }> {
         const callable = httpsCallable<

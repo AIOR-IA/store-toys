@@ -345,8 +345,10 @@ export class GiftCardLabelsSheetComponent implements OnInit {
      * en el plástico. El código de una Gift Card nunca es un EAN/UPC real
      * (mismo comentario que `GiftCardLabelDialogComponent`), así que el
      * formato es SIEMPRE CODE128 — funciona igual con el formato nuevo
-     * (`GC-000001`) que con códigos históricos/manuales (`GC100-0001`,
-     * `ABCD1234XYZ`): no se interpreta ni se extrae nada del texto del código.
+     * (`GC000001`, sin guion desde el plan §16.16 por incompatibilidad con
+     * el lector físico) que con códigos históricos/manuales (`GC-000001`,
+     * `GC100-0001`, `ABCD1234XYZ`): no se interpreta ni se extrae nada del
+     * texto del código.
      */
     private buildLabelCell(
         card: GiftCard,

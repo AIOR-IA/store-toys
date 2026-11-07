@@ -226,6 +226,16 @@ describe('GiftCardLabelsSheetComponent', () => {
             expect(texts).toEqual(['GC-000001', 'GC-000002']);
         });
 
+        it('H2) formato nuevo sin guion (plan §16.16, GC000001) codifica igual que cualquier otro', async () => {
+            await setup([makeCard('GC000001'), makeCard('GC000002')]);
+            const doc = await run(catalog);
+            const texts = doc.content[0].table.body
+                .flat()
+                .map((cell) => (cell as { stack?: { text: string }[] }).stack?.[1]?.text)
+                .filter((t): t is string => !!t);
+            expect(texts).toEqual(['GC000001', 'GC000002']);
+        });
+
         it('I) un código histórico/manual (no GC-NNNNNN) también genera su etiqueta', async () => {
             await setup([makeCard('GC100-0001'), makeCard('ABCD1234XYZ')]);
             const doc = await run(catalog);
