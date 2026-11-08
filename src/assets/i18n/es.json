@@ -381,7 +381,14 @@
         "searchFirst": "Busca una gift card activa antes de confirmar.",
         "forfeitWarning": "La compra es menor al valor de la tarjeta: se pierde el sobrante de {{amount}}.",
         "forfeitedLabel": "Sobrante perdido: {{amount}}",
-        "differenceLabel": "Diferencia a cobrar: {{amount}}"
+        "differenceLabel": "Diferencia a cobrar: {{amount}}",
+        "coveredLabel": "Cubierto con Gift Card"
+      },
+      "summary": {
+        "pendingLabel": "Diferencia a cobrar",
+        "pendingCashLabel": "Restante por cobrar en efectivo",
+        "changeLabel": "Cambio a entregar",
+        "completeLabel": "Pago completo"
       }
     },
     "giftCards": {

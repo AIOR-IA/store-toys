@@ -45,6 +45,30 @@ type PosPaymentMethod = PaymentMethod | 'cashqr';
 /** Segundo pago para cubrir la diferencia cuando la compra supera el valor de la gift card. */
 type GiftCardDifferenceMethod = Extract<PaymentMethod, 'cash' | 'qr'>;
 
+/** Severidad del resumen de cobro — mismo vocabulario que los `severity` de PrimeNG. */
+type PaymentSummarySeverity = 'success' | 'warn' | 'info' | 'error';
+
+/** Línea secundaria del resumen (p. ej. el desglose de «Efectivo + QR»): etiqueta llana, sin monto embebido. */
+interface PaymentSummaryLine {
+    labelKey: string;
+    amountCents: number;
+}
+
+/**
+ * Estado visual del bloque de resumen de cobro — UN solo modelo para los
+ * cuatro métodos de pago (Ajuste de Ventas, obs. de UI): el monto nunca va
+ * embebido en la oración, para poder mostrarlo aparte en grande y en negrita.
+ */
+interface PaymentSummaryView {
+    severity: PaymentSummarySeverity;
+    icon: string;
+    containerClass: string;
+    textClass: string;
+    titleKey: string;
+    amountCents?: number;
+    lines?: PaymentSummaryLine[];
+}
+
 /**
  * Punto de venta (plan §15.5, prompt §16): un solo puesto, pensado para
  * teclado + lector HID (G1). Plan A (escáner) y Plan B (manual) recorren
@@ -239,6 +263,144 @@ export class SalesPosComponent implements AfterViewInit {
         const change = this.changeCents();
         return change === null ? null : Math.max(0, change);
     });
+
+    /**
+     * Resumen visual del cobro (Ajuste de Ventas, obs. de UI): un solo bloque,
+     * compartido por los cuatro métodos de pago, que le dice al cajero de un
+     * vistazo si falta cobrar algo, si hay que devolver cambio, o si el pago
+     * ya queda cubierto. `null` solo cuando el tramo todavía no está
+     * determinado (p. ej. no se buscó una gift card, o no se tecleó el monto
+     * QR del modo mixto) — no ensucia la pantalla con un resumen sobre un
+     * monto que ni siquiera se conoce todavía.
+     */
+    readonly paymentSummary = computed<PaymentSummaryView | null>(() => {
+        switch (this.paymentMethod()) {
+            case 'cash':
+                return this.cashFlowSummary(
+                    this.totalCents(),
+                    this.cashReceivedBs(),
+                    'app.sales.summary.pendingLabel',
+                );
+            case 'qr':
+                return this.buildPaymentSummary(
+                    'success',
+                    'app.sales.summary.completeLabel',
+                    this.totalCents(),
+                );
+            case 'cashqr': {
+                const qr = this.qrPartBs();
+                if (qr === null || qr === undefined) return null;
+                if (!this.isMixedQrValid()) {
+                    return this.buildPaymentSummary('error', 'app.sales.mixed.invalidQr');
+                }
+                return this.cashFlowSummary(
+                    this.mixedCashCents(),
+                    this.cashReceivedBs(),
+                    'app.sales.summary.pendingCashLabel',
+                    [
+                        { labelKey: 'app.sales.mixed.cashApplied', amountCents: this.mixedCashCents() },
+                        { labelKey: 'app.sales.payment.qr', amountCents: this.mixedQrCents() },
+                    ],
+                );
+            }
+            case 'giftcard': {
+                const card = this.foundGiftCard();
+                if (!card) return null;
+                const difference = this.giftCardDifferenceCents();
+                if (difference === 0) {
+                    return this.buildPaymentSummary(
+                        'success',
+                        'app.sales.summary.completeLabel',
+                        this.totalCents(),
+                    );
+                }
+                const coveredLine: PaymentSummaryLine[] = [
+                    { labelKey: 'app.sales.giftCard.coveredLabel', amountCents: this.giftCardAppliedCents() },
+                ];
+                // Complemento QR: siempre cubre la diferencia exacta, sin «recibido» que comparar
+                // (mismo razonamiento que el método «qr» puro) — nunca queda pendiente ni da cambio.
+                if (this.giftCardDifferenceMethod() === 'qr') {
+                    return this.buildPaymentSummary(
+                        'success',
+                        'app.sales.summary.completeLabel',
+                        this.totalCents(),
+                        coveredLine,
+                    );
+                }
+                return this.cashFlowSummary(
+                    difference,
+                    this.cashReceivedBs(),
+                    'app.sales.summary.pendingLabel',
+                    coveredLine,
+                );
+            }
+            default:
+                return null;
+        }
+    });
+
+    /**
+     * Lectura compartida por Efectivo, «Efectivo + QR» y el complemento en
+     * efectivo de una Gift Card: compara lo recibido contra lo que falta
+     * cobrar en ESE tramo (el total en Efectivo puro, el tramo en efectivo en
+     * el mixto, o la diferencia de la Gift Card). Es una lectura SOLO visual
+     * — nunca sustituye a `changeCents()` (la fuente real de `canConfirm` y
+     * del campo «Cambio» de Efectivo/«Efectivo + QR»): aquí "nada tecleado
+     * todavía" se trata como Bs 0, para que el cajero vea de entrada cuánto
+     * falta cobrar sin tener que escribir nada primero.
+     */
+    private cashFlowSummary(
+        requiredCents: number,
+        receivedBs: number | null,
+        pendingTitleKey: string,
+        lines?: PaymentSummaryLine[],
+    ): PaymentSummaryView {
+        const receivedCents = toCents(receivedBs ?? 0);
+        const diff = receivedCents - requiredCents;
+        if (diff > 0) {
+            return this.buildPaymentSummary('info', 'app.sales.summary.changeLabel', diff, lines);
+        }
+        if (diff < 0) {
+            return this.buildPaymentSummary('warn', pendingTitleKey, -diff, lines);
+        }
+        return this.buildPaymentSummary(
+            'success',
+            'app.sales.summary.completeLabel',
+            this.totalCents(),
+            lines,
+        );
+    }
+
+    private buildPaymentSummary(
+        severity: PaymentSummarySeverity,
+        titleKey: string,
+        amountCents?: number,
+        lines?: PaymentSummaryLine[],
+    ): PaymentSummaryView {
+        const bySeverity: Record<PaymentSummarySeverity, Pick<PaymentSummaryView, 'icon' | 'containerClass' | 'textClass'>> = {
+            success: {
+                icon: 'fas fa-circle-check',
+                containerClass: 'bg-success-soft border-success',
+                textClass: 'text-success-dark',
+            },
+            warn: {
+                icon: 'fas fa-triangle-exclamation',
+                containerClass: 'bg-warning-soft border-warning',
+                textClass: 'text-warning-dark',
+            },
+            info: {
+                icon: 'fas fa-circle-info',
+                containerClass: 'bg-info-soft border-info',
+                textClass: 'text-info-dark',
+            },
+            error: {
+                icon: 'fas fa-circle-exclamation',
+                containerClass: 'bg-danger-soft border-danger',
+                textClass: 'text-danger-dark',
+            },
+        };
+        return { severity, titleKey, amountCents, lines, ...bySeverity[severity] };
+    }
 
     readonly canConfirm = computed(() => {
         if (!this.cart().length || this.confirming()) return false;
@@ -498,6 +660,19 @@ export class SalesPosComponent implements AfterViewInit {
         this.foundGiftCard.set(null);
         this.giftCardCodeValue.set('');
         this.giftCardDifferenceMethod.set('cash');
+        this.cashReceivedBs.set(null); // era del complemento en efectivo de la tarjeta anterior
+    }
+
+    /**
+     * El efectivo recibido tecleado era para comparar contra la diferencia
+     * de ESTE complemento (plan de UI del resumen de cobro): cambiar de
+     * complemento (efectivo ⇄ QR) invalida esa comparación, igual que
+     * `setPaymentMethod` ya limpia `cashReceivedBs` al cambiar de método.
+     */
+    setGiftCardDifferenceMethod(method: GiftCardDifferenceMethod): void {
+        if (method === this.giftCardDifferenceMethod()) return;
+        this.giftCardDifferenceMethod.set(method);
+        this.cashReceivedBs.set(null);
     }
 
     async onVoucherSelected(event: Event): Promise<void> {

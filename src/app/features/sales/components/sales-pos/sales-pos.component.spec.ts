@@ -1146,4 +1146,220 @@ describe('SalesPosComponent — rebaja', () => {
             expect(component.cart().length).toBe(1);
         });
     });
+
+    /**
+     * Resumen visual del cobro (Ajuste de Ventas, obs. de UI): un solo bloque
+     * reutilizado por los cuatro métodos de pago. Se prueba el `computed`
+     * directamente — la plantilla solo lee sus campos ya resueltos.
+     */
+    /**
+     * Resumen visual del cobro (Ajuste de Ventas, obs. de UI #2): warning
+     * (falta cobrar), info (hay que dar cambio) y success (cubierto exacto)
+     * para los cuatro métodos de pago, desde UNA sola fuente (`paymentSummary`
+     * + `cashFlowSummary`). El monto «recibido» sin teclear se trata como
+     * Bs 0 — por eso el resumen aparece desde el primer instante en Efectivo,
+     * a diferencia de `changeCents()`/`canConfirm`, que siguen exigiendo que
+     * el cajero teclee algo (sin tocar esa lógica).
+     */
+    describe('resumen visual del cobro (paymentSummary)', () => {
+        const cashInput = () =>
+            fixture.nativeElement.querySelector('#cashReceived') as HTMLElement;
+
+        beforeEach(() => {
+            component.cart.set([line(14000)]); // Bs 140, sin rebaja
+        });
+
+        describe('Efectivo', () => {
+            it('A) recibido menor al total → warning con el faltante exacto', () => {
+                component.setPaymentMethod('cash');
+                component.cashReceivedBs.set(50); // Total 140, recibe 50 → faltan 60
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingLabel');
+                expect(summary?.amountCents).toBe(9000);
+            });
+
+            it('nada tecleado todavía → warning con el total completo (Bs 0 recibido por defecto)', () => {
+                component.setPaymentMethod('cash');
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.amountCents).toBe(14000);
+            });
+
+            it('B) recibido exactamente igual al total → success, sin cambio', () => {
+                component.setPaymentMethod('cash');
+                component.cashReceivedBs.set(140);
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('success');
+                expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
+                expect(summary?.amountCents).toBe(14000);
+            });
+
+            it('C) recibido mayor al total → info con el cambio a entregar', () => {
+                component.setPaymentMethod('cash');
+                component.cashReceivedBs.set(150); // Total 110 en el ejemplo del cliente; aquí 140
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('info');
+                expect(summary?.titleKey).toBe('app.sales.summary.changeLabel');
+                expect(summary?.amountCents).toBe(1000);
+            });
+
+            it('D) recibido mayor al total → el input de efectivo NO queda marcado como inválido', () => {
+                component.setPaymentMethod('cash');
+                fixture.detectChanges();
+                component.cashReceivedBs.set(150);
+                fixture.detectChanges();
+
+                const input = cashInput();
+                expect(input).toBeTruthy();
+                expect(input.classList.contains('ng-invalid')).toBeFalse();
+                expect(input.classList.contains('p-invalid')).toBeFalse();
+            });
+        });
+
+        describe('QR puro', () => {
+            it('L) siempre cubre el total y nunca muestra «Cambio a entregar»', () => {
+                component.setPaymentMethod('qr');
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('success');
+                expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
+                expect(summary?.titleKey).not.toBe('app.sales.summary.changeLabel');
+                expect(summary?.amountCents).toBe(14000);
+            });
+        });
+
+        describe('Efectivo + QR', () => {
+            it('sin QR tecleado todavía → sin resumen (el tramo en efectivo aún no está determinado)', () => {
+                component.setPaymentMethod('cashqr');
+                expect(component.paymentSummary()).toBeNull();
+            });
+
+            it('monto QR inválido (≥ total) → error, sin monto', () => {
+                component.setPaymentMethod('cashqr');
+                component.qrPartBs.set(140); // == total: el efectivo aplicado quedaría en 0
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('error');
+                expect(summary?.titleKey).toBe('app.sales.mixed.invalidQr');
+                expect(summary?.amountCents).toBeUndefined();
+            });
+
+            it('E) QR válido, nada recibido en efectivo todavía → warning con el restante en efectivo', () => {
+                component.setPaymentMethod('cashqr');
+                component.qrPartBs.set(40); // Total 140 − QR 40 = restante 100 en efectivo
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingCashLabel');
+                expect(summary?.amountCents).toBe(10000);
+                expect(summary?.lines).toEqual([
+                    { labelKey: 'app.sales.mixed.cashApplied', amountCents: 10000 },
+                    { labelKey: 'app.sales.payment.qr', amountCents: 4000 },
+                ]);
+            });
+
+            it('F) QR válido + efectivo recibido cubre exactamente el restante → success', () => {
+                component.setPaymentMethod('cashqr');
+                component.qrPartBs.set(40);
+                component.cashReceivedBs.set(100); // cubre exacto el restante de Bs 100
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('success');
+                expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
+                expect(summary?.amountCents).toBe(14000); // el total de la venta, no solo el tramo
+            });
+
+            it('G) QR válido + efectivo recibido mayor al restante → info con el cambio', () => {
+                component.setPaymentMethod('cashqr');
+                component.qrPartBs.set(40);
+                component.cashReceivedBs.set(120); // restante 100, recibe 120 → cambio 20
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('info');
+                expect(summary?.titleKey).toBe('app.sales.summary.changeLabel');
+                expect(summary?.amountCents).toBe(2000);
+            });
+        });
+
+        describe('Gift Card', () => {
+            it('sin tarjeta buscada todavía → sin resumen', () => {
+                component.setPaymentMethod('giftcard');
+                expect(component.paymentSummary()).toBeNull();
+            });
+
+            it('H) cubre solo una parte (complemento efectivo, nada recibido) → warning con la diferencia y el desglose', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(10000)); // Bs 100 de 140
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingLabel');
+                expect(summary?.amountCents).toBe(4000);
+                expect(summary?.lines).toEqual([
+                    { labelKey: 'app.sales.giftCard.coveredLabel', amountCents: 10000 },
+                ]);
+            });
+
+            it('I) cubre el total exacto → success', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(14000));
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('success');
+                expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
+                expect(summary?.amountCents).toBe(14000);
+            });
+
+            it('J) complemento efectivo mayor al restante → info con el cambio a entregar', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(10000)); // restante 40
+                component.giftCardDifferenceMethod.set('cash');
+                component.cashReceivedBs.set(70); // recibe 70 de un restante de 40 → cambio 30
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('info');
+                expect(summary?.titleKey).toBe('app.sales.summary.changeLabel');
+                expect(summary?.amountCents).toBe(3000);
+            });
+
+            it('K) complemento QR → siempre success, sin cambio físico que mostrar', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(10000)); // restante 40
+                component.giftCardDifferenceMethod.set('qr');
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('success');
+                expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
+                expect(summary?.amountCents).toBe(14000);
+            });
+
+            it('cambiar de complemento (efectivo → QR) descarta el efectivo ya tecleado', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(10000));
+                component.cashReceivedBs.set(70);
+
+                component.setGiftCardDifferenceMethod('qr');
+                expect(component.cashReceivedBs()).toBeNull();
+
+                component.setGiftCardDifferenceMethod('cash');
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn'); // vuelve a 0 recibido, no arrastra los 70
+                expect(summary?.amountCents).toBe(4000);
+            });
+
+            it('«Cambiar» tarjeta descarta el efectivo tecleado para el complemento anterior', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(10000));
+                component.cashReceivedBs.set(70);
+
+                component.clearGiftCardSelection();
+                expect(component.cashReceivedBs()).toBeNull();
+            });
+        });
+    });
 });
