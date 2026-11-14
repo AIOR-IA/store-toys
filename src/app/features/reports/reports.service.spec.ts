@@ -1,5 +1,5 @@
 import { DailySummary } from './daily-summary.model';
-import { mergeDailySummaries, receivedTotals } from './reports.service';
+import { buildTopConcepts, mergeDailySummaries, receivedTotals } from './reports.service';
 
 /**
  * Regla de negocio: una Gift Card es INGRESO cuando SE VENDE (emisión), no
@@ -27,6 +27,7 @@ describe('receivedTotals — Gift Card como ingreso al venderse', () => {
             giftCardIssuesCashCents: 0,
             giftCardIssuesQrCents: 0,
             products: {},
+            extras: {},
             ...o,
         }) as DailySummary;
     const bs = (n: number) => n * 100;
@@ -131,5 +132,60 @@ describe('receivedTotals — Gift Card como ingreso al venderse', () => {
             { qrCents: bs(50), giftCardIssuesQrCents: bs(200), giftCardForfeitedCents: bs(300) },
         );
         expect(r).toEqual({ cashCents: bs(600), qrCents: bs(250), totalCents: bs(850) });
+    });
+
+    /**
+     * Rediseño del PDF ejecutivo (plan §18.4): `extras` es simétrico a
+     * `products` dentro de `mergeDailySummaries` — mismo nombre normalizado
+     * puede venir de días distintos y debe fundirse en una sola entrada.
+     */
+    it('12. mergeDailySummaries acumula "extras" de varios días por clave normalizada, igual que "products"', () => {
+        const merged = mergeDailySummaries(
+            [
+                summary({ extras: { chocolate: { name: 'Chocolate', qty: 2, totalCents: bs(20) } } }),
+                summary({ extras: { chocolate: { name: 'Chocolate', qty: 3, totalCents: bs(30) } } }),
+                summary({ extras: { envoltura: { name: 'Envoltura', qty: 1, totalCents: bs(5) } } }),
+            ].map((s) => s as unknown as DailySummary),
+        );
+        expect(merged.extras['chocolate']).toEqual({ name: 'Chocolate', qty: 5, totalCents: bs(50) });
+        expect(merged.extras['envoltura']).toEqual({ name: 'Envoltura', qty: 1, totalCents: bs(5) });
+    });
+
+    it('13. un resumen histórico sin "extras" en absoluto se funde como si tuviera {} (backward compatibility)', () => {
+        const legacy = { ...summary({}) } as Partial<DailySummary>;
+        delete (legacy as { extras?: unknown }).extras;
+        const merged = mergeDailySummaries([legacy as DailySummary]);
+        expect(merged.extras).toEqual({});
+    });
+});
+
+/**
+ * Tabla agregada de conceptos (rediseño del PDF ejecutivo, plan §18.4):
+ * Products + Extras en una sola lista, cada uno con su `type`, nunca
+ * mezclados en el MISMO objeto (un Extra no tiene `code`).
+ */
+describe('buildTopConcepts — tabla agregada Products + Extras', () => {
+    it('combina products y extras, cada uno con su tipo, y ordena por total descendente', () => {
+        const concepts = buildTopConcepts({
+            products: { bear: { code: 'MP000010', name: 'Oso peluche', qty: 37, totalCents: 277500 } },
+            extras: {
+                chocolate: { name: 'Chocolate', qty: 82, totalCents: 82000 },
+                envoltura: { name: 'Envoltura regalo', qty: 14, totalCents: 7000 },
+            },
+        });
+        expect(concepts).toEqual([
+            { type: 'PRODUCT', code: 'MP000010', name: 'Oso peluche', qty: 37, totalCents: 277500 },
+            { type: 'EXTRA', name: 'Chocolate', qty: 82, totalCents: 82000 },
+            { type: 'EXTRA', name: 'Envoltura regalo', qty: 14, totalCents: 7000 },
+        ]);
+    });
+
+    it('un Extra nunca aparece con "code": solo los PRODUCT lo tienen', () => {
+        const concepts = buildTopConcepts({ products: {}, extras: { x: { name: 'X', qty: 1, totalCents: 100 } } });
+        expect(concepts[0].code).toBeUndefined();
+    });
+
+    it('sin products ni extras: lista vacía', () => {
+        expect(buildTopConcepts({ products: {}, extras: {} })).toEqual([]);
     });
 });

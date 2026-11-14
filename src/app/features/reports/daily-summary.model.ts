@@ -50,4 +50,15 @@ export interface DailySummary {
     // PRECIO DE LISTA: la rebaja es de la venta completa, no de un artículo,
     // así que Σ products[].totalCents === totalCents + discountCents (bruto).
     products: Record<string, { code: string; name: string; qty: number; totalCents: number }>;
+
+    /**
+     * Detalle por EXTRA del día (rediseño del PDF ejecutivo, plan §15.8,
+     * §18.4): simétrico a `products`, pero agrupado por nombre NORMALIZADO
+     * (`trim().toLowerCase()`) en vez de por `productId` — un Extra no tiene
+     * ID real. `name` conserva el primer nombre legible visto (nunca la
+     * clave normalizada). Un Extra NUNCA aparece en `products` (ese ranking
+     * sigue siendo estrictamente de inventario). Un resumen anterior a este
+     * ajuste no tiene este campo: `dailySummaryConverter` lo lee como `{}`.
+     */
+    extras: Record<string, { name: string; qty: number; totalCents: number }>;
 }

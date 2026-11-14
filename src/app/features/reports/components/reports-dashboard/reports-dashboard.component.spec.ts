@@ -2,7 +2,7 @@ import { CurrencyPipe } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { TranslateModule } from '@ngx-translate/core';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ImageCompressorService, SettingsService, ToastService } from '@core/services';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { SaleReceiptService } from '../../../sales/sale-receipt.service';
@@ -66,6 +66,7 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
                 .and.returnValue(of({ issuesCount: 0, nominalCents: 0, cashCents: 0, qrCents: 0 })),
             getIssuesCountInRange: jasmine.createSpy('getIssuesCountInRange').and.returnValue(of(0)),
             getRedemptionsCountInRange: jasmine.createSpy('getRedemptionsCountInRange').and.returnValue(of(0)),
+            getSoldIssuesCountInRange: jasmine.createSpy('getSoldIssuesCountInRange').and.returnValue(of(0)),
             createIssuesPager: jasmine.createSpy('createIssuesPager').and.callFake(() => ({
                 first: async () => ({ rows: [], hasNext: false, hasPrev: false, total: 0 }),
             })),
@@ -277,7 +278,7 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
 
     it('los KPIs y la integridad NO se recargan ni cambian al cambiar el filtro', async () => {
         const kpiCalls = () =>
-            ['getSummariesInRange', 'getSalesIntegrity', 'getSellerTotals', 'getIssuesCountInRange', 'getRedemptionsCountInRange'].map(
+            ['getSummariesInRange', 'getSalesIntegrity', 'getSellerTotals', 'getIssuesCountInRange', 'getRedemptionsCountInRange', 'getSoldIssuesCountInRange'].map(
                 (k) => reports[k].calls.count(),
             );
         const totalsBefore = JSON.stringify(component.rangeTotals());
@@ -325,6 +326,29 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
         expect(component.dailyTotal()).toBe(0);
         expect(component.dailyHasNext()).toBeFalse();
         expect(toastError).toHaveBeenCalledWith('app.common.errors.general');
+    });
+
+    /**
+     * `giftCardsSoldCount`: `null` (consulta fallida, p. ej. índice compuesto
+     * todavía no desplegado) nunca debe confundirse con `0` (consulta válida,
+     * de verdad cero Gift Cards vendidas).
+     */
+    it('G. si getSoldIssuesCountInRange falla, giftCardsSoldCount queda en null, NUNCA en 0', async () => {
+        expect(component.giftCardsSoldCount()).toBe(0); // mock por defecto: éxito con 0 (cero real)
+
+        reports.getSoldIssuesCountInRange.and.returnValue(throwError(() => new Error('failed-precondition')));
+        component.setPreset('yesterday'); // reaplica el rango → vuelve a llamar applyRange()
+        await fixture.whenStable();
+
+        expect(component.giftCardsSoldCount()).toBeNull();
+    });
+
+    it('H. si getSoldIssuesCountInRange responde con éxito y 0, giftCardsSoldCount queda en 0 (no en null)', async () => {
+        reports.getSoldIssuesCountInRange.and.returnValue(of(0));
+        component.setPreset('yesterday');
+        await fixture.whenStable();
+
+        expect(component.giftCardsSoldCount()).toBe(0);
     });
 
     /**

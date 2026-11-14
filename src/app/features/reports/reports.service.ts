@@ -14,7 +14,7 @@ import {
     sum,
     where,
 } from '@angular/fire/firestore';
-import { Observable, from, map } from 'rxjs';
+import { Observable, forkJoin, from, map } from 'rxjs';
 import { CursorPager, PageSize } from '@core/data';
 import { giftCardIssueConverter } from '../gift-cards/gift-card.converter';
 import { GiftCardIssue } from '../gift-cards/gift-card.model';
@@ -53,6 +53,8 @@ export interface RangeTotals {
     giftCardIssuesCashCents: number;
     giftCardIssuesQrCents: number;
     products: Record<string, { code: string; name: string; qty: number; totalCents: number }>;
+    /** Simétrico a `products`, agrupado por nombre normalizado (rediseño del PDF ejecutivo, plan §18.4). */
+    extras: Record<string, { name: string; qty: number; totalCents: number }>;
     /** Cuántos `dailySummaries/{dateKey}` del rango existen (hubo actividad ese día). */
     daysWithData: number;
 }
@@ -71,8 +73,43 @@ function emptyRangeTotals(): RangeTotals {
         giftCardIssuesCashCents: 0,
         giftCardIssuesQrCents: 0,
         products: {},
+        extras: {},
         daysWithData: 0,
     };
+}
+
+export interface ReportConcept {
+    type: 'PRODUCT' | 'EXTRA';
+    code?: string;
+    name: string;
+    qty: number;
+    totalCents: number;
+}
+
+/**
+ * Tabla agregada de conceptos vendidos —Products + Extras— para el reporte
+ * ejecutivo (rediseño del PDF, plan §18.4): nunca por venta ni por unidad,
+ * solo lo que `RangeTotals` ya trae agregado desde `dailySummaries`. Un
+ * Extra nunca mezcla con el ranking de inventario (`products`): esta lista
+ * es exclusivamente para el reporte financiero.
+ */
+export function buildTopConcepts(t: Pick<RangeTotals, 'products' | 'extras'>): ReportConcept[] {
+    const concepts: ReportConcept[] = [
+        ...Object.values(t.products).map((p) => ({
+            type: 'PRODUCT' as const,
+            code: p.code,
+            name: p.name,
+            qty: p.qty,
+            totalCents: p.totalCents,
+        })),
+        ...Object.values(t.extras).map((e) => ({
+            type: 'EXTRA' as const,
+            name: e.name,
+            qty: e.qty,
+            totalCents: e.totalCents,
+        })),
+    ];
+    return concepts.sort((a, b) => b.totalCents - a.totalCents);
 }
 
 /**
@@ -262,6 +299,14 @@ export function mergeDailySummaries(summaries: DailySummary[]): RangeTotals {
             const existing = totals.products[productId];
             totals.products[productId] = {
                 code: entry.code,
+                name: entry.name,
+                qty: (existing?.qty ?? 0) + entry.qty,
+                totalCents: (existing?.totalCents ?? 0) + entry.totalCents,
+            };
+        }
+        for (const [key, entry] of Object.entries(summary.extras ?? {})) {
+            const existing = totals.extras[key];
+            totals.extras[key] = {
                 name: entry.name,
                 qty: (existing?.qty ?? 0) + entry.qty,
                 totalCents: (existing?.totalCents ?? 0) + entry.totalCents,
@@ -458,6 +503,36 @@ export class ReportsService {
             where('dateKey', '<=', toKey),
         );
         return from(getAggregateFromServer(q, { total: count() })).pipe(map((snap) => snap.data().total));
+    }
+
+    /**
+     * Ciclos con `origin === 'replacement'` activados en el rango — nunca son
+     * ingreso (CLAUDE.md §Gift Cards, `replaceGiftCard`). Requiere el índice
+     * compuesto `giftCardIssues(origin, dateKey)` (`firestore.indexes.json`).
+     */
+    private getReplacementIssuesCountInRange(fromKey: string, toKey: string): Observable<number> {
+        const q = query(
+            this.giftCardIssuesCollection,
+            where('origin', '==', 'replacement'),
+            where('dateKey', '>=', fromKey),
+            where('dateKey', '<=', toKey),
+        );
+        return from(getAggregateFromServer(q, { total: count() })).pipe(map((snap) => snap.data().total));
+    }
+
+    /**
+     * Gift Cards VENDIDAS/EMITIDAS en el rango — "cantidad" del reporte
+     * ejecutivo (rediseño del PDF, plan §18.4): `getIssuesCountInRange` de
+     * arriba cuenta CUALQUIER ciclo (a propósito, incluye reemplazos, es otra
+     * métrica — `app.reports.giftCards.issuesCountHelp`); esta resta los
+     * reemplazos de ese mismo total, en dos aggregate queries de servidor,
+     * SIN leer ningún documento uno por uno.
+     */
+    getSoldIssuesCountInRange(fromKey: string, toKey: string): Observable<number> {
+        return forkJoin({
+            total: this.getIssuesCountInRange(fromKey, toKey),
+            replacements: this.getReplacementIssuesCountInRange(fromKey, toKey),
+        }).pipe(map(({ total, replacements }) => total - replacements));
     }
 
     /**

@@ -1189,6 +1189,62 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('Y-O. Gift Card paga un Extra con el flujo actual: ÉXITO, tarjeta redimida (AVAILABLE de nuevo)',
         r.ok && store.get('giftCards/GC-1').status === 'AVAILABLE', r.message);
 
+    // ---- Y-P a Y-T. Reportes (rediseño del PDF ejecutivo): dailySummaries.extras ----
+    console.log('\nY-P a Y-T. dailySummaries.extras: agregado, normalización, cancelSale, backward compatibility');
+
+    // P) createSale agrega el Extra por nombre normalizado en dailySummaries.extras.
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-P', items: [{ kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 }], payments: [{ method: 'cash', amountCents: 2000 }] });
+    check('Y-P. dailySummaries.extras tiene la entrada "chocolate" con name/qty/totalCents correctos',
+        !!summary().extras?.chocolate && summary().extras.chocolate.name === 'Chocolate' &&
+        summary().extras.chocolate.qty === 2 && summary().extras.chocolate.totalCents === 2000,
+        JSON.stringify(summary().extras));
+
+    // Q) normalización trim+lowercase: mismo concepto en dos líneas de una venta y en otra venta distinta se funde en una sola entrada.
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-Q1', items: [
+        { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 1 },
+        { kind: 'EXTRA', name: ' CHOCOLATE ', unitPriceCents: 1000, quantity: 1 },
+    ], payments: [{ method: 'cash', amountCents: 2000 }] });
+    await call(createSale, 'seller', { saleId: 'Y-Q2', items: [{ kind: 'EXTRA', name: 'chocolate', unitPriceCents: 1000, quantity: 3 }], payments: [{ method: 'cash', amountCents: 3000 }] });
+    check('Y-Q. "Chocolate" / " CHOCOLATE " / "chocolate" (2 ventas, 3 líneas) se funden en una sola entrada: qty 5, total 5000, nombre legible "Chocolate" (el primero visto)',
+        Object.keys(summary().extras).length === 1 && summary().extras.chocolate.qty === 5 &&
+        summary().extras.chocolate.totalCents === 5000 && summary().extras.chocolate.name === 'Chocolate',
+        JSON.stringify(summary().extras));
+
+    // R) cancelSale revierte EXACTAMENTE lo que esa venta sumó, sin tocar la entrada de otra venta/concepto.
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-R1', items: [{ kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 }], payments: [{ method: 'cash', amountCents: 2000 }] });
+    await call(createSale, 'seller', { saleId: 'Y-R2', items: [{ kind: 'EXTRA', name: 'Envoltura', unitPriceCents: 500, quantity: 1 }], payments: [{ method: 'cash', amountCents: 500 }] });
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'Y-R1', reason: 'prueba' }));
+    check('Y-R. cancelSale de Y-R1: ÉXITO', r.ok, r.message);
+    check('Y-R2. "chocolate" vuelve a qty 0 / total 0; "envoltura" (de la OTRA venta) queda intacta',
+        summary().extras.chocolate.qty === 0 && summary().extras.chocolate.totalCents === 0 &&
+        summary().extras.envoltura.qty === 1 && summary().extras.envoltura.totalCents === 500,
+        JSON.stringify(summary().extras));
+
+    // S) backward compatibility: un resumen diario histórico SIN campo "extras" (de antes de este ajuste) no revienta con una venta nueva ese mismo día.
+    reset();
+    store.set(`dailySummaries/${todayKey}`, {
+        dateKey: todayKey, monthKey: todayKey.slice(0, 7), year: Number(todayKey.slice(0, 4)),
+        salesCount: 1, itemsCount: 1, totalCents: 7500, discountCents: 0,
+        cashCents: 7500, qrCents: 0, giftCardCents: 0, giftCardsIssuedCents: 0, giftCardForfeitedCents: 0,
+        giftCardIssuesCashCents: 0, giftCardIssuesQrCents: 0,
+        products: { bear: { code: 'MP000010', name: 'BEAR', qty: 1, totalCents: 7500 } },
+        // Sin "extras": documento histórico anterior a este ajuste.
+    });
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-S', items: [{ kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 1 }], payments: [{ method: 'cash', amountCents: 1000 }] }));
+    check('Y-S. createSale sobre un resumen histórico sin "extras": ÉXITO, no revienta', r.ok, r.message);
+    check('Y-S2. el resumen ahora trae "extras.chocolate" con lo de esta venta nueva, y el total acumulado (7500+1000) es correcto',
+        r.ok && summary().extras.chocolate.qty === 1 && summary().extras.chocolate.totalCents === 1000 && summary().totalCents === 8500,
+        JSON.stringify(summary()));
+
+    // T) primera venta del día, solo Product: el resumen nuevo igual trae "extras": {} vacío, por simetría con "products".
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-T', items: [{ kind: 'PRODUCT', productId: 'bear', quantity: 1 }], payments: [{ method: 'cash', amountCents: 7500 }] });
+    check('Y-T. resumen nuevo (solo Product) ya trae "extras": {} vacío, por simetría con "products"',
+        summary().extras !== undefined && Object.keys(summary().extras).length === 0, JSON.stringify(summary()));
+
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);
 })();

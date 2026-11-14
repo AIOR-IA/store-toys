@@ -325,6 +325,21 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   `mercancía vendida == Σ pagos de las ventas` y
   `dinero recibido == (cash+qr de ventas) + (cash+qr de emisiones)`.
 - Exportación solo a **PDF** (`pdfmake`, hoja carta). Sin Excel ni CSV.
+- **PDF ejecutivo** (rediseño posterior a la Fase 7, plan §18.4): compacto, pocos KPIs grandes
+  (`totalCents` — mercadería/Extras — e ingreso real cobrado), tres bloques por método de pago
+  (Efectivo/QR/Gift Card, **solo montos**: una venta mixta nunca atribuye un Product/Extra a un
+  método de pago individual, no hay esa relación guardada y repartirla sería inventar un dato),
+  una sola tabla agregada de conceptos vendidos (`dailySummaries.products` + `dailySummaries.extras`,
+  nunca por venta ni por unidad) y un cierre final compacto con la misma comprobación de
+  consistencia de siempre. `dailySummaries.extras: Record<nombreNormalizado, {name,qty,totalCents}>`
+  es simétrico a `products` pero agrupado por `trim().toLowerCase()` del nombre del Extra (que no
+  tiene `productId`); lo escriben `createSale`/`cancelSale` en la misma transacción, nunca mezclado
+  con `products`. Un resumen anterior a este ajuste no tiene el campo: se lee como `{}`
+  (`dailySummaryConverter`), sin migrar nada. "Gift Cards vendidas/emitidas" (cantidad) excluye
+  `origin === 'replacement'` (dos aggregate queries de servidor, nunca lectura de documentos,
+  `ReportsService.getSoldIssuesCountInRange`). El inventario de Gift Cards traduce su estado con
+  `status.toLowerCase()` (mismo patrón que el dashboard en pantalla) — el PDF anterior tenía un bug
+  de case-sensitivity que imprimía la clave técnica sin traducir.
 
 ## Estado actual
 

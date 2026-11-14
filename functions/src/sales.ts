@@ -282,6 +282,67 @@ function validatePaymentsShape(value: unknown): CreateSalePaymentInput[] {
     return payments;
 }
 
+type ExtrasMap = Record<string, { name: string; qty: number; totalCents: number }>;
+
+/**
+ * Reportes (rediseño del PDF ejecutivo): agrupa un Extra por nombre
+ * normalizado (trim + lowercase) — "Chocolate", " chocolate " y "CHOCOLATE"
+ * son el mismo concepto en `dailySummaries.extras`, aunque en el carrito/
+ * `sales.items[]` sigan siendo líneas separadas (eso no cambia: la fusión es
+ * solo para el agregado del reporte). Se conserva el primer nombre legible
+ * visto para mostrar, nunca la clave normalizada.
+ */
+function normalizeExtraKey(name: string): string {
+    return name.trim().toLowerCase();
+}
+
+/**
+ * Pliega una lista de líneas EXTRA sobre un mapa `extras` existente (vacío
+ * para la primera venta del día). Simétrico a como `createSale` ya pliega
+ * `saleItems` sobre `products` — misma idea, pero agrupado por nombre
+ * normalizado en vez de por `productId`, porque un Extra no tiene ID real.
+ */
+function foldExtrasIntoMap(
+    base: ExtrasMap,
+    items: { name: string; quantity: number; subtotalCents: number }[],
+): ExtrasMap {
+    const result: ExtrasMap = { ...base };
+    for (const item of items) {
+        const key = normalizeExtraKey(item.name);
+        const existing = result[key];
+        result[key] = {
+            name: existing?.name ?? item.name.trim(),
+            qty: (existing?.qty ?? 0) + item.quantity,
+            totalCents: assertSafeIntegerCents(
+                (existing?.totalCents ?? 0) + item.subtotalCents,
+                `dailySummaries.extras.${key}.totalCents`,
+            ),
+        };
+    }
+    return result;
+}
+
+/** Inverso de `foldExtrasIntoMap`, para `cancelSale`. */
+function subtractExtrasFromMap(
+    base: ExtrasMap,
+    items: { name: string; quantity: number; subtotalCents: number }[],
+): ExtrasMap {
+    const result: ExtrasMap = { ...base };
+    for (const item of items) {
+        const key = normalizeExtraKey(item.name);
+        const existing = result[key];
+        result[key] = {
+            name: existing?.name ?? item.name.trim(),
+            qty: (existing?.qty ?? 0) - item.quantity,
+            totalCents: assertSafeIntegerCents(
+                (existing?.totalCents ?? 0) - item.subtotalCents,
+                `dailySummaries.extras.${key}.totalCents`,
+            ),
+        };
+    }
+    return result;
+}
+
 /**
  * Registra una venta (plan §15.3): recalcula precios y total en servidor,
  * aplica `allowSaleWithoutStock`, y descuenta stock + actualiza el resumen
@@ -625,6 +686,11 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                         totalCents: item.subtotalCents,
                     };
                 }
+                // Reportes: agregado de Extras, simétrico a `products` pero
+                // agrupado por nombre normalizado (prompt §1-§2). Siempre se
+                // escribe, aunque quede `{}` (venta solo de Products) — misma
+                // simetría que `products` ya tiene hoy.
+                const extras = foldExtrasIntoMap({}, extraSaleItems);
                 tx.create(summaryRef, {
                     dateKey,
                     monthKey,
@@ -641,6 +707,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     giftCardIssuesCashCents: 0,
                     giftCardIssuesQrCents: 0,
                     products,
+                    extras,
                     updatedAt: FieldValue.serverTimestamp(),
                 });
             } else {
@@ -702,6 +769,16 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     update[`products.${item.productId}.qty`] = FieldValue.increment(item.quantity);
                     update[`products.${item.productId}.totalCents`] = newProductTotalCents;
                 }
+                // Reportes: agregado de Extras (prompt §1-§2). Un nombre de
+                // Extra es texto libre del vendedor —puede traer '.', '/' o
+                // cualquier carácter— así que NUNCA se escribe por dot-path
+                // (`extras.${key}.qty`, como sí es seguro con `products.${productId}`,
+                // que siempre es un ID de Firestore): se lee el mapa completo,
+                // se pliega en JavaScript y se reemplaza entero de una vez.
+                if (extraSaleItems.length > 0) {
+                    const currentExtras = (summarySnap.get('extras') as ExtrasMap | undefined) ?? {};
+                    update['extras'] = foldExtrasIntoMap(currentExtras, extraSaleItems);
+                }
                 tx.update(summaryRef, update);
             }
         });
@@ -762,11 +839,21 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
         const allItems = (saleSnap.get('items') as {
             kind?: SaleItemKind;
             productId?: string;
+            name?: string;
             quantity: number;
             subtotalCents: number;
         }[]) ?? [];
         const productItems = allItems.filter((item) => (item.kind ?? 'PRODUCT') === 'PRODUCT') as {
             productId: string;
+            quantity: number;
+            subtotalCents: number;
+        }[];
+        // Reportes: items EXTRA de la venta que se anula, para revertir su
+        // entrada en `dailySummaries.extras` (prompt §1). Un item sin `kind`
+        // es histórico y SIEMPRE es PRODUCT (nunca EXTRA) — el filtro exacto
+        // `=== 'EXTRA'` ya lo excluye correctamente, sin necesitar `?? ...`.
+        const extraItems = allItems.filter((item) => item.kind === 'EXTRA') as {
+            name: string;
             quantity: number;
             subtotalCents: number;
         }[];
@@ -981,6 +1068,13 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 );
                 update[`products.${item.productId}.qty`] = FieldValue.increment(-item.quantity);
                 update[`products.${item.productId}.totalCents`] = newProductTotalCents;
+            }
+            // Reportes: revierte el agregado de Extras, simétrico al de
+            // arriba (mismo motivo de reemplazo completo del mapa, nunca
+            // dot-path, por el nombre libre del Extra).
+            if (extraItems.length > 0) {
+                const currentExtras = (summarySnap.get('extras') as ExtrasMap | undefined) ?? {};
+                update['extras'] = subtractExtrasFromMap(currentExtras, extraItems);
             }
             tx.update(summaryRef, update);
         }

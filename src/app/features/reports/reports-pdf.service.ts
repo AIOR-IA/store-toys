@@ -7,7 +7,7 @@ import { fromCents } from '@core/utils';
 import { formatProductName } from '@shared/utils';
 import { RECEIPT_LOGO_BASE64 } from '../sales/receipt-logo.const';
 import { GiftCardStatus } from '../gift-cards/gift-card.model';
-import { RangeTotals, SalesAggregateTotals, SellerBreakdown } from './reports.service';
+import { ReportConcept, RangeTotals, SalesAggregateTotals, SellerBreakdown } from './reports.service';
 
 type PdfMake = {
     createPdf: (doc: unknown) => { print: () => void; download: (name: string) => void };
@@ -24,19 +24,31 @@ export interface ReportPdfData {
     integrity: SalesAggregateTotals | null;
     integrityMismatch: boolean;
     giftCardInventory: Record<GiftCardStatus, number>;
-    giftCardDenominations: { amountCents: number; count: number }[];
-    liabilityCents: number;
-    issuesCountInRange: number;
-    redemptionsCountInRange: number;
-    topProducts: { code: string; name: string; qty: number; totalCents: number }[];
+    /**
+     * Gift Cards vendidas/emitidas en el rango, EXCLUYENDO reemplazos
+     * (`ReportsService.getSoldIssuesCountInRange`). `null` = la consulta
+     * falló (p. ej. índice compuesto todavía no listo) — NUNCA se imprime
+     * como `0`, que significaría "de verdad cero Gift Cards vendidas".
+     */
+    giftCardsSoldCount: number | null;
+    /** Products + Extras agregados (`buildTopConcepts`), nunca por venta ni por unidad. */
+    topConcepts: ReportConcept[];
     sellerScope: { name: string; breakdown: SellerBreakdown } | null;
 }
 
 /**
- * Exportación a PDF del cierre de caja (Fase 7, plan §18.3: "Exportación:
- * solo PDF. Sin Excel ni CSV" — decisión ya tomada en el plan, no se inventa
- * un CSV nuevo). Mismo patrón declarativo que `SaleReceiptService`
- * (`pdfmake`, hoja carta, `import()` dinámico): solo esta pantalla lo carga.
+ * Exportación a PDF del cierre de caja (Fase 7, plan §18.3, rediseño
+ * ejecutivo plan §18.4: "Exportación: solo PDF. Sin Excel ni CSV"). Mismo
+ * patrón declarativo que `SaleReceiptService` (`pdfmake`, hoja carta,
+ * `import()` dinámico): solo esta pantalla lo carga.
+ *
+ * Rediseño (plan §18.4): reporte EJECUTIVO y compacto — pocos KPIs grandes,
+ * tres bloques por método de pago (Efectivo/QR/Gift Card, solo montos,
+ * nunca un reparto inventado para ventas mixtas), una sola tabla agregada
+ * de conceptos vendidos (Products + Extras, nunca venta por venta ni unidad
+ * por unidad) y un cierre final compacto. Nunca imprime el detalle de una
+ * venta ni ningún id/código técnico salvo el código de Product (que sí
+ * aporta valor para ubicarlo en el catálogo).
  */
 @Injectable({ providedIn: 'root' })
 export class ReportsPdfService {
@@ -75,14 +87,33 @@ export class ReportsPdfService {
         };
     }
 
+    /** KPI grande (Resumen ejecutivo / Cierre final): etiqueta pequeña encima, monto grande en negrita debajo. */
+    private bigKpi(label: string, value: string): unknown {
+        return {
+            stack: [
+                { text: label, fontSize: 9, color: 'gray' },
+                { text: value, fontSize: 17, bold: true, margin: [0, 0, 0, 2] as [number, number, number, number] },
+            ],
+            margin: [0, 6, 0, 0] as [number, number, number, number],
+        };
+    }
+
+    private sectionTitle(text: string): unknown {
+        return { text, bold: true, fontSize: 11, margin: [0, 12, 0, 4] as [number, number, number, number] };
+    }
+
     private buildDocDefinition(data: ReportPdfData, settings: { storeName: string; timezone: string }): unknown {
         const line = { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1 }] };
         const t = data.rangeTotals;
         const generatedAt = new Date().toLocaleString('es-BO', { timeZone: settings.timezone });
 
-        const identitiesOk =
-            t.totalCents === t.cashCents + t.qrCents + t.giftCardCents &&
-            data.moneyReceivedCents === t.cashCents + t.qrCents + t.giftCardIssuesCashCents + t.giftCardIssuesQrCents;
+        // Comprobación de consistencia (plan §18.3, mismas identidades de
+        // siempre): se combina en UN solo veredicto — compacta cuando todo
+        // cuadra, y solo entonces se detallan las líneas que fallaron.
+        const merchandiseOk = t.totalCents === t.cashCents + t.qrCents + t.giftCardCents;
+        const integrityOk = !data.integrity || !data.integrityMismatch;
+        const allConsistent = merchandiseOk && integrityOk;
+        const merchandiseDiffCents = Math.abs(t.totalCents - (t.cashCents + t.qrCents + t.giftCardCents));
 
         return {
             pageSize: 'LETTER',
@@ -112,71 +143,102 @@ export class ReportsPdfService {
                     ? [{ text: `${this.t('export.sellerScope')}: ${data.sellerScope.name}`, margin: [0, 2, 0, 0] }]
                     : []),
 
-                { text: this.t('kpis.merchandiseSales'), bold: true, margin: [0, 14, 0, 4] as [number, number, number, number] },
-                this.row(this.t('kpis.merchandiseSales'), this.money(t.totalCents), true),
-                { text: this.t('kpis.netHint'), fontSize: 8, color: 'gray' },
-                this.row(this.t('kpis.discountApplied'), this.money(t.discountCents)),
-                this.row(this.t('kpis.cashReceived'), this.money(data.cashReceivedCents)),
-                this.row(this.t('kpis.qrReceived'), this.money(data.qrReceivedCents)),
-                this.row(this.t('kpis.moneyReceived'), this.money(data.moneyReceivedCents), true),
-                { text: this.t('kpis.moneyReceivedHint'), fontSize: 8, color: 'gray' },
-                this.row(this.t('kpis.giftCardRedeemed'), this.money(t.giftCardCents)),
-                { text: this.t('kpis.giftCardRedeemedHint'), fontSize: 8, color: 'gray' },
-                this.row(this.t('kpis.giftCardsIssued'), this.money(t.giftCardsIssuedCents)),
-                { text: this.t('kpis.giftCardsIssuedHint'), fontSize: 8, color: 'gray' },
-                this.row(this.t('kpis.salesCount'), String(t.salesCount)),
-                this.row(this.t('kpis.itemsCount'), String(t.itemsCount)),
-
-                { ...line, margin: [0, 10, 0, 6] },
-                { text: this.t('breakdown.merchandiseTitle'), bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
+                // ---- Resumen ejecutivo ----
+                // `t.totalCents` es NETO (después de rebaja); `products`/`extras` guardan
+                // el subtotal BRUTO de cada concepto (precio de lista, antes de la rebaja
+                // de la venta completa) — por eso, cuando hubo rebajas, se muestra primero
+                // la venta bruta y la rebaja, y el NETO queda como el KPI grande.
                 ...(t.discountCents > 0
                     ? [
-                          this.row(
-                              this.t('breakdown.grossMerchandise'),
-                              this.money(t.totalCents + t.discountCents),
-                          ),
+                          this.row(this.t('kpis.grossSales'), this.money(t.totalCents + t.discountCents)),
                           this.row(this.t('kpis.discountApplied'), `-${this.money(t.discountCents)}`),
                       ]
                     : []),
-                this.row(this.t('kpis.merchandiseSales'), this.money(t.totalCents)),
-                this.row(this.translate.instant('app.sales.payment.cash'), this.money(t.cashCents)),
-                this.row(this.translate.instant('app.sales.payment.qr'), this.money(t.qrCents)),
-                this.row(this.translate.instant('app.sales.payment.giftcard'), this.money(t.giftCardCents)),
+                this.bigKpi(this.t('kpis.totalSoldTitle'), this.money(t.totalCents)),
+                this.bigKpi(this.t('kpis.moneyReceivedTitle'), this.money(data.moneyReceivedCents)),
+                this.row(this.t('kpis.cashReceived'), this.money(data.cashReceivedCents)),
+                this.row(this.t('kpis.qrReceived'), this.money(data.qrReceivedCents)),
+                this.row(this.t('kpis.giftCardRedeemed'), this.money(t.giftCardCents)),
+                { text: this.t('kpis.giftCardRedeemedHint'), fontSize: 8, color: 'gray' },
 
-                { text: this.t('breakdown.issuesTitle'), bold: true, margin: [0, 10, 0, 4] as [number, number, number, number] },
+                // ---- Efectivo ----
+                { ...line, margin: [0, 10, 0, 0] },
+                this.sectionTitle(this.t('sections.cash')),
+                this.row(this.t('cash.fromSales'), this.money(t.cashCents)),
+                this.row(this.t('cash.fromGiftCards'), this.money(t.giftCardIssuesCashCents)),
+                this.row(this.t('cash.total'), this.money(data.cashReceivedCents), true),
+
+                // ---- QR ----
+                this.sectionTitle(this.t('sections.qr')),
+                this.row(this.t('qr.fromSales'), this.money(t.qrCents)),
+                this.row(this.t('qr.fromGiftCards'), this.money(t.giftCardIssuesQrCents)),
+                this.row(this.t('qr.total'), this.money(data.qrReceivedCents), true),
+
+                // ---- Gift Card ----
+                this.sectionTitle(this.t('sections.giftCard')),
+                { text: this.t('giftCards.soldTitle'), bold: true, fontSize: 9, margin: [0, 2, 0, 2] as [number, number, number, number] },
+                this.row(
+                    this.t('giftCards.soldCount'),
+                    data.giftCardsSoldCount === null ? '—' : String(data.giftCardsSoldCount),
+                ),
                 this.row(this.t('breakdown.totalNominal'), this.money(t.giftCardsIssuedCents)),
                 this.row(this.t('breakdown.collectedCash'), this.money(t.giftCardIssuesCashCents)),
                 this.row(this.t('breakdown.collectedQr'), this.money(t.giftCardIssuesQrCents)),
-
-                { ...line, margin: [0, 10, 0, 6] },
-                { text: this.t('identities.title'), bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
                 {
-                    text: identitiesOk ? `✓ ${this.t('identities.ok')}` : `⚠ ${this.t('identities.mismatch')}`,
-                    color: identitiesOk ? 'green' : 'red',
+                    text: this.t('giftCards.appliedTitle'),
+                    bold: true,
+                    fontSize: 9,
+                    margin: [0, 8, 0, 2] as [number, number, number, number],
                 },
-                ...(data.integrity
+                this.row(this.t('giftCards.appliedAmount'), this.money(t.giftCardCents), true),
+                { text: this.t('kpis.giftCardRedeemedHint'), fontSize: 8, color: 'gray' },
+                {
+                    text: this.t('giftCards.inventoryTitle'),
+                    bold: true,
+                    fontSize: 9,
+                    margin: [0, 8, 0, 2] as [number, number, number, number],
+                },
+                {
+                    text: Object.entries(data.giftCardInventory)
+                        .map(([status, n]) => `${this.t(`giftCards.inventoryLabels.${status}`)}: ${n}`)
+                        .join(' · '),
+                },
+
+                // ---- Tabla agregada: Productos + Extras ----
+                ...(data.topConcepts.length
                     ? [
+                          { ...line, margin: [0, 10, 0, 6] },
+                          { text: this.t('concepts.title'), bold: true, margin: [0, 0, 0, 2] as [number, number, number, number] },
                           {
-                              text: data.integrityMismatch
-                                  ? `⚠ ${this.t('identities.integrity.mismatch')}`
-                                  : `✓ ${this.t('identities.integrity.ok')}`,
-                              color: data.integrityMismatch ? 'red' : 'green',
-                              margin: [0, 2, 0, 0] as [number, number, number, number],
+                              text: this.t('concepts.grossNote'),
+                              fontSize: 8,
+                              color: 'gray',
+                              margin: [0, 0, 0, 4] as [number, number, number, number],
+                          },
+                          {
+                              table: {
+                                  headerRows: 1,
+                                  dontBreakRows: true,
+                                  widths: ['*', 'auto', 'auto', 'auto'],
+                                  body: [
+                                      [
+                                          { text: this.t('concepts.columns.concept'), bold: true },
+                                          { text: this.t('concepts.columns.type'), bold: true },
+                                          { text: this.t('concepts.columns.qty'), bold: true, alignment: 'center' },
+                                          { text: this.t('concepts.columns.total'), bold: true, alignment: 'right' },
+                                      ],
+                                      ...data.topConcepts.map((c) => [
+                                          formatProductName(c.name),
+                                          c.type === 'EXTRA' ? this.t('concepts.typeExtra') : this.t('concepts.typeProduct'),
+                                          { text: String(c.qty), alignment: 'center' },
+                                          { text: this.money(c.totalCents), alignment: 'right' },
+                                      ]),
+                                  ],
+                              },
+                              layout: 'lightHorizontalLines',
                           },
                       ]
                     : []),
-
-                { ...line, margin: [0, 10, 0, 6] },
-                { text: this.t('giftCards.title'), bold: true, margin: [0, 0, 0, 4] as [number, number, number, number] },
-                this.row(
-                    this.t('giftCards.inventoryTitle'),
-                    Object.entries(data.giftCardInventory)
-                        .map(([status, n]) => `${this.translate.instant(`app.giftCards.status.${status}`)}: ${n}`)
-                        .join(' · '),
-                ),
-                this.row(this.t('giftCards.liabilityTitle'), this.money(data.liabilityCents)),
-                this.row(this.t('giftCards.issuesCount'), String(data.issuesCountInRange)),
-                this.row(this.t('giftCards.redemptionsCount'), String(data.redemptionsCountInRange)),
 
                 ...(data.sellerScope
                     ? [
@@ -203,40 +265,24 @@ export class ReportsPdfService {
                       ]
                     : []),
 
-                ...(data.topProducts.length
-                    ? [
-                          { ...line, margin: [0, 10, 0, 6] },
-                          { text: this.t('topProducts.title'), bold: true, margin: [0, 0, 0, 2] as [number, number, number, number] },
-                          {
-                              text: this.t('topProducts.grossNote'),
-                              fontSize: 8,
-                              color: 'gray',
-                              margin: [0, 0, 0, 4] as [number, number, number, number],
-                          },
-                          {
-                              table: {
-                                  headerRows: 1,
-                                  widths: ['auto', '*', 'auto', 'auto'],
-                                  body: [
-                                      [
-                                          { text: this.t('topProducts.columns.code'), bold: true },
-                                          { text: this.t('topProducts.columns.name'), bold: true },
-                                          { text: this.t('topProducts.columns.qty'), bold: true, alignment: 'center' },
-                                          { text: this.t('topProducts.columns.total'), bold: true, alignment: 'right' },
-                                      ],
-                                      ...data.topProducts
-                                          .slice(0, 20)
-                                          .map((p) => [
-                                              p.code,
-                                              formatProductName(p.name),
-                                              { text: String(p.qty), alignment: 'center' },
-                                              { text: this.money(p.totalCents), alignment: 'right' },
-                                          ]),
-                                  ],
-                              },
-                              layout: 'lightHorizontalLines',
-                          },
-                      ]
+                // ---- Cierre final ----
+                { ...line, margin: [0, 10, 0, 6] },
+                this.bigKpi(this.t('closing.totalSold'), this.money(t.totalCents)),
+                this.bigKpi(this.t('closing.moneyReceived'), this.money(data.moneyReceivedCents)),
+                this.row(this.t('closing.cash'), this.money(data.cashReceivedCents)),
+                this.row(this.t('closing.qr'), this.money(data.qrReceivedCents)),
+                this.row(this.t('closing.giftCardApplied'), this.money(t.giftCardCents)),
+                {
+                    text: allConsistent ? `✓ ${this.t('closing.consistent')}` : `⚠ ${this.t('closing.inconsistent')}`,
+                    color: allConsistent ? 'green' : 'red',
+                    bold: true,
+                    margin: [0, 6, 0, 0] as [number, number, number, number],
+                },
+                ...(!merchandiseOk
+                    ? [{ text: `⚠ ${this.t('identities.mismatch')} (${this.money(merchandiseDiffCents)})`, color: 'red', fontSize: 8 }]
+                    : []),
+                ...(data.integrity && data.integrityMismatch
+                    ? [{ text: `⚠ ${this.t('identities.integrity.mismatch')}`, color: 'red', fontSize: 8 }]
                     : []),
             ],
         };

@@ -591,18 +591,45 @@
       },
       "kpis": {
         "merchandiseSales": "Ventas de mercadería",
+        "totalSoldTitle": "Total vendido en mercadería / extras (neto)",
+        "grossSales": "Venta bruta",
         "cashReceived": "Efectivo recibido",
         "qrReceived": "QR recibido",
         "moneyReceived": "Cobros recibidos",
+        "moneyReceivedTitle": "Ingreso real cobrado",
         "moneyReceivedHint": "Efectivo + QR recibidos (incluye Gift Cards vendidas)",
         "giftCardRedeemed": "Gift Card aplicada",
-        "giftCardRedeemedHint": "Usada como pago de mercadería: no es dinero nuevo",
+        "giftCardRedeemedHint": "No representa dinero nuevo recibido en este período.",
         "giftCardsIssued": "Gift Cards vendidas/emitidas",
         "giftCardsIssuedHint": "Valor nominal vendido: ya cobrado al venderse",
         "salesCount": "N.º de ventas",
         "itemsCount": "Artículos vendidos",
         "discountApplied": "Rebajas aplicadas",
         "netHint": "Neto: importe final después de rebajas"
+      },
+      "sections": {
+        "cash": "Efectivo",
+        "qr": "QR",
+        "giftCard": "Gift Card"
+      },
+      "cash": {
+        "fromSales": "De ventas",
+        "fromGiftCards": "De Gift Cards vendidas",
+        "total": "Total efectivo recibido"
+      },
+      "qr": {
+        "fromSales": "De ventas",
+        "fromGiftCards": "De Gift Cards vendidas",
+        "total": "Total QR recibido"
+      },
+      "closing": {
+        "totalSold": "Total vendido del período",
+        "moneyReceived": "Ingreso real cobrado",
+        "cash": "Efectivo",
+        "qr": "QR",
+        "giftCardApplied": "Gift Card aplicada",
+        "consistent": "Reporte consistente",
+        "inconsistent": "Diferencia detectada"
       },
       "identities": {
         "title": "Comprobación de consistencia",
@@ -635,7 +662,17 @@
       },
       "giftCards": {
         "title": "Gift Cards",
+        "soldTitle": "Gift Cards vendidas / emitidas",
+        "soldCount": "Cantidad vendida/emitida",
+        "appliedTitle": "Gift Card aplicada como pago",
+        "appliedAmount": "Monto aplicado",
         "inventoryTitle": "Inventario actual",
+        "inventoryLabels": {
+            "AVAILABLE": "Disponibles",
+            "ACTIVE": "Activas",
+            "SUSPENDED": "Suspendidas",
+            "CANCELLED": "Canceladas"
+        },
         "denominationsTitle": "Denominaciones registradas",
         "activityTitle": "Actividad del período",
         "issuesCount": "Ciclos activados (ventas + reemplazos)",
@@ -673,6 +710,19 @@
           "total": "Total"
         },
         "empty": "No hay productos vendidos en este rango."
+      },
+      "concepts": {
+        "title": "Productos y Extras vendidos",
+        "grossNote": "Importes a precio de lista (bruto), antes de las rebajas de cada venta — la rebaja es de la venta completa, no de un concepto. Por eso la suma de esta tabla puede ser MAYOR al \"Total vendido neto\" de arriba cuando hubo rebajas. Agregado por concepto: no lista venta por venta ni unidad por unidad.",
+        "columns": {
+          "concept": "Producto / concepto",
+          "type": "Tipo",
+          "qty": "Cantidad",
+          "total": "Subtotal bruto"
+        },
+        "typeProduct": "Producto",
+        "typeExtra": "Extra",
+        "empty": "No hay productos ni extras vendidos en este rango."
       },
       "bySeller": {
         "title": "Ventas por vendedor",

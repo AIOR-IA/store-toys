@@ -37,6 +37,10 @@ export const dailySummaryConverter: FirestoreDataConverter<DailySummary> = {
             discountCents: data.discountCents ?? 0,
             giftCardIssuesCashCents: data.giftCardIssuesCashCents ?? 0,
             giftCardIssuesQrCents: data.giftCardIssuesQrCents ?? 0,
+            // Rediseño del PDF ejecutivo: un resumen anterior a este ajuste
+            // (o un día sin ningún Extra vendido) no tiene este campo — sin
+            // Extras ese día, mismo criterio defensivo de arriba.
+            extras: data.extras ?? {},
         };
     },
 };

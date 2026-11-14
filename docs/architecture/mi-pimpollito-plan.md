@@ -3334,6 +3334,85 @@ en el comprobante para evitar la discusión en el mostrador. El PDF **no se alma
 regenera desde la venta cuando haga falta reimprimirlo, porque la venta es inmutable y el
 resultado es idéntico.
 
+### 18.5 Rediseño ejecutivo del PDF de Reportes/Cierre de caja (ajuste posterior a la Fase 7)
+
+El PDF de `ReportsPdfService` original (§18.3) imprimía muchos números sin jerarquía y
+corría el riesgo de crecer sin control si algún día se imprimiera detalle venta por venta
+en rangos largos. Pedido del cliente: un **reporte ejecutivo y compacto** — el dueño debe
+poder abrir el PDF y entender rápido cuánto se vendió, cuánto dinero real entró, por qué
+método, y qué conceptos se vendieron, sin páginas por venta ni por unidad.
+
+**Auditoría previa (antes de tocar ninguna fórmula):** `receivedTotals`/`mergeDailySummaries`
+(`reports.service.ts`) ya eran correctos — Gift Card aplicada nunca suma como ingreso nuevo,
+solo la emisión/venta de la tarjeta lo es — así que el rediseño es de **presentación**, no de
+fórmulas, con una sola laguna real encontrada: no existía ninguna agregación barata de
+Extras (ver abajo) y un bug de i18n (ver abajo).
+
+**Estructura nueva** (misma para hoy/semana/mes/año/rango personalizado — el período solo
+cambia el dataset, nunca la plantilla):
+
+1. **Resumen ejecutivo** (primera sección): dos KPIs grandes — `rangeTotals.totalCents`
+   ("Total vendido en mercadería/extras", NETO de rebajas, incluye Products y Extras por
+   igual) y `moneyReceivedCents` ("Ingreso real cobrado", de `receivedTotals`, sin cambios de
+   fórmula) — seguidos de Efectivo/QR/Gift Card aplicada recibidos, compacto.
+2. **Tres bloques por método** (Efectivo / QR / Gift Card): **solo montos**, nunca un reparto
+   de Products/Extras por método — el sistema no guarda qué parte de una venta mixta
+   (p. ej. 60 efectivo + 40 QR) corresponde a qué artículo, y repartirlo proporcionalmente
+   falsearía el dato. Efectivo/QR desglosan "de ventas" + "de Gift Cards vendidas" (fuentes
+   ya separadas en `dailySummaries`, no es un cálculo nuevo). Gift Card separa A) vendidas/
+   emitidas (cantidad, nominal, cobrado efectivo/QR) de B) aplicada como pago (monto + "no
+   representa dinero nuevo recibido en este período") de C) inventario.
+3. **Una sola tabla agregada** de conceptos vendidos (Products + Extras, columna "Tipo"),
+   nunca por venta ni por unidad — escala por cantidad de conceptos distintos del catálogo,
+   no por número de ventas: incluso un año completo queda manejable. `headerRows: 1` +
+   `dontBreakRows: true` en la tabla (pdfmake) para que el encabezado se repita entre
+   páginas y ninguna fila se corte a la mitad.
+4. **Cierre final** compacto: repite los mismos 5 números del resumen ejecutivo + un único
+   veredicto de consistencia (`✓ Reporte consistente` o `⚠ Diferencia detectada: Bs X`,
+   combinando las dos identidades de §18.2 en una sola línea cuando todo cuadra).
+
+**Hallazgo real y su solución — agregación de Extras en `dailySummaries` (nuevo campo
+`extras`):** Venta Extra (§15.8) nunca contamina `products` (correcto, por diseño), pero
+eso significa que no existía ningún lugar barato para sumar "Chocolate: 82 unidades, Bs 820"
+a lo largo de un rango largo sin leer `sales` documento por documento (prohibido por
+CLAUDE.md, "Datos"). Se añadió `dailySummaries.extras: Record<nombreNormalizado,
+{name, qty, totalCents}>` — **simétrico a `products`**, pero agrupado por
+`name.trim().toLowerCase()` porque un Extra no tiene `productId` ni código real (la primera
+grafía legible vista se conserva para mostrar). Lo escriben `createSale`/`cancelSale` en la
+MISMA transacción, igual que `products`, pero con una diferencia deliberada: nunca por
+dot-path (`extras.${key}.qty`, inseguro con un nombre de texto libre que puede traer `.`/`/`
+o cualquier carácter) sino leyendo el mapa completo y reemplazándolo entero, igual al patrón
+ya usado para los campos `*Cents` (`assertSafeIntegerCents`, evita la degradación a
+`doubleValue` de `FieldValue.increment()`). Dos líneas de Extra con el mismo nombre
+normalizado, de la misma venta o de ventas distintas, se funden en una sola entrada —
+backward-safe: un resumen anterior a este ajuste no tiene el campo, se lee como `{}`
+(`dailySummaryConverter`), **nunca se migra ningún documento existente**.
+
+**"Gift Cards vendidas/emitidas" (cantidad):** el KPI existente `issuesCountInRange` cuenta
+CUALQUIER ciclo a propósito, incluidos los reemplazos de plástico (§16.13) — por diseño, es
+otra métrica. Para la cantidad real de tarjetas VENDIDAS (excluyendo reemplazos, que nunca
+son ingreso) se añadió `ReportsService.getSoldIssuesCountInRange`: dos `getAggregateFromServer`
+de solo conteo (total del rango menos los `origin === 'replacement'` del mismo rango) — nunca
+se lee un documento de `giftCardIssues` uno por uno. Requiere el índice compuesto
+`giftCardIssues(origin, dateKey)` (`firestore.indexes.json`).
+
+**Bug de i18n corregido (no era un problema de datos):** el PDF imprimía literalmente
+`app.giftCards.status.AVAILABLE` en vez de "Disponible". Causa: `GiftCardStatus` usa
+MAYÚSCULAS (`'AVAILABLE' | 'ACTIVE' | ...`) pero las claves de `es.json` son minúsculas
+(`app.giftCards.status.available`); el dashboard en pantalla ya hacía
+`status.toLowerCase()` antes de traducir (`reports-dashboard.component.html`) — el PDF era
+el único lugar que lo construía sin ese `.toLowerCase()`. Corregido con el mismo patrón, sin
+tocar `es.json`.
+
+**Qué NO cambió:** ninguna Rule, ningún dato existente, ninguna migración; `products`,
+`users`, Authentication, Storage, `giftCards`/`giftCardIssues`/`giftCardMovements` intactos.
+La pantalla en vivo del dashboard (`reports-dashboard.component.html`) no se tocó — sigue
+mostrando su propio detalle de productos, denominaciones de Gift Card, ciclos activados y
+canjes tal cual; estos datos ya no se imprimen en el PDF ejecutivo (quedó fuera del alcance
+pedido), pero siguen disponibles en pantalla para quien los necesite. No se implementó el
+nuevo modelo de Gift Card con saldo (`balanceCents`, recargas, consumo parcial) — explícitamente
+fuera de alcance, queda para una tarea posterior.
+
 ---
 
 ## 19. Optimización de lecturas y costes

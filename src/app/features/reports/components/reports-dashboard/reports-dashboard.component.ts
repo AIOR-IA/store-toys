@@ -43,6 +43,7 @@ import {
     SellerBreakdown,
     SellerIssuesTotals,
     buildSellerBreakdown,
+    buildTopConcepts,
     mergeDailySummaries,
     receivedTotals,
 } from '../../reports.service';
@@ -121,6 +122,8 @@ export class ReportsDashboardComponent implements OnInit {
     readonly topProducts = computed(() =>
         Object.values(this.rangeTotals().products).sort((a, b) => b.totalCents - a.totalCents),
     );
+    /** Products + Extras agregados (reporte ejecutivo, plan §18.4) — solo para el PDF, no para esta pantalla. */
+    readonly topConcepts = computed(() => buildTopConcepts(this.rangeTotals()));
 
     // Cobros reales: ventas + emisiones de Gift Card (fórmula única, `receivedTotals`).
     private readonly received = computed(() => receivedTotals(this.rangeTotals()));
@@ -183,6 +186,12 @@ export class ReportsDashboardComponent implements OnInit {
     readonly loadingGiftCardActivity = signal(false);
     readonly issuesCountInRange = signal(0);
     readonly redemptionsCountInRange = signal(0);
+    /**
+     * Gift Cards vendidas/emitidas del rango, EXCLUYENDO reemplazos — "cantidad" del reporte
+     * ejecutivo (plan §18.4). `null` = la consulta falló (p. ej. el índice compuesto todavía
+     * no está listo) — nunca se confunde con `0` (consulta válida, de verdad cero).
+     */
+    readonly giftCardsSoldCount = signal<number | null>(null);
 
     // ---- Detalle de activaciones del período (paginado) ----
     readonly issuesPageSize = signal<PageSize>(DEFAULT_PAGE_SIZE);
@@ -402,6 +411,15 @@ export class ReportsDashboardComponent implements OnInit {
             next: (n) => this.issuesCountInRange.set(n),
             error: () => undefined,
         });
+        // `null` = dato no disponible (consulta falló, p. ej. índice aún no listo) — NUNCA
+        // se confunde con `0` (consulta válida, de verdad cero Gift Cards vendidas). Se
+        // resetea a `null` antes de cada consulta nueva para no dejar el número de un rango
+        // anterior visible mientras este falla.
+        this.giftCardsSoldCount.set(null);
+        this.reportsService.getSoldIssuesCountInRange(fromKey, toKey).subscribe({
+            next: (n) => this.giftCardsSoldCount.set(n),
+            error: () => this.giftCardsSoldCount.set(null),
+        });
         const { start, end } = dateKeyRangeToTimestampBounds(fromKey, toKey, this.timezone);
         this.reportsService.getRedemptionsCountInRange(start, end).subscribe({
             next: (n) => {
@@ -584,11 +602,8 @@ export class ReportsDashboardComponent implements OnInit {
                 integrity: this.integrity(),
                 integrityMismatch: this.integrityMismatch(),
                 giftCardInventory: this.giftCardInventory(),
-                giftCardDenominations: this.giftCardDenominations(),
-                liabilityCents: this.liabilityCents(),
-                issuesCountInRange: this.issuesCountInRange(),
-                redemptionsCountInRange: this.redemptionsCountInRange(),
-                topProducts: this.topProducts(),
+                giftCardsSoldCount: this.giftCardsSoldCount(),
+                topConcepts: this.topConcepts(),
                 sellerScope,
             });
         } catch {
