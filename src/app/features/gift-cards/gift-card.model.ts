@@ -26,7 +26,8 @@ import { Timestamp } from '@angular/fire/firestore';
  *
  * AJUSTE POSTERIOR (identidad ≠ monto, plan §16.13): `amountCents` dejó de
  * ser verdaderamente fijo — ahora es el MONTO CONFIGURADO ACTUAL, editable
- * por un admin (`updateGiftCardAmount`) mientras la tarjeta está
+ * por admin o vendedor (`updateGiftCardAmount`, plan §16.17 — ajuste de
+ * permisos posterior, antes solo admin) mientras la tarjeta está
  * `AVAILABLE`. El nombre del campo no cambió (nunca hubo necesidad de
  * migrar nada): lo que cambió es la regla de negocio detrás de él. Una vez
  * que la tarjeta se vende/activa, ese valor queda CONGELADO en el ciclo

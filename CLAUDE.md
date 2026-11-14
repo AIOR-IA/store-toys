@@ -250,7 +250,8 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   El estado completo (denominación, estado, comprador, ciclo) vive denormalizado en
   `giftCards`: consultar una tarjeta cuesta **1 lectura**, no 2.
 - **Identidad ≠ monto (ajuste posterior, plan §16.13): el código NUNCA representa el valor.**
-  `amountCents` es el monto CONFIGURADO ACTUAL — editable por admin (`updateGiftCardAmount`)
+  `amountCents` es el monto CONFIGURADO ACTUAL — editable por **admin o vendedor**
+  (`updateGiftCardAmount`, plan §16.17 — ajuste de permisos posterior; antes solo admin)
   **solo** mientras `AVAILABLE`; en cuanto se vende/activa queda CONGELADO en el ciclo
   (snapshot en `giftCardIssues.amountCents`, sin cambios) hasta que vuelva a `AVAILABLE`. Nunca
   es un ingreso: solo deja un movimiento `AMOUNT_CHANGED` de auditoría.

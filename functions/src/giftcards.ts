@@ -1110,26 +1110,31 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
 });
 
 /**
- * Cambia el monto configurado de una tarjeta (solo admin, ajuste posterior:
- * identidad ≠ monto, prompt §4-§8). El código (`cardCode`) nunca cambia,
+ * Cambia el monto configurado de una tarjeta (admin + vendedor, ajuste
+ * posterior de permisos sobre identidad ≠ monto, prompt §4-§8; ampliado a
+ * `assertStaffRole` — ver plan §16.17). El código (`cardCode`) nunca cambia,
  * solo `amountCents` — y únicamente mientras la tarjeta está `AVAILABLE`: en
  * cuanto se vende/activa, ese monto queda CONGELADO en el ciclo (snapshot en
  * `giftCardIssues.amountCents`, §16.8) y ya no se puede tocar hasta que la
- * tarjeta vuelva a estar disponible (prompt §5, §6, §9).
+ * tarjeta vuelva a estar disponible (prompt §5, §6, §9) — esta restricción de
+ * `status` es incondicional, para CUALQUIER rol autorizado, y nunca se
+ * relajó con este ajuste.
  *
  * Server-side, no solo ocultando el botón en el frontend (prompt §35, §41):
- * ni un admin puede saltarse esta regla desde la consola, porque `giftCards`
- * tiene `allow write: if false` — la única vía de escritura es esta
- * Function.
+ * ni un admin (ni un vendedor) puede saltarse esta regla desde la consola,
+ * porque `giftCards` tiene `allow write: if false` — la única vía de
+ * escritura es esta Function.
  *
  * NO es un ingreso (prompt §25, §26): solo deja constancia en
- * `giftCardMovements` (`AMOUNT_CHANGED`, con `previousAmountCents`) para que
- * el historial de la tarjeta sea legible — nunca toca `dailySummaries`.
+ * `giftCardMovements` (`AMOUNT_CHANGED`, con `previousAmountCents` Y el
+ * `performedBy`/`performedByName` real de quien lo hizo, admin o vendedor)
+ * para que el historial de la tarjeta sea legible — nunca toca
+ * `dailySummaries`.
  */
 export const updateGiftCardAmount = onCall<UpdateGiftCardAmountData>({ region: REGION }, async (request) => {
-    const adminSnap = await assertAdmin(request.auth);
+    const staffSnap = await assertStaffRole(request.auth);
     const uid = request.auth!.uid;
-    const name = staffName(adminSnap);
+    const name = staffName(staffSnap);
 
     const cardCode = requireCode(request.data.code);
     const amountCents = requireAmountCents(request.data.amountCents);

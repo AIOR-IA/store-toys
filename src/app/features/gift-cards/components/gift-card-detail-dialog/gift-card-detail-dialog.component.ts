@@ -78,6 +78,17 @@ export class GiftCardDetailDialogComponent {
         const session = this.sessionService.session();
         return session.status === 'active' && session.role === 'admin';
     });
+    /**
+     * Admin + vendedor (`RoleUser = 'admin' | 'user'`, único enum de roles
+     * reales — ajuste de permisos, plan §16.17): "activo con sesión" ya
+     * equivale a "ADMIN o SELLER" porque no existe un tercer rol, pero se
+     * deja el `role === 'user'` explícito para que la condición documente la
+     * intención y siga siendo correcta si algún día se agrega otro rol.
+     */
+    readonly isStaff = computed(() => {
+        const session = this.sessionService.session();
+        return session.status === 'active' && (session.role === 'admin' || session.role === 'user');
+    });
 
     mode = signal<PanelMode>('view');
     buyerName = signal('');
@@ -148,14 +159,15 @@ export class GiftCardDetailDialogComponent {
     readonly displayCard = computed(() => this.cardOverride() ?? this.card());
 
     /**
-     * Solo admin, y solo mientras `AVAILABLE` (prompt §5, §6, §35, §41): una
-     * vez vendida/activada, el monto queda congelado en el ciclo — la Function
-     * `updateGiftCardAmount` ya lo rechaza server-side; esto solo evita
-     * mostrar una acción que de todas formas se rechazaría.
+     * Admin + vendedor, y solo mientras `AVAILABLE` (ajuste de permisos,
+     * plan §16.17 — antes solo admin, prompt §5, §6, §35, §41): una vez
+     * vendida/activada, el monto queda congelado en el ciclo — la Function
+     * `updateGiftCardAmount` ya lo rechaza server-side para CUALQUIER rol;
+     * esto solo evita mostrar una acción que de todas formas se rechazaría.
      */
     readonly canEditAmount = computed(() => {
         const card = this.displayCard();
-        return !!card && this.isAdmin() && card.status === 'AVAILABLE';
+        return !!card && this.isStaff() && card.status === 'AVAILABLE';
     });
 
     /**
@@ -407,9 +419,9 @@ export class GiftCardDetailDialogComponent {
     }
 
     /**
-     * Cambia el monto configurado (solo admin + AVAILABLE, prompt §5-§8):
-     * nunca es un ingreso — la Function solo deja un movimiento
-     * `AMOUNT_CHANGED` de auditoría, nunca toca `dailySummaries`.
+     * Cambia el monto configurado (admin + vendedor + AVAILABLE, plan
+     * §16.17, prompt §5-§8): nunca es un ingreso — la Function solo deja un
+     * movimiento `AMOUNT_CHANGED` de auditoría, nunca toca `dailySummaries`.
      */
     confirmEditAmount(): void {
         const card = this.displayCard();

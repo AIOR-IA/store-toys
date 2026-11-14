@@ -517,21 +517,24 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('L9. un código manual con guion se registra y queda intacto',
         store.get('giftCards/GC-000001')?.amountCents === 77700);
 
-    // ---- Monto configurado: editable solo ADMIN + AVAILABLE (caso integral §45) ----
-    console.log('\nM. Monto editable (solo admin + AVAILABLE) — caso integral');
+    // ---- Monto configurado: editable por ADMIN + VENDEDOR, solo AVAILABLE (caso integral §45, permisos ampliados plan §16.17) ----
+    console.log('\nM. Monto editable (admin + vendedor, solo AVAILABLE) — caso integral');
     base();
     rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
     const M1 = rg.value.cardCode;
     check('M1. tarjeta nueva AVAILABLE, Bs 100', store.get(`giftCards/${M1}`).status === 'AVAILABLE' && store.get(`giftCards/${M1}`).amountCents === 10000);
 
-    r = await outcome(call(updateGiftCardAmount, 'seller', { code: M1, amountCents: 50000 }));
-    check('M2. vendedor NO puede cambiar el monto', !r.ok && store.get(`giftCards/${M1}`).amountCents === 10000, r.message);
+    r = await outcome(call(updateGiftCardAmount, 'seller', { code: M1, amountCents: 30000 }));
+    check('M2. vendedor SÍ puede cambiar el monto mientras AVAILABLE (ajuste de permisos, plan §16.17): 100 → 300',
+        r.ok && store.get(`giftCards/${M1}`).amountCents === 30000, r.message);
+    check('M2b. historial: AMOUNT_CHANGED registra al vendedor real (performedBy), nunca "admin" genérico',
+        [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.giftCardId === M1 && v.type === 'AMOUNT_CHANGED' && v.previousAmountCents === 10000 && v.amountCents === 30000 && v.performedBy === 'seller'));
 
     r = await outcome(call(updateGiftCardAmount, 'admin', { code: M1, amountCents: 50000 }));
-    check('M3. admin cambia 100 → 500: permitido, AVAILABLE, sin ingreso',
+    check('M3. admin cambia 300 → 500: permitido, AVAILABLE, sin ingreso',
         r.ok && store.get(`giftCards/${M1}`).amountCents === 50000 && store.get(`giftCards/${M1}`).status === 'AVAILABLE' && !summary(), r.message);
-    check('M3b. historial: AMOUNT_CHANGED con previousAmountCents=10000, amountCents=50000',
-        [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.giftCardId === M1 && v.type === 'AMOUNT_CHANGED' && v.previousAmountCents === 10000 && v.amountCents === 50000));
+    check('M3b. historial: AMOUNT_CHANGED con previousAmountCents=30000, amountCents=50000, performedBy=admin',
+        [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.giftCardId === M1 && v.type === 'AMOUNT_CHANGED' && v.previousAmountCents === 30000 && v.amountCents === 50000 && v.performedBy === 'admin'));
 
     r = await outcome(call(activateGiftCard, 'seller', { code: M1, payments: [{ method: 'qr', amountCents: 50000 }] }));
     check('M4. vendedor vende Bs 500 por QR: ACTIVE, issue snapshot 500, ingreso QR 500',
@@ -1017,6 +1020,74 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     const WK = await makeEligibleSource(15000);
     r = await outcome(call(replaceGiftCard, 'admin', { code: WK, reason: 'sin mode, como antes' }));
     check('WK. sin "mode": comportamiento IDÉNTICO al modo generate (código nuevo, nunca el mismo que una tarjeta ya registrada)', r.ok && r.value.newCardCode !== WK && !store.get(`giftCards/${r.value.newCardCode}`) === false, r.message);
+
+    // ---- X. Permisos ADMIN + VENDEDOR: vender/activar y editar monto AVAILABLE (ajuste de permisos, plan §16.17) ----
+    // Matriz completa pedida por el cliente: activar/vender y editar monto se
+    // amplían a admin+vendedor; cancelar y reemplazar SIGUEN siendo solo admin.
+    console.log('\nX. Permisos: activar/vender y editar monto (admin + vendedor) — cancelar/reemplazar siguen solo admin');
+    base();
+    store.set('users/guest', { isActive: true, role: 'guest', firstName: 'Rol', lastName: 'Invalido' });
+
+    // A-C) activateGiftCard: admin PASS, vendedor PASS, rol no autorizado RECHAZADO.
+    let rg1 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XA = rg1.value.cardCode;
+    r = await outcome(call(activateGiftCard, 'admin', { code: XA, payments: [{ method: 'cash', amountCents: 10000 }] }));
+    check('X-A. ADMIN puede activateGiftCard', r.ok && store.get(`giftCards/${XA}`).status === 'ACTIVE', r.message);
+
+    let rg2 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XB = rg2.value.cardCode;
+    r = await outcome(call(activateGiftCard, 'seller', { code: XB, payments: [{ method: 'cash', amountCents: 10000 }] }));
+    check('X-B. SELLER (vendedor, rol "user") puede activateGiftCard', r.ok && store.get(`giftCards/${XB}`).status === 'ACTIVE', r.message);
+
+    let rg3 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XC = rg3.value.cardCode;
+    r = await outcome(call(activateGiftCard, 'guest', { code: XC, payments: [{ method: 'cash', amountCents: 10000 }] }));
+    check('X-C. un rol no autorizado (ni admin ni user) NO puede activateGiftCard', !r.ok && store.get(`giftCards/${XC}`).status === 'AVAILABLE', r.message);
+
+    // D-E) updateGiftCardAmount en AVAILABLE: admin PASS, vendedor PASS.
+    let rg4 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XD = rg4.value.cardCode;
+    r = await outcome(call(updateGiftCardAmount, 'admin', { code: XD, amountCents: 20000 }));
+    check('X-D. ADMIN puede updateGiftCardAmount en AVAILABLE', r.ok && store.get(`giftCards/${XD}`).amountCents === 20000, r.message);
+
+    let rg5 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XE = rg5.value.cardCode;
+    r = await outcome(call(updateGiftCardAmount, 'seller', { code: XE, amountCents: 25000 }));
+    check('X-E. SELLER puede updateGiftCardAmount en AVAILABLE', r.ok && store.get(`giftCards/${XE}`).amountCents === 25000, r.message);
+
+    // F-H) SELLER intenta cambiar el monto fuera de AVAILABLE: rechazado en los tres estados.
+    let rg6 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XF = rg6.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: XF, payments: [{ method: 'cash', amountCents: 10000 }] });
+    r = await outcome(call(updateGiftCardAmount, 'seller', { code: XF, amountCents: 99000 }));
+    check('X-F. SELLER intenta cambiar el monto de una tarjeta ACTIVE: RECHAZADO', !r.ok && store.get(`giftCards/${XF}`).amountCents === 10000, r.message);
+
+    await call(suspendGiftCard, 'seller', { code: XF, reason: 'perdida' });
+    r = await outcome(call(updateGiftCardAmount, 'seller', { code: XF, amountCents: 99000 }));
+    check('X-G. SELLER intenta cambiar el monto de una tarjeta SUSPENDED: RECHAZADO', !r.ok && store.get(`giftCards/${XF}`).amountCents === 10000, r.message);
+
+    let rg7 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XH = rg7.value.cardCode;
+    await call(cancelGiftCard, 'admin', { code: XH, reason: 'baja' });
+    r = await outcome(call(updateGiftCardAmount, 'seller', { code: XH, amountCents: 99000 }));
+    check('X-H. SELLER intenta cambiar el monto de una tarjeta CANCELLED: RECHAZADO', !r.ok && store.get(`giftCards/${XH}`).amountCents === 10000, r.message);
+
+    // I-J) SELLER sigue SIN poder cancelar ni reemplazar (admin-only, sin tocar).
+    r = await outcome(call(cancelGiftCard, 'seller', { code: XD, reason: 'intento de vendedor' }));
+    check('X-I. SELLER sigue sin poder ejecutar cancelGiftCard (admin-only, sin cambios)', !r.ok && store.get(`giftCards/${XD}`).status === 'AVAILABLE', r.message);
+
+    let rg8 = await outcome(call(registerGiftCard, 'admin', { amountCents: 10000, codeMode: 'generated' }));
+    const XJ = rg8.value.cardCode;
+    await call(activateGiftCard, 'seller', { code: XJ, payments: [{ method: 'cash', amountCents: 10000 }] });
+    await call(cancelGiftCard, 'admin', { code: XJ, reason: 'dañada' }); // regla de flujo: cancelar antes de reemplazar
+    r = await outcome(call(replaceGiftCard, 'seller', { code: XJ, reason: 'intento de vendedor' }));
+    check('X-J. SELLER sigue sin poder ejecutar replaceGiftCard (admin-only, sin cambios)', !r.ok && store.get(`giftCards/${XJ}`).replacedByCode === null, r.message);
+
+    // K) el actor real queda registrado — nunca "admin" genérico ni un valor vacío.
+    check('X-K1. activateGiftCard por SELLER: activatedBy/activatedByName = el vendedor real (XB)',
+        store.get(`giftCards/${XB}`).activatedBy === 'seller' && store.get(`giftCards/${XB}`).activatedByName === 'Vend Edor');
+    check('X-K2. updateGiftCardAmount por SELLER: el movimiento AMOUNT_CHANGED registra performedBy/performedByName del vendedor real (XE)',
+        [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.giftCardId === XE && v.type === 'AMOUNT_CHANGED' && v.performedBy === 'seller' && v.performedByName === 'Vend Edor'));
 
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);

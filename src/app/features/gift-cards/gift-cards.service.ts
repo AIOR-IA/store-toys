@@ -387,7 +387,8 @@ export class GiftCardsService {
     }
 
     /**
-     * `updateGiftCardAmount` (Function, solo admin — ajuste posterior,
+     * `updateGiftCardAmount` (Function, admin + vendedor — ajuste de
+     * permisos, plan §16.17; antes solo admin, ajuste posterior de
      * identidad ≠ monto): cambia el monto configurado, solo mientras la
      * tarjeta está `AVAILABLE`.
      */

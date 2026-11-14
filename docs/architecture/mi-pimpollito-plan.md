@@ -2949,6 +2949,52 @@ llamaba así.
 - **Rules/índices: sin cambios** — no hay ninguna validación de formato de `cardCode` en las
   Rules (solo control de acceso), así que no hay nada que actualizar ahí.
 
+### 16.17 Permisos de vendedor — vender/activar y editar monto AVAILABLE (ajuste de permisos)
+
+> **Motivo (sin abrir una fase nueva):** el cliente pidió que el rol vendedor (`RoleUser =
+> 'user'` — no existe un string `'SELLER'` separado en el proyecto, es el mismo rol que ya
+> vende productos) pueda, además de lo que ya hacía, (1) vender/activar una Gift Card y (2)
+> editar el monto de una Gift Card mientras está `AVAILABLE` — exactamente igual que admin, sin
+> convertirlo en admin ni darle ningún otro permiso.
+
+- **Auditoría previa al cambio — el hallazgo real:** de las dos acciones pedidas, **vender/
+  activar YA estaba abierta al vendedor**, tanto en Functions (`activateGiftCard` ya llama
+  `assertStaffRole`, el mismo helper que `suspendGiftCard`/`reactivateGiftCard`, que acepta
+  `'admin'` y `'user'`) como en frontend (el botón «Vender/Activar» del diálogo de detalle
+  nunca estuvo detrás de `isAdmin()`; el ítem de menú "Gift Cards" ya es `roles: ['admin',
+  'user']`, `gift-cards.routes.ts` solo exige `authGuard`). La única acción realmente
+  restringida a admin era **editar `amountCents` mientras `AVAILABLE`**:
+  `updateGiftCardAmount` llamaba `assertAdmin()` server-side, y `canEditAmount` en
+  `gift-card-detail-dialog.component.ts` exigía `isAdmin()` en el cliente. El cambio real de
+  este ajuste se reduce a esa única Function y ese único computed.
+- **Backend:** `updateGiftCardAmount` (`functions/src/giftcards.ts`) cambia su guard de
+  `assertAdmin(request.auth)` a `assertStaffRole(request.auth)` — el MISMO helper reutilizado
+  que ya usan `activateGiftCard`/`suspendGiftCard`/`reactivateGiftCard`, sin introducir ningún
+  string de rol nuevo. La restricción `status === 'AVAILABLE'` sigue siendo **incondicional**,
+  para cualquier rol autorizado — nunca se relajó. `performedBy`/`performedByName` en el
+  movimiento `AMOUNT_CHANGED` ya registraban al actor real de la llamada (no un valor
+  genérico): con un vendedor ejecutando la acción, queda su propio uid/nombre, igual que ya
+  ocurre con `activatedBy`/`activatedByName` en `activateGiftCard`.
+- **Frontend:** `gift-card-detail-dialog.component.ts` agrega un computed `isStaff` (`session.
+  status === 'active' && (role === 'admin' || role === 'user')`) junto al `isAdmin` que ya
+  existía, y `canEditAmount` pasa de `isAdmin() && status === 'AVAILABLE'` a `isStaff() &&
+  status === 'AVAILABLE'`. Nada más cambia en esa plantilla: el botón «Vender/Activar» (sin
+  gate de rol, ya correcto), «Suspender»/«Reactivar» (sin gate de rol, ya correctos) siguen
+  igual; «Cancelar definitivamente», «Reemplazar tarjeta», «Imprimir etiqueta» y el historial
+  de movimientos siguen exclusivamente detrás de `isAdmin()`, sin tocar.
+- **Qué NO cambia (confirmado, no solo asumido):** `registerGiftCard`/`registerGiftCardBatch`
+  (`assertAdmin`, registrar plástico nuevo sigue siendo solo admin), `cancelGiftCard`
+  (`assertAdmin`, baja definitiva), `replaceGiftCard` (`assertAdmin`, reemplazo de plástico) —
+  los tres siguen exactamente con el mismo guard que antes. Las Rules de `giftCards`/
+  `giftCardIssues`/`giftCardMovements` no tienen ninguna validación por rol de estas dos
+  acciones (ya eran `allow write: if false` — la autorización real siempre vivió en las
+  Functions, nunca en Rules), así que no hay nada que tocar ahí.
+- **Reportes/historial:** sin cambios de cálculo. Una venta/activación o un cambio de monto
+  hechos por un vendedor se ven, se filtran y se reportan exactamente igual que uno hecho por
+  un admin — el campo `activatedBy`/`performedBy` siempre fue el actor real, el admin solo
+  tenía además la vista "todos los vendedores" en Historial (`isAdmin()` en
+  `gift-card-history.component.ts`, sin tocar en este ajuste).
+
 ---
 
 ## 17. Dinero y fechas

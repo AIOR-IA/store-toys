@@ -13,8 +13,12 @@ import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardDetailDialogComponent } from './gift-card-detail-dialog.component';
 
 /**
- * Identidad ≠ monto (ajuste posterior, plan §16.13): "Editar monto" solo
- * para admin + AVAILABLE.
+ * Identidad ≠ monto (ajuste posterior, plan §16.13; permisos ampliados en
+ * plan §16.17): "Editar monto" para admin O vendedor (`RoleUser = 'admin' |
+ * 'user'` — no existe un rol "SELLER" separado) + AVAILABLE. Antes de
+ * §16.17 era solo admin; "vender/activar" (`confirmActivate`) nunca tuvo
+ * gate de rol, en ningún momento — se prueba aquí también para dejar
+ * constancia de que admin y vendedor comparten exactamente el mismo flujo.
  *
  * "Reemplazar" — regla de flujo DEFINITIVA (segundo ajuste posterior): YA NO
  * es directo desde `ACTIVE`/`SUSPENDED`. Solo es elegible una tarjeta
@@ -75,7 +79,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
     const makeTarget = (overrides: Partial<GiftCard> = {}): GiftCard =>
         baseCard({ cardCode: 'GC-TARGET', status: 'AVAILABLE', amountCents: 5000, ...overrides });
 
-    const setUp = async (card: GiftCard, role: 'admin' | 'user' = 'admin') => {
+    const setUp = async (card: GiftCard, role: string = 'admin') => {
         sessionRole.set({ status: 'active', role });
         updateGiftCardAmount = jasmine.createSpy('updateGiftCardAmount').and.returnValue(
             of({ cardCode: card.cardCode, amountCents: 0 }),
@@ -171,8 +175,28 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             expect(component.canEditAmount()).toBeFalse();
         });
 
-        it('D) vendedor (no admin) + AVAILABLE: false', async () => {
+        it('D) vendedor (plan §16.17 — ajuste de permisos) + AVAILABLE: true, igual que admin', async () => {
             await setUp(baseCard({ status: 'AVAILABLE' }), 'user');
+            expect(component.canEditAmount()).toBeTrue();
+        });
+
+        it('E) vendedor + ACTIVE: false (congelado para CUALQUIER rol, no solo admin)', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'user');
+            expect(component.canEditAmount()).toBeFalse();
+        });
+
+        it('F) vendedor + SUSPENDED: false (congelado para CUALQUIER rol)', async () => {
+            await setUp(baseCard({ status: 'SUSPENDED' }), 'user');
+            expect(component.canEditAmount()).toBeFalse();
+        });
+
+        it('G) vendedor + CANCELLED: false (congelado para CUALQUIER rol)', async () => {
+            await setUp(baseCard({ status: 'CANCELLED' }), 'user');
+            expect(component.canEditAmount()).toBeFalse();
+        });
+
+        it('H) rol no autorizado (ni admin ni vendedor) + AVAILABLE: false', async () => {
+            await setUp(baseCard({ status: 'AVAILABLE' }), 'guest');
             expect(component.canEditAmount()).toBeFalse();
         });
     });
@@ -606,6 +630,23 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
 
             component.printActivatedReceipt();
             expect(printReceipt).toHaveBeenCalledOnceWith(component.activatedReceipt());
+        });
+
+        it('Y) el vendedor vende/activa exactamente igual que el admin (sin gate de rol en esta acción, nunca lo tuvo)', async () => {
+            await setUp(baseCard({ status: 'AVAILABLE', amountCents: 50000 }), 'user');
+
+            component.openActivate();
+            component.buyerName.set('Camila');
+            component.activatePaymentMethod.set('qr');
+            component.confirmActivate();
+            await flush();
+
+            expect(activateGiftCard).toHaveBeenCalledOnceWith({
+                code: 'GC-000001',
+                buyerName: 'Camila',
+                payments: [{ method: 'qr', amountCents: 50000 }],
+            });
+            expect(component.activatedReceipt()?.id).toBe('cyc-new');
         });
 
         it('X) no bloquea la venta si la relectura del recibo falla: la venta ya está completa, solo se cierra', async () => {
