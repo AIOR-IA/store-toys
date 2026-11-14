@@ -242,6 +242,21 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   (la foto está en un celular y el POS es una laptop). El voucher es **inmutable**.
 - El POS se diseña para **teclado y lector USB HID** (monitores no táctiles): un `<input>`
   visible y siempre enfocado que dispara con `Enter`.
+- **Venta Extra** (nueva funcionalidad, plan §15.8): cada `SaleItem` tiene `kind: 'PRODUCT' |
+  'EXTRA'` — un concepto vendido que NO es un `Product` registrado (chocolates, envoltura,
+  servicios ocasionales). Un `EXTRA` **nunca** tiene `productId`/`code`, **nunca** existe en
+  `products`/`barcodes`, **nunca** valida ni descuenta stock, y **no** crea ninguna colección
+  `extras`: vive solo como snapshot dentro de `sales/{id}.items[]`, creado en el momento de
+  vender. `createSale` acepta carritos de solo Products, solo Extras o mixtos; el precio de un
+  Extra lo trae el cliente (no hay otra fuente), pero el **subtotal siempre se recalcula**
+  server-side (`unitPriceCents × quantity`), nunca se confía en uno enviado por el cliente.
+  Participa en `totalCents`/`dailySummaries` y en **todas** las formas de pago existentes
+  exactamente igual que un Product (incluida Gift Card, sin ningún cambio a esa arquitectura);
+  el ranking por producto (`dailySummaries.products.*`) **nunca** incluye un Extra. `cancelSale`
+  revierte stock **solo** de los items `PRODUCT` de la venta — un Extra nunca tuvo stock que
+  devolver. **Backward-safe:** un item sin `kind` (venta anterior a este ajuste) se trata como
+  `'PRODUCT'`, tanto al leer (`saleConverter`) como en `cancelSale` — nunca se migra ningún
+  documento existente.
 
 ### Gift Cards
 

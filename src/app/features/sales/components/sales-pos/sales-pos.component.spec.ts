@@ -24,6 +24,7 @@ import { SalesPosComponent } from './sales-pos.component';
  */
 describe('SalesPosComponent — rebaja', () => {
     const line = (unitPriceCents: number, quantity = 1, productId = 'p1'): SaleCartLine => ({
+        kind: 'PRODUCT',
         productId,
         code: 'MP000001',
         name: 'Juguete',
@@ -135,7 +136,7 @@ describe('SalesPosComponent — rebaja', () => {
         const payload = createSale.calls.mostRecent().args[0];
         expect(payload).toEqual({
             saleId: 'sale-1',
-            items: [{ productId: 'p1', quantity: 2 }],
+            items: [{ kind: 'PRODUCT', productId: 'p1', quantity: 2 }],
             payments: [{ method: 'cash', amountCents: 14000 }], // aplicado, NO lo recibido (15000)
             customerName: undefined,
             discountCents: 1000,
@@ -698,7 +699,7 @@ describe('SalesPosComponent — rebaja', () => {
                 { method: 'qr', amountCents: 10000 },
             ]);
             expect(payload.discountCents).toBe(0);
-            expect(payload.items).toEqual([{ productId: 'p1', quantity: 4 }]);
+            expect(payload.items).toEqual([{ kind: 'PRODUCT', productId: 'p1', quantity: 4 }]);
             expect(attachVoucher).not.toHaveBeenCalled();
         });
 
@@ -771,7 +772,8 @@ describe('SalesPosComponent — rebaja', () => {
             component.scanValue.set(CATALOG[key].code);
             component.onScanSubmit();
         };
-        const qtyOf = (id: string) => component.cart().find((l) => l.productId === id)?.quantity ?? 0;
+        const qtyOf = (id: string) =>
+            component.cart().find((l) => l.kind === 'PRODUCT' && l.productId === id)?.quantity ?? 0;
 
         beforeEach(() => {
             jasmine.clock().install();
@@ -994,8 +996,8 @@ describe('SalesPosComponent — rebaja', () => {
         const buttonOf = (icon: string) => el().querySelector<HTMLButtonElement>(`button .${icon}`)!.closest('button')!;
         const printButton = () => buttonOf('fa-print');
         const sale = { id: 'sale-abcdef12', paymentMethods: ['cash'], payments: [] } as never;
-        const oneLine = (quantity = 1) => [
-            { productId: 'p1', code: 'X', name: 'Juguete', unitPriceCents: 1000, quantity, stockReference: 9 },
+        const oneLine = (quantity = 1): SaleCartLine[] => [
+            { kind: 'PRODUCT', productId: 'p1', code: 'X', name: 'Juguete', unitPriceCents: 1000, quantity, stockReference: 9 },
         ];
 
         /** Click «real» de usuario: enfoca el botón y luego hace click (el .click() programático no enfoca). */
@@ -1123,7 +1125,7 @@ describe('SalesPosComponent — rebaja', () => {
             );
             userClick(printButton());
             hidScan('7772830181398');
-            expect(component.cart().map((l) => l.productId)).toEqual(['A']);
+            expect(component.cart().map((l) => (l.kind === 'PRODUCT' ? l.productId : null))).toEqual(['A']);
             expect(print).toHaveBeenCalledTimes(1);
         });
 
@@ -1360,6 +1362,157 @@ describe('SalesPosComponent — rebaja', () => {
                 component.clearGiftCardSelection();
                 expect(component.cashReceivedBs()).toBeNull();
             });
+        });
+    });
+
+    /**
+     * Venta Extra (nueva funcionalidad): conceptos vendidos que NO son
+     * `Product` registrados — sin código, sin stock. Se prueban aquí como
+     * líneas del carrito y su participación en el total/pago; la validación
+     * del propio formulario (nombre/precio/cantidad) vive en
+     * `AddExtraDialogComponent` (`add-extra-dialog.component.spec.ts`).
+     */
+    describe('Venta Extra (nueva funcionalidad)', () => {
+        const chocolate = (quantity = 1, unitPriceCents = 1000) => ({
+            name: 'Chocolate',
+            unitPriceCents,
+            quantity,
+        });
+
+        it('A) admin puede abrir «Agregar extra»', () => {
+            expect(component.extraDialogVisible()).toBeFalse();
+            component.openAddExtra();
+            expect(component.extraDialogVisible()).toBeTrue();
+        });
+
+        it('B) vendedor puede abrir «Agregar extra» — este componente no distingue por rol (la autorización real vive en el guard de ruta y en createSale)', () => {
+            expect(component.extraDialogVisible()).toBeFalse();
+            component.openAddExtra();
+            expect(component.extraDialogVisible()).toBeTrue();
+        });
+
+        it('C) agregar un Extra válido lo agrega como línea del carrito', () => {
+            component.onExtraAdded(chocolate(2));
+            expect(component.cart()).toEqual([
+                { kind: 'EXTRA', id: 'extra-0', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 },
+            ]);
+        });
+
+        it('G) incrementar la cantidad de un Extra recalcula su subtotal', () => {
+            component.onExtraAdded(chocolate(2));
+            component.incrementQty(component.cart()[0]);
+            expect(component.cart()[0].quantity).toBe(3);
+            expect(component.subtotalCents()).toBe(3000);
+        });
+
+        it('H) disminuir la cantidad de un Extra recalcula su subtotal', () => {
+            component.onExtraAdded(chocolate(2));
+            component.decrementQty(component.cart()[0]);
+            expect(component.cart()[0].quantity).toBe(1);
+            expect(component.subtotalCents()).toBe(1000);
+        });
+
+        it('decrementar hasta 0 retira el Extra del carrito (mismo comportamiento que un Product)', () => {
+            component.onExtraAdded(chocolate(1));
+            component.decrementQty(component.cart()[0]);
+            expect(component.cart()).toEqual([]);
+        });
+
+        it('I) eliminar un Extra lo quita del carrito', () => {
+            component.onExtraAdded(chocolate(1));
+            component.removeLine(component.cart()[0]);
+            expect(component.cart()).toEqual([]);
+        });
+
+        it('dos Extras agregados por separado son líneas independientes, aunque compartan nombre y precio', () => {
+            component.onExtraAdded(chocolate(1));
+            component.onExtraAdded(chocolate(1));
+            expect(component.cart().length).toBe(2);
+            expect((component.cart()[0] as { id: string }).id).not.toBe(
+                (component.cart()[1] as { id: string }).id,
+            );
+        });
+
+        it('J) solo Extra: el total es exactamente la suma de los Extras, sin ningún Product', () => {
+            component.onExtraAdded(chocolate(2)); // Bs 20
+            component.onExtraAdded({ name: 'Envoltura', unitPriceCents: 500, quantity: 1 }); // Bs 5
+            expect(component.subtotalCents()).toBe(2500);
+            expect(component.totalCents()).toBe(2500);
+        });
+
+        it('K) Product + Extra: el total suma ambos', () => {
+            component.cart.set([line(8000)]); // Bs 80
+            component.onExtraAdded(chocolate(2)); // Bs 20
+            expect(component.subtotalCents()).toBe(10000);
+        });
+
+        it('L) solo Products: el comportamiento existente no cambia', () => {
+            component.cart.set([line(8000)]);
+            expect(component.subtotalCents()).toBe(8000);
+            expect(component.cart()[0].kind).toBe('PRODUCT');
+        });
+
+        it('M) pago Efectivo con solo Extra', () => {
+            component.onExtraAdded(chocolate(2)); // Bs 20
+            component.setPaymentMethod('cash');
+            component.cashReceivedBs.set(20);
+
+            component.confirmSale();
+            const payload = createSale.calls.mostRecent().args[0];
+            expect(payload.items).toEqual([
+                { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 },
+            ]);
+            expect(payload.payments).toEqual([{ method: 'cash', amountCents: 2000 }]);
+        });
+
+        it('N) pago QR con solo Extra', () => {
+            component.onExtraAdded(chocolate(2));
+            component.setPaymentMethod('qr');
+
+            component.confirmSale();
+            const payload = createSale.calls.mostRecent().args[0];
+            expect(payload.payments).toEqual([{ method: 'qr', amountCents: 2000 }]);
+        });
+
+        it('O) pago mixto (Efectivo + QR) con Product + Extra', () => {
+            component.cart.set([line(8000)]); // Bs 80
+            component.onExtraAdded(chocolate(2)); // Bs 20 → total 100
+            component.setPaymentMethod('cashqr');
+            component.qrPartBs.set(40);
+            component.cashReceivedBs.set(60); // cubre exacto el efectivo aplicado (100 − 40)
+
+            component.confirmSale();
+            const payload = createSale.calls.mostRecent().args[0];
+            expect(payload.items.length).toBe(2);
+            expect(payload.payments).toEqual([
+                { method: 'cash', amountCents: 6000 },
+                { method: 'qr', amountCents: 4000 },
+            ]);
+        });
+
+        it('P) Gift Card con Extra usa el flujo actual, sin cambios', () => {
+            component.onExtraAdded(chocolate(2)); // Bs 20
+            component.setPaymentMethod('giftcard');
+            component.foundGiftCard.set(giftCard(2000));
+
+            component.confirmSale();
+            const payload = createSale.calls.mostRecent().args[0];
+            expect(payload.items).toEqual([
+                { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 },
+            ]);
+            expect(payload.payments[0].method).toBe('giftcard');
+        });
+
+        it('Q) tras confirmar la venta, el reset limpia Extras igual que Products', () => {
+            component.onExtraAdded(chocolate(2));
+            component.setPaymentMethod('cash');
+            component.cashReceivedBs.set(20);
+
+            component.confirmSale();
+            TestBed.flushEffects();
+
+            expect(component.cart()).toEqual([]);
+            expect(component.extraDialogVisible()).toBeFalse();
         });
     });
 });

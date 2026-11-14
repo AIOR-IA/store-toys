@@ -4,7 +4,20 @@ import {
     QueryDocumentSnapshot,
     SnapshotOptions,
 } from '@angular/fire/firestore';
-import { Sale } from './sale.model';
+import { ExtraSaleItem, ProductSaleItem, Sale, SaleItem } from './sale.model';
+
+/**
+ * Venta Extra (nueva funcionalidad): ventas ANTERIORES a este ajuste no
+ * tienen `kind` en sus `items[]` — se normalizan a `'PRODUCT'` al leer
+ * (mismo patrón que `subtotalCents`/`discountCents` abajo), nunca se migra
+ * ningún documento.
+ */
+function normalizeSaleItem(raw: Record<string, unknown>): SaleItem {
+    if (raw['kind'] === 'EXTRA') {
+        return raw as unknown as ExtraSaleItem;
+    }
+    return { ...raw, kind: 'PRODUCT' } as unknown as ProductSaleItem;
+}
 
 /**
  * `withConverter` de `sales` (CLAUDE.md, "Datos": *un `withConverter` por
@@ -26,6 +39,7 @@ export const saleConverter: FirestoreDataConverter<Sale> = {
             id: snapshot.id,
             subtotalCents: data['subtotalCents'] ?? data['totalCents'],
             discountCents: data['discountCents'] ?? 0,
+            items: ((data['items'] as Record<string, unknown>[]) ?? []).map(normalizeSaleItem),
         } as Sale;
     },
 };

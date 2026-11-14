@@ -16,10 +16,21 @@ import { CursorPager, PageSize } from '@core/data';
 import { saleConverter } from './sale.converter';
 import { PaymentMethod, Sale } from './sale.model';
 
-export interface CreateSaleItemInput {
+export interface CreateSaleProductItemInput {
+    kind: 'PRODUCT';
     productId: string;
     quantity: number;
 }
+
+/** Venta Extra (nueva funcionalidad): sin `productId` — `createSale` nunca lee `products`/`barcodes` para esta línea. */
+export interface CreateSaleExtraItemInput {
+    kind: 'EXTRA';
+    name: string;
+    unitPriceCents: number;
+    quantity: number;
+}
+
+export type CreateSaleItemInput = CreateSaleProductItemInput | CreateSaleExtraItemInput;
 
 export interface CreateSalePaymentInput {
     method: PaymentMethod;

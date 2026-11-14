@@ -50,9 +50,17 @@
                 </tr>
             </thead>
             <tbody>
-                @for (item of sale.items; track item.productId) {
+                @for (item of sale.items; track $index) {
                 <tr class="border-b border-gray-100">
-                    <td class="py-1 font-mono">{{ item.code }}</td>
+                    <td class="py-1 font-mono">
+                        @if (item.kind === 'EXTRA') {
+                        <span class="text-2xs font-sans font-semibold uppercase text-primary">{{
+                            "app.sales.extra.badge" | translate
+                        }}</span>
+                        } @else {
+                        {{ item.code }}
+                        }
+                    </td>
                     <td>{{ item.name | productName }}</td>
                     <td class="text-center">{{ item.quantity }}</td>
                     <td class="text-right">{{ item.unitPriceCents | money }}</td>

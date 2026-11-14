@@ -1,0 +1,71 @@
+<p-dialog
+    [visible]="visible()"
+    (visibleChange)="!$event && close()"
+    [modal]="true"
+    [style]="{ width: '26rem' }"
+    [breakpoints]="{ '640px': '95vw' }"
+    [draggable]="false"
+    [header]="'app.sales.extra.dialogTitle' | translate"
+>
+    <form (ngSubmit)="submit()" class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="extraName">{{
+                "app.sales.extra.nameLabel" | translate
+            }}</label>
+            <input
+                pInputText
+                id="extraName"
+                [ngModel]="name()"
+                (ngModelChange)="name.set($event)"
+                name="extraName"
+                autocomplete="off"
+                [maxlength]="nameMaxLength"
+                [placeholder]="'app.sales.extra.namePlaceholder' | translate"
+                class="w-full"
+            />
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="extraPrice">{{
+                "app.sales.extra.priceLabel" | translate
+            }}</label>
+            <p-inputNumber
+                inputId="extraPrice"
+                [name]="'extraPrice'"
+                mode="currency"
+                currency="BOB"
+                locale="es-BO"
+                [minFractionDigits]="2"
+                [ngModel]="priceBs()"
+                (ngModelChange)="priceBs.set($event)"
+                styleClass="w-full"
+                inputStyleClass="w-full"
+            ></p-inputNumber>
+        </div>
+        <div class="flex flex-col gap-1">
+            <label class="text-sm font-medium" for="extraQuantity">{{
+                "app.sales.extra.quantityLabel" | translate
+            }}</label>
+            <p-inputNumber
+                inputId="extraQuantity"
+                [name]="'extraQuantity'"
+                mode="decimal"
+                [min]="1"
+                [step]="1"
+                [ngModel]="quantity()"
+                (ngModelChange)="quantity.set($event)"
+                styleClass="w-full"
+                inputStyleClass="w-full"
+            ></p-inputNumber>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button
+                pButton
+                type="button"
+                class="p-button-text"
+                [label]="'app.common.cancel' | translate"
+                (click)="close()"
+            ></button>
+            <button pButton type="submit" [label]="'app.sales.extra.confirmButton' | translate"></button>
+        </div>
+    </form>
+</p-dialog>

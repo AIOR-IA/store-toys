@@ -20,6 +20,8 @@ import { applyDiscount, parseDiscountCents } from './sale-discount';
 const REGION = 'southamerica-west1';
 const MAX_ITEMS = 50;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
+/** Venta Extra (nueva funcionalidad): "longitud razonable" del nombre del concepto vendido. */
+const MAX_EXTRA_NAME_LENGTH = 80;
 const MAX_CANCEL_REASON_LENGTH = 300;
 const MAX_VOUCHER_BYTES = 3 * 1024 * 1024;
 const VOUCHER_EXTENSION_BY_MIME: Record<string, string> = {
@@ -31,10 +33,38 @@ const VOUCHER_EXTENSION_BY_MIME: Record<string, string> = {
 type PaymentMethod = 'cash' | 'qr' | 'giftcard';
 const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'qr', 'giftcard'];
 
-interface CreateSaleItemInput {
+type SaleItemKind = 'PRODUCT' | 'EXTRA';
+
+/**
+ * Venta Extra (nueva funcionalidad): un concepto vendido que NO es un
+ * `Product` registrado — chocolates, envoltura, servicios ocasionales — sin
+ * código de barras ni inventario. No existe en `products` ni en `barcodes`;
+ * vive SOLO como snapshot dentro de la venta, nunca en una colección propia.
+ *
+ * Cualquier item SIN `kind` (payload de un cliente anterior a este ajuste,
+ * o el campo simplemente omitido) se trata como `'PRODUCT'` — el valor por
+ * defecto histórico, antes de que existiera la distinción.
+ */
+interface CreateSaleProductItemInput {
+    kind: 'PRODUCT';
     productId: string;
     quantity: number;
 }
+
+/**
+ * El precio SÍ viene del cliente (no hay otra fuente: a diferencia de un
+ * Product, no hay ningún documento server-side del que leerlo) — pero el
+ * SUBTOTAL nunca se confía: `createSale` siempre recalcula
+ * `unitPriceCents * quantity` dentro de la transacción (prompt §12).
+ */
+interface CreateSaleExtraItemInput {
+    kind: 'EXTRA';
+    name: string;
+    unitPriceCents: number;
+    quantity: number;
+}
+
+type CreateSaleItemInput = CreateSaleProductItemInput | CreateSaleExtraItemInput;
 
 interface CreateSalePaymentInput {
     method: PaymentMethod;
@@ -109,37 +139,85 @@ function assertSafeIntegerCents(value: number, field: string): number {
     return value;
 }
 
+function requireItemQuantity(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+        throw new HttpsError('invalid-argument', 'La cantidad de cada artículo debe ser un entero mayor a 0.');
+    }
+    return value;
+}
+
+/** Venta Extra (nueva funcionalidad, prompt §12): nombre no vacío, longitud razonable. */
+function requireExtraName(value: unknown): string {
+    if (typeof value !== 'string' || !value.trim()) {
+        throw new HttpsError('invalid-argument', 'El nombre del extra es obligatorio.');
+    }
+    return value.trim().slice(0, MAX_EXTRA_NAME_LENGTH);
+}
+
+/** Venta Extra (nueva funcionalidad, prompt §12): precio unitario entero en centavos, mayor a 0. */
+function requireExtraUnitPriceCents(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+        throw new HttpsError('invalid-argument', 'El precio del extra es inválido.');
+    }
+    return value;
+}
+
+interface ValidatedSaleItems {
+    products: CreateSaleProductItemInput[];
+    extras: CreateSaleExtraItemInput[];
+}
+
 /**
- * Valida la FORMA del payload (plan §15.3, paso 2) — antes de cualquier
- * lectura de Firestore. El precio y el total **nunca** vienen del cliente
- * (plan §30, §2.1 C-9): el ítem solo trae `productId`/`quantity`, así que no
- * hay nada de dinero que un cliente manipulado pueda falsear en este payload.
+ * Valida la FORMA del payload (plan §15.3, paso 2; ampliado por Venta Extra)
+ * — antes de cualquier lectura de Firestore.
+ *
+ * PRODUCT: el precio y el total **nunca** vienen del cliente (plan §30,
+ * §2.1 C-9): el ítem solo trae `productId`/`quantity` — se fusionan por
+ * `productId` (mismo comportamiento de siempre, sin cambios) para que
+ * escanear el mismo código dos veces sume cantidad en una sola línea.
+ *
+ * EXTRA: NUNCA se fusiona con otro — cada línea que el cliente mandó queda
+ * como su propia entrada, igual que en el carrito (dos "Chocolate" por
+ * separado son dos líneas, no una con cantidad duplicada).
  */
-function validateItemsShape(value: unknown): CreateSaleItemInput[] {
+function validateItemsShape(value: unknown): ValidatedSaleItems {
     if (!Array.isArray(value) || value.length < 1 || value.length > MAX_ITEMS) {
         throw new HttpsError(
             'invalid-argument',
-            `La venta debe tener entre 1 y ${MAX_ITEMS} productos.`,
+            `La venta debe tener entre 1 y ${MAX_ITEMS} artículos.`,
         );
     }
 
     const merged = new Map<string, number>();
+    const extras: CreateSaleExtraItemInput[] = [];
+
     for (const raw of value) {
+        const kind: SaleItemKind = (raw as { kind?: unknown })?.kind === 'EXTRA' ? 'EXTRA' : 'PRODUCT';
+
+        if (kind === 'EXTRA') {
+            const name = requireExtraName((raw as { name?: unknown })?.name);
+            const unitPriceCents = requireExtraUnitPriceCents(
+                (raw as { unitPriceCents?: unknown })?.unitPriceCents,
+            );
+            const quantity = requireItemQuantity((raw as { quantity?: unknown })?.quantity);
+            extras.push({ kind: 'EXTRA', name, unitPriceCents, quantity });
+            continue;
+        }
+
         const productId = requireDocId(
             (raw as { productId?: unknown })?.productId,
             'productId',
         );
-        const quantity = (raw as { quantity?: unknown })?.quantity;
-        if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
-            throw new HttpsError(
-                'invalid-argument',
-                'La cantidad de cada producto debe ser un entero mayor a 0.',
-            );
-        }
+        const quantity = requireItemQuantity((raw as { quantity?: unknown })?.quantity);
         merged.set(productId, (merged.get(productId) ?? 0) + quantity);
     }
 
-    return Array.from(merged, ([productId, quantity]) => ({ productId, quantity }));
+    const products = Array.from(merged, ([productId, quantity]) => ({
+        kind: 'PRODUCT' as const,
+        productId,
+        quantity,
+    }));
+    return { products, extras };
 }
 
 function validatePaymentsShape(value: unknown): CreateSalePaymentInput[] {
@@ -222,7 +300,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
     }
 
     const saleId = requireDocId(request.data.saleId, 'saleId');
-    const items = validateItemsShape(request.data.items);
+    const { products: productItems, extras: extraItems } = validateItemsShape(request.data.items);
     const payments = validatePaymentsShape(request.data.payments);
     const discountCents = parseDiscountCents(request.data.discountCents);
     const customerNameRaw = request.data.customerName;
@@ -236,7 +314,9 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
     const timezone = (settingsSnap.get('timezone') as string) || 'America/La_Paz';
 
     const saleRef = db.doc(`sales/${saleId}`);
-    const productRefs = items.map((item) => db.doc(`products/${item.productId}`));
+    // Un Extra NUNCA genera una referencia a `products/*` (prompt §13): solo
+    // los items PRODUCT llegan a leer/escribir esa colección.
+    const productRefs = productItems.map((item) => db.doc(`products/${item.productId}`));
 
     try {
         const giftcardPayment = payments.find((p) => p.method === 'giftcard');
@@ -289,6 +369,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
             }
 
             const saleItems: {
+                kind: 'PRODUCT';
                 productId: string;
                 code: string;
                 name: string;
@@ -297,7 +378,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 subtotalCents: number;
             }[] = [];
 
-            for (let i = 0; i < items.length; i++) {
+            for (let i = 0; i < productItems.length; i++) {
                 const snap = productSnaps[i];
                 if (!snap.exists) {
                     throw new HttpsError(
@@ -312,7 +393,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     );
                 }
 
-                const quantity = items[i].quantity;
+                const quantity = productItems[i].quantity;
                 const stock = snap.get('stock') as number;
                 if (!allowSaleWithoutStock && stock < quantity) {
                     throw new HttpsError(
@@ -326,6 +407,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     'products.priceCents',
                 );
                 saleItems.push({
+                    kind: 'PRODUCT',
                     productId: snap.id,
                     code: snap.get('code') as string,
                     name: snap.get('name') as string,
@@ -338,14 +420,30 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 });
             }
 
-            // Orden del cálculo (Ajuste de Ventas, obs. 1): subtotal de los
-            // productos con los precios REALES → rebaja fija validada →
-            // total final. Todo lo que sigue (gift card, pagos, resumen)
-            // trabaja sobre `totalCents`, que sigue siendo el total FINAL
-            // cobrado — la rebaja no es un método de pago y nunca aparece en
-            // `payments[]`.
+            // Venta Extra (nueva funcionalidad, prompt §11-§13): NUNCA lee
+            // `products`/`barcodes`, nunca toca stock — el precio lo trae el
+            // cliente (no hay otra fuente), pero el subtotal SIEMPRE se
+            // recalcula aquí, nunca se confía en uno enviado por el cliente.
+            const extraSaleItems = extraItems.map((extra) => ({
+                kind: 'EXTRA' as const,
+                name: extra.name,
+                unitPriceCents: extra.unitPriceCents,
+                quantity: extra.quantity,
+                subtotalCents: assertSafeIntegerCents(
+                    extra.unitPriceCents * extra.quantity,
+                    'items[].subtotalCents',
+                ),
+            }));
+            const allSaleItems = [...saleItems, ...extraSaleItems];
+
+            // Orden del cálculo (Ajuste de Ventas, obs. 1): subtotal de
+            // Products + Extras con los precios REALES → rebaja fija
+            // validada → total final. Todo lo que sigue (gift card, pagos,
+            // resumen) trabaja sobre `totalCents`, que sigue siendo el total
+            // FINAL cobrado — la rebaja no es un método de pago y nunca
+            // aparece en `payments[]`.
             const subtotalCents = assertSafeIntegerCents(
-                saleItems.reduce((sum, item) => sum + item.subtotalCents, 0),
+                allSaleItems.reduce((sum, item) => sum + item.subtotalCents, 0),
                 'sale.subtotalCents',
             );
             const totalCents = assertSafeIntegerCents(
@@ -397,7 +495,12 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
             const paymentMethods = Array.from(new Set(payments.map((p) => p.method)));
 
             const { dateKey, monthKey, year } = dateKeys(new Date(), timezone);
-            const totalItems = saleItems.reduce((sum, item) => sum + item.quantity, 0);
+            // Venta Extra (nueva funcionalidad, prompt §16): el conteo de
+            // artículos del día incluye Products Y Extras — financieramente
+            // ambos son ventas reales. El ranking POR PRODUCTO, más abajo,
+            // sigue leyendo solo `saleItems` (nunca `allSaleItems`): un Extra
+            // nunca contamina esa métrica (prompt §17).
+            const totalItems = allSaleItems.reduce((sum, item) => sum + item.quantity, 0);
             const summaryRef = db.doc(`dailySummaries/${dateKey}`);
             const summarySnap = await tx.get(summaryRef);
 
@@ -406,7 +509,7 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
             tx.create(saleRef, {
                 sellerId: request.auth!.uid,
                 sellerName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
-                items: saleItems,
+                items: allSaleItems,
                 subtotalCents,
                 discountCents,
                 totalCents,
@@ -440,9 +543,12 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 year,
             });
 
-            for (let i = 0; i < items.length; i++) {
+            // Solo Products descuentan stock — un Extra nunca llega a este
+            // loop (prompt §13): `productRefs`/`productItems` ya excluyen
+            // cualquier línea EXTRA desde su construcción.
+            for (let i = 0; i < productItems.length; i++) {
                 tx.update(productRefs[i], {
-                    stock: FieldValue.increment(-items[i].quantity),
+                    stock: FieldValue.increment(-productItems[i].quantity),
                     updatedAt: FieldValue.serverTimestamp(),
                 });
             }
@@ -646,11 +752,25 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
             throw new HttpsError('failed-precondition', 'Esta venta ya fue anulada.');
         }
 
-        const items = (saleSnap.get('items') as {
+        // Venta Extra (nueva funcionalidad, prompt §19): un item SIN `kind`
+        // es una venta ANTERIOR a este ajuste — se trata como `'PRODUCT'`
+        // (el único tipo que existía entonces), igual que el resto del
+        // código trata los campos ausentes de ventas históricas. Filtrar
+        // ANTES de construir `productRefs` es obligatorio: un Extra no tiene
+        // `productId` real, así que nunca debe llegar a leerse/escribirse en
+        // `products`.
+        const allItems = (saleSnap.get('items') as {
+            kind?: SaleItemKind;
+            productId?: string;
+            quantity: number;
+            subtotalCents: number;
+        }[]) ?? [];
+        const productItems = allItems.filter((item) => (item.kind ?? 'PRODUCT') === 'PRODUCT') as {
             productId: string;
             quantity: number;
-        }[]) ?? [];
-        const productRefs = items.map((item) => db.doc(`products/${item.productId}`));
+            subtotalCents: number;
+        }[];
+        const productRefs = productItems.map((item) => db.doc(`products/${item.productId}`));
         const productSnaps = await Promise.all(productRefs.map((ref) => tx.get(ref)));
 
         const dateKey = saleSnap.get('dateKey') as string;
@@ -728,10 +848,13 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
             updatedAt: FieldValue.serverTimestamp(),
         });
 
-        for (let i = 0; i < items.length; i++) {
+        // Venta Extra (prompt §19): solo Products restauran stock — un Extra
+        // nunca tuvo stock que devolver, así que ni siquiera aparece aquí
+        // (`productItems` ya los excluyó arriba).
+        for (let i = 0; i < productItems.length; i++) {
             if (!productSnaps[i].exists) continue; // soft delete: no debería pasar nunca
             tx.update(productRefs[i], {
-                stock: FieldValue.increment(items[i].quantity),
+                stock: FieldValue.increment(productItems[i].quantity),
                 updatedAt: FieldValue.serverTimestamp(),
             });
         }
@@ -797,7 +920,9 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 (saleSnap.get('discountCents') as number | undefined) ?? 0,
                 'sale.discountCents',
             );
-            const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+            // Venta Extra (prompt §18): el conteo de artículos revertido debe
+            // ser simétrico al de `createSale` — incluye Products Y Extras.
+            const totalItems = allItems.reduce((sum, item) => sum + item.quantity, 0);
 
             // Igual que en `createSale`: los campos `*Cents` se leen y se
             // restan aquí mismo en vez de `FieldValue.increment(-n)` — ver
@@ -843,11 +968,10 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 update['giftCardCents'] = newGiftCardCents;
                 update['giftCardForfeitedCents'] = newGiftCardForfeitedCents;
             }
-            for (const item of saleSnap.get('items') as {
-                productId: string;
-                quantity: number;
-                subtotalCents: number;
-            }[]) {
+            // Solo Products (prompt §17): un Extra nunca estuvo en el mapa
+            // `products.*` de `dailySummaries` (`createSale` nunca lo
+            // escribió ahí), así que tampoco hay nada que revertir para él.
+            for (const item of productItems) {
                 const existing = summarySnap.get(`products.${item.productId}`) as
                     | { totalCents?: number }
                     | undefined;

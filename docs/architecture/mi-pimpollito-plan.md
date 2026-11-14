@@ -2502,6 +2502,77 @@ rebaja, el flujo y los importes son idénticos a los anteriores.
   Firestore en memoria (`tests/functions/sales.harness.js`); specs de TestBed del POS en
   `sales-pos.component.spec.ts`. No sustituyen la prueba en DEV.
 
+### 15.8 Venta Extra — conceptos sin Product/stock/barcode (nueva funcionalidad)
+
+> **Motivo (sin abrir una fase nueva):** el cliente necesita vender conceptos ocasionales que
+> no tiene sentido cargar como `Product` — chocolates, envoltura/regalo, otros servicios — sin
+> código de barras, sin etiqueta, sin inventario que mantener. **Explícitamente fuera de
+> alcance en este ajuste:** el nuevo modelo de Gift Cards con saldo reutilizable/recargas, que
+> es otra funcionalidad independiente, posterior a esta.
+
+- **`SaleItemKind = 'PRODUCT' | 'EXTRA'`** — campo nuevo en `SaleItem` (y en su contraparte de
+  carrito, `SaleCartLine`). Discriminador explícito, no un `productId` opcional: cada forma
+  tiene exactamente los campos que le corresponden.
+  - `PRODUCT` (sin cambios respecto a lo que ya existía): `productId`, `code`, `name`,
+    `unitPriceCents`, `quantity`, `subtotalCents`.
+  - `EXTRA` (nuevo): `name`, `unitPriceCents`, `quantity`, `subtotalCents` — **sin**
+    `productId` ni `code` (nunca existió un producto real que los tuviera).
+- **Sin colección `extras` ni catálogo persistente, a propósito.** El Extra nace en el
+  momento de vender y queda ÚNICAMENTE como snapshot dentro de `sales/{id}.items[]` — no hay
+  inventario, etiqueta ni código que mantener para él. Si el cliente pide más adelante un
+  catálogo reutilizable de Extras, es una funcionalidad nueva, no una extensión de esta.
+- **UI del POS:** botón «Agregar extra» (nunca «Agregar producto», para no confundirlo con
+  crear un `Product`), cerca del buscador/scanner, visible pero sin competir visualmente con
+  «Confirmar venta» (`p-button-text`). Abre un diálogo (`AddExtraDialogComponent`) con
+  Nombre/Precio/Cantidad; valida localmente (nombre no vacío, precio > 0, cantidad entera ≥ 1)
+  solo para no mostrar un error evitable — `createSale` revalida todo de cero, nunca confía en
+  esta validación. Sin edición: si el vendedor se equivoca, quita la línea y la vuelve a
+  agregar (mínima complejidad a propósito, prompt §8). En el carrito, una línea EXTRA se
+  distingue con un badge «EXTRA» en la columna de código — mismas acciones de +/−/quitar que
+  un Product, por una identidad local (`id` incremental) en vez de `productId` real: dos
+  Extras iguales agregados por separado siguen siendo dos líneas independientes.
+- **`createSale` (`functions/src/sales.ts`) separa la validación por tipo desde el payload:**
+  `validateItemsShape` devuelve `{ products, extras }` — los `PRODUCT` se fusionan por
+  `productId` (igual que siempre, sin cambios); los `EXTRA` **nunca** se fusionan entre sí
+  (cada línea que llegó del carrito queda como su propia entrada). Un item sin `kind` en el
+  payload (compatibilidad defensiva) se trata como `'PRODUCT'`.
+  - `EXTRA`: valida `name` (no vacío, máx. 80 caracteres), `unitPriceCents` (entero > 0) y
+    `quantity` (entero ≥ 1) — **nunca** lee `products` ni `barcodes`, **nunca** toca stock. El
+    precio SÍ viene del cliente (no hay otra fuente server-side), pero el **subtotal se
+    recalcula siempre** (`unitPriceCents × quantity`): un `subtotalCents` que el cliente mande
+    se ignora por completo.
+  - `PRODUCT`: exactamente la lógica de siempre (buscar, validar `isActive`/stock, descontar
+    stock, snapshot de `code`/`name`/`unitPriceCents` reales).
+  - El documento final (`items: allSaleItems`) concatena Products + Extras; `subtotalCents`/
+    `totalCents`/`itemsCount` se calculan sobre la suma de AMBOS. El mapa
+    `dailySummaries.products.{productId}` (ranking por producto) sigue poblándose **solo**
+    desde los items `PRODUCT` — un Extra nunca aparece ahí, por diseño (no debe contaminar
+    métricas de inventario).
+- **Pagos: sin ninguna regla especial.** Una venta con Extras usa exactamente las mismas
+  formas de pago/combinaciones de §15.1/§15.7 y el mismo flujo de Gift Card de §16 — el total
+  que se reparte entre `payments[]` ya incluye Products + Extras, `createSale` no distingue.
+- **`cancelSale` restaura stock SOLO de los items `PRODUCT`** de la venta (un item sin `kind`
+  también cuenta como `PRODUCT`, por la misma compatibilidad defensiva): se filtran ANTES de
+  construir las referencias a `products/*`, para que un Extra —que no tiene `productId` real—
+  nunca llegue a leerse/escribirse ahí. `itemsCount` se revierte sobre el total de items
+  (Products + Extras), simétrico a como `createSale` lo incrementó.
+- **Historial/detalle/recibo:** una línea EXTRA se muestra con el mismo badge que en el
+  carrito, en vez de un código de producto — nombre, cantidad, precio unitario y subtotal
+  siempre visibles, igual que cualquier línea. Ninguna de estas pantallas necesitó cambiar su
+  lógica de cálculo: todas ya leían `items[]`/`payments[]`/`totalCents` de forma genérica.
+- **Backward-safe, sin migración.** `saleConverter.fromFirestore` normaliza cualquier item sin
+  `kind` a `'PRODUCT'` al leer (mismo patrón que ya usa para `subtotalCents`/`discountCents`
+  ausentes) — ninguna venta histórica se modifica ni se reescribe.
+- **Rules: sin cambios.** `sales` ya tenía `allow write: if false`; la única vía de escritura
+  sigue siendo `createSale`/`cancelSale`. No hay ninguna validación de forma de `items[]` en
+  las Rules (vivía solo en el código de la Function), así que no había nada que relajar ni que
+  endurecer ahí.
+- **Pruebas:** nueva sección en `tests/functions/sales.harness.js` (solo Product, solo Extra,
+  mixta, validaciones de nombre/precio/cantidad, recálculo de subtotal, `cancelSale` de ambos
+  casos, Gift Card pagando un Extra); `add-extra-dialog.component.spec.ts` (validación del
+  diálogo); nuevos casos en `sales-pos.component.spec.ts` (carrito, totales, los cuatro
+  métodos de pago, reset); `sale.converter.spec.ts` (compatibilidad histórica).
+
 ---
 
 ## 16. Gift Cards

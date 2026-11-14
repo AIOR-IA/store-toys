@@ -33,8 +33,9 @@ import { ProductsService } from '../../../products/products.service';
 import { SALE_DISCOUNT_OPTIONS_CENTS, isDiscountApplicable } from '../../sale-discount.const';
 import { SAME_BARCODE_DEBOUNCE_MS } from '@shared/constants';
 import { SaleReceiptService } from '../../sale-receipt.service';
-import { CreateSalePaymentInput, SalesService } from '../../sales.service';
+import { CreateSaleItemInput, CreateSalePaymentInput, SalesService } from '../../sales.service';
 import { PaymentMethod, Sale, SaleCartLine } from '../../sale.model';
+import { AddExtraDialogComponent, AddedExtra } from '../add-extra-dialog/add-extra-dialog.component';
 
 /**
  * Lo que el vendedor elige en pantalla. `'cashqr'` NO es un `PaymentMethod` de
@@ -97,6 +98,7 @@ interface PaymentSummaryView {
         TranslateModule,
         MoneyPipe,
         ProductNamePipe,
+        AddExtraDialogComponent,
     ],
     templateUrl: './sales-pos.component.html',
 })
@@ -122,6 +124,9 @@ export class SalesPosComponent implements AfterViewInit {
     private readonly lastAcceptedScanAt = new Map<string, number>();
     private pendingScanLookups = 0;
     cart = signal<SaleCartLine[]>([]);
+    /** Venta Extra (nueva funcionalidad): id LOCAL incremental para cada línea EXTRA agregada — nunca se envía al servidor. */
+    private nextExtraId = 0;
+    extraDialogVisible = signal(false);
     customerName = signal('');
     paymentMethod = signal<PosPaymentMethod>('cash');
     cashReceivedBs = signal<number | null>(null);
@@ -554,15 +559,16 @@ export class SalesPosComponent implements AfterViewInit {
 
     private addToCart(product: Product): void {
         this.cart.update((lines) => {
-            const existing = lines.find((line) => line.productId === product.id);
+            const existing = lines.find((line) => line.kind === 'PRODUCT' && line.productId === product.id);
             if (existing) {
                 return lines.map((line) =>
-                    line.productId === product.id
+                    line.kind === 'PRODUCT' && line.productId === product.id
                         ? { ...line, quantity: line.quantity + 1 }
                         : line,
                 );
             }
             const newLine: SaleCartLine = {
+                kind: 'PRODUCT',
                 productId: product.id,
                 code: product.code,
                 name: product.name,
@@ -574,10 +580,39 @@ export class SalesPosComponent implements AfterViewInit {
         });
     }
 
+    openAddExtra(): void {
+        this.extraDialogVisible.set(true);
+    }
+
+    /**
+     * Venta Extra (nueva funcionalidad, prompt §7): a diferencia de un
+     * Product, un Extra agregado por separado NUNCA se fusiona con otro de
+     * igual nombre/precio — cada click en «Agregar» del diálogo crea una
+     * línea propia e independiente (`id` local incremental), igual que dos
+     * líneas de carrito distintas que el vendedor podría querer quitar por
+     * separado.
+     */
+    onExtraAdded(extra: AddedExtra): void {
+        const newLine: SaleCartLine = {
+            kind: 'EXTRA',
+            id: `extra-${this.nextExtraId++}`,
+            name: extra.name,
+            unitPriceCents: extra.unitPriceCents,
+            quantity: extra.quantity,
+        };
+        this.cart.update((lines) => [...lines, newLine]);
+        this.focusScan();
+    }
+
+    /** Identidad de una línea del carrito (Product → `productId`, Extra → `id` local) — nunca se confunden entre sí. */
+    private lineIdentity(line: SaleCartLine): string {
+        return line.kind === 'EXTRA' ? `extra:${line.id}` : `product:${line.productId}`;
+    }
+
     incrementQty(line: SaleCartLine): void {
         this.cart.update((lines) =>
             lines.map((l) =>
-                l.productId === line.productId ? { ...l, quantity: l.quantity + 1 } : l,
+                this.lineIdentity(l) === this.lineIdentity(line) ? { ...l, quantity: l.quantity + 1 } : l,
             ),
         );
         this.focusScan();
@@ -588,7 +623,7 @@ export class SalesPosComponent implements AfterViewInit {
         this.cart.update((lines) =>
             lines
                 .map((l) =>
-                    l.productId === line.productId ? { ...l, quantity: l.quantity - 1 } : l,
+                    this.lineIdentity(l) === this.lineIdentity(line) ? { ...l, quantity: l.quantity - 1 } : l,
                 )
                 .filter((l) => l.quantity > 0),
         );
@@ -596,7 +631,7 @@ export class SalesPosComponent implements AfterViewInit {
     }
 
     removeLine(line: SaleCartLine): void {
-        this.cart.update((lines) => lines.filter((l) => l.productId !== line.productId));
+        this.cart.update((lines) => lines.filter((l) => this.lineIdentity(l) !== this.lineIdentity(line)));
         this.focusScan();
     }
 
@@ -722,12 +757,22 @@ export class SalesPosComponent implements AfterViewInit {
         this.discountCents.set(0);
         this.qrPartBs.set(null);
         this.paymentMethod.set('cash');
-        this.cart.set([]);
+        this.cart.set([]); // limpia Products Y Extras — es el mismo arreglo (prompt §23)
+        this.nextExtraId = 0;
+        this.extraDialogVisible.set(false);
         this.customerName.set('');
         this.cashReceivedBs.set(null);
         this.clearVoucherSelection();
         this.clearGiftCardSelection();
         this.focusScan();
+    }
+
+    /** Arma la línea exacta que espera `createSale` (plan Venta Extra): nunca envía `subtotalCents`, el servidor siempre lo recalcula. */
+    private toCreateSaleItem(line: SaleCartLine): CreateSaleItemInput {
+        if (line.kind === 'EXTRA') {
+            return { kind: 'EXTRA', name: line.name, unitPriceCents: line.unitPriceCents, quantity: line.quantity };
+        }
+        return { kind: 'PRODUCT', productId: line.productId, quantity: line.quantity };
     }
 
     /**
@@ -790,10 +835,7 @@ export class SalesPosComponent implements AfterViewInit {
 
         this.confirming.set(true);
         const saleId = this.salesService.generateSaleId();
-        const items = this.cart().map((line) => ({
-            productId: line.productId,
-            quantity: line.quantity,
-        }));
+        const items: CreateSaleItemInput[] = this.cart().map((line) => this.toCreateSaleItem(line));
         const payments: CreateSalePaymentInput[] = this.buildPayments();
         const customerName = this.customerName().trim() || undefined;
         // Solo se envía la intención; el servidor recalcula subtotal y total.

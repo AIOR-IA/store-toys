@@ -62,4 +62,47 @@ describe('SaleReceiptService — nombre de producto', () => {
         expect(text).not.toContain('Juguete transformer');
         expect(sale.items[0].name).toBe('Juguete transformer');
     });
+
+    it('Venta Extra: una línea EXTRA imprime su nombre/cantidad/precio con el badge en vez de un código', async () => {
+        TestBed.configureTestingModule({
+            imports: [TranslateModule.forRoot()],
+            providers: [
+                CurrencyPipe,
+                {
+                    provide: SettingsService,
+                    useValue: {
+                        getSettings: () =>
+                            of({ storeName: 'Mi Pimpollito', timezone: 'America/La_Paz' }),
+                    },
+                },
+            ],
+        });
+        const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+            default: { createPdf: (doc: unknown) => unknown };
+        };
+        let doc: unknown;
+        spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((d: unknown) => {
+            doc = d;
+            return { print: () => undefined };
+        }) as never);
+
+        const sale = {
+            id: 'abcdef123456',
+            createdAt: Timestamp.now(),
+            sellerName: 'Ana',
+            payments: [],
+            discountCents: 0,
+            subtotalCents: 2000,
+            totalCents: 2000,
+            items: [
+                { kind: 'EXTRA', name: 'Chocolate', quantity: 2, unitPriceCents: 1000, subtotalCents: 2000 },
+            ],
+        } as unknown as Sale;
+
+        await TestBed.inject(SaleReceiptService).print(sale);
+
+        const text = JSON.stringify(doc);
+        expect(text).toContain('CHOCOLATE');
+        expect(text).toContain('app.sales.extra.badge'); // TranslateModule.forRoot() sin catálogo: instant() devuelve la clave
+    });
 });

@@ -50,7 +50,22 @@ export interface Payment {
     giftCardForfeitedCents?: number;
 }
 
-export interface SaleItem {
+/**
+ * Venta Extra (nueva funcionalidad): un concepto vendido que NO es un
+ * `Product` registrado — chocolates, envoltura, servicios ocasionales — sin
+ * código de barras, sin stock, sin existir en `products`/`barcodes`. Vive
+ * SOLO como snapshot dentro de la venta (`functions/src/sales.ts`): no hay
+ * colección `extras` ni catálogo persistente.
+ *
+ * `kind` distingue las dos formas de `SaleItem`. Ventas ANTERIORES a este
+ * ajuste no tienen el campo en Firestore — `saleConverter` las normaliza a
+ * `kind: 'PRODUCT'` al leer (igual que ya hace con `subtotalCents`/
+ * `discountCents` para la rebaja): nunca se migran documentos existentes.
+ */
+export type SaleItemKind = 'PRODUCT' | 'EXTRA';
+
+export interface ProductSaleItem {
+    kind: 'PRODUCT';
     productId: string;
     code: string;
     name: string;
@@ -58,6 +73,21 @@ export interface SaleItem {
     quantity: number;
     subtotalCents: number;
 }
+
+/**
+ * Sin `productId`/`code` (nunca existió un producto real) y sin
+ * `stockReference`: un Extra nunca valida ni descuenta stock, en ningún
+ * punto del flujo (`createSale`/`cancelSale`).
+ */
+export interface ExtraSaleItem {
+    kind: 'EXTRA';
+    name: string;
+    unitPriceCents: number;
+    quantity: number;
+    subtotalCents: number;
+}
+
+export type SaleItem = ProductSaleItem | ExtraSaleItem;
 
 export type SaleStatus = 'completed' | 'cancelled';
 
@@ -107,7 +137,8 @@ export interface Sale {
 }
 
 /** Línea del carrito del POS — estado local, nunca se guarda tal cual (plan §15.5). */
-export interface SaleCartLine {
+export interface ProductCartLine {
+    kind: 'PRODUCT';
     productId: string;
     code: string;
     name: string;
@@ -117,3 +148,22 @@ export interface SaleCartLine {
      * validación real de stock ocurre en `createSale`, en servidor. */
     stockReference: number;
 }
+
+/**
+ * Línea de Venta Extra en el carrito (nueva funcionalidad): `id` es un
+ * identificador LOCAL, generado al agregarla — nunca se envía a `createSale`
+ * ni se guarda — solo existe para que `incrementQty`/`decrementQty`/
+ * `removeLine` puedan identificar ESTA línea concreta (dos Extras con el
+ * mismo nombre y precio agregados por separado deben seguir siendo líneas
+ * independientes, a diferencia de un Product, que se identifica por
+ * `productId` real).
+ */
+export interface ExtraCartLine {
+    kind: 'EXTRA';
+    id: string;
+    name: string;
+    unitPriceCents: number;
+    quantity: number;
+}
+
+export type SaleCartLine = ProductCartLine | ExtraCartLine;

@@ -1089,6 +1089,106 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('X-K2. updateGiftCardAmount por SELLER: el movimiento AMOUNT_CHANGED registra performedBy/performedByName del vendedor real (XE)',
         [...store].some(([k, v]) => k.startsWith('giftCardMovements/') && v.giftCardId === XE && v.type === 'AMOUNT_CHANGED' && v.performedBy === 'seller' && v.performedByName === 'Vend Edor'));
 
+    // ---- Y. Venta Extra (nueva funcionalidad): conceptos sin Product/stock/barcode ----
+    console.log('\nY. Venta Extra: solo Product / solo Extra / mixta — createSale y cancelSale');
+
+    // A) solo Product sigue funcionando exactamente igual (sanity explícito de este ajuste).
+    reset();
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-A', items: [{ kind: 'PRODUCT', productId: 'bear', quantity: 1 }], payments: [{ method: 'cash', amountCents: 7500 }] }));
+    check('Y-A. solo Product: ÉXITO, stock 10 → 9', r.ok && store.get('products/bear').stock === 9, r.message);
+
+    // B) solo Extra funciona, aunque no exista ningún Product en el carrito.
+    reset();
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-B', items: [{ kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 }], payments: [{ method: 'cash', amountCents: 2000 }] }));
+    check('Y-B. solo Extra: ÉXITO, sin ningún Product en el carrito', r.ok, r.message);
+    check('Y-B2. el item guardado es kind=EXTRA, sin productId/code, con subtotal 2000', r.ok &&
+        sale('Y-B').items.length === 1 && sale('Y-B').items[0].kind === 'EXTRA' &&
+        sale('Y-B').items[0].productId === undefined && sale('Y-B').items[0].code === undefined &&
+        sale('Y-B').items[0].name === 'Chocolate' && sale('Y-B').items[0].subtotalCents === 2000);
+    check('Y-D. Extra no toca products: bear sigue en stock 10 (no se leyó ni se escribió nada de products)', store.get('products/bear').stock === 10);
+
+    // C) Product + Extra mezclados en UNA sola venta.
+    reset();
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-C', items: [
+        { kind: 'PRODUCT', productId: 'bear', quantity: 1 },
+        { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 },
+    ], payments: [{ method: 'cash', amountCents: 9500 }] }));
+    check('Y-C. Product + Extra: ÉXITO, total 7500 + 2000 = 9500', r.ok && sale('Y-C').totalCents === 9500, r.message);
+    check('Y-C2. 2 líneas guardadas, una PRODUCT y otra EXTRA', sale('Y-C').items.length === 2 &&
+        sale('Y-C').items.some((i) => i.kind === 'PRODUCT' && i.productId === 'bear') &&
+        sale('Y-C').items.some((i) => i.kind === 'EXTRA' && i.name === 'Chocolate'));
+    check('Y-E. el Product de la venta mixta SÍ descontó stock: 10 → 9', store.get('products/bear').stock === 9);
+    check('Y-F. el Extra de la venta mixta NO generó ninguna entrada en products.* del resumen', !summary().products.chocolate);
+
+    // G-I) validación server-side de un Extra — nunca confiar en el frontend.
+    reset();
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-G', items: [{ kind: 'EXTRA', name: '', unitPriceCents: 1000, quantity: 1 }], payments: [{ method: 'cash', amountCents: 1000 }] }));
+    check('Y-G. backend rechaza un Extra sin nombre', !r.ok && r.code === 'invalid-argument', r.message);
+
+    for (const badPrice of [0, -100]) {
+        reset();
+        r = await outcome(call(createSale, 'seller', { saleId: 'Y-H', items: [{ kind: 'EXTRA', name: 'X', unitPriceCents: badPrice, quantity: 1 }], payments: [{ method: 'cash', amountCents: 100 }] }));
+        check(`Y-H. backend rechaza un Extra con precio ${badPrice}`, !r.ok && r.code === 'invalid-argument', r.message);
+    }
+
+    for (const badQty of [0, -1]) {
+        reset();
+        r = await outcome(call(createSale, 'seller', { saleId: 'Y-I', items: [{ kind: 'EXTRA', name: 'X', unitPriceCents: 1000, quantity: badQty }], payments: [{ method: 'cash', amountCents: 1000 }] }));
+        check(`Y-I. backend rechaza un Extra con cantidad ${badQty}`, !r.ok && r.code === 'invalid-argument', r.message);
+    }
+
+    // J) el servidor SIEMPRE recalcula el subtotal — un subtotalCents falso enviado por el cliente se ignora.
+    reset();
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-J', items: [{ kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2, subtotalCents: 999999 }], payments: [{ method: 'cash', amountCents: 2000 }] }));
+    check('Y-J. el subtotal guardado es 1000×2=2000, NUNCA el 999999 que mandó el cliente', r.ok && sale('Y-J').items[0].subtotalCents === 2000, r.message);
+
+    // K) cancelSale de una venta SOLO Extra: nada que restaurar, el resumen se revierte igual.
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-K', items: [{ kind: 'EXTRA', name: 'Envoltura', unitPriceCents: 500, quantity: 1 }], payments: [{ method: 'cash', amountCents: 500 }] });
+    check('Y-K0. antes de anular: resumen con Bs 5 de Extra', summary().totalCents === 500);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'Y-K', reason: 'prueba' }));
+    check('Y-K. cancelSale solo Extra: ÉXITO, sin tocar ningún Product (no hay ninguno en la venta)', r.ok, r.message);
+    check('Y-K2. resumen revertido a cero', summary().totalCents === 0 && summary().salesCount === 0);
+
+    // L) cancelSale de una venta MIXTA: restaura SOLO el stock del Product, el Extra no provoca ninguna operación sobre Products.
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-L', items: [
+        { kind: 'PRODUCT', productId: 'bear', quantity: 2 },
+        { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 1 },
+    ], payments: [{ method: 'cash', amountCents: 16000 }] }); // 7500×2 + 1000
+    check('Y-L0. antes de anular: stock 10 → 8', store.get('products/bear').stock === 8);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'Y-L', reason: 'prueba' }));
+    check('Y-L. cancelSale mixta: ÉXITO', r.ok, r.message);
+    check('Y-L2. stock del Product restaurado: 8 → 10 (exactamente la cantidad original, nunca de más)', store.get('products/bear').stock === 10);
+    check('Y-L3. resumen revertido a cero (Product + Extra)', summary().totalCents === 0 && summary().itemsCount === 0);
+
+    // M) dailySummaries incluye el monto de los Extras como ingreso real (sin contaminar el ranking por producto).
+    reset();
+    await call(createSale, 'seller', { saleId: 'Y-M', items: [
+        { kind: 'PRODUCT', productId: 'bear', quantity: 1 },
+        { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 },
+    ], payments: [{ method: 'cash', amountCents: 9500 }] });
+    check('Y-M. dailySummaries.totalCents = 9500 (7500 Product + 2000 Extra), itemsCount = 3 (1 + 2)',
+        summary().totalCents === 9500 && summary().itemsCount === 3, JSON.stringify(summary()));
+    check('Y-M2. el ranking por producto (products.*) solo tiene la entrada del Product, nunca la del Extra',
+        Object.keys(summary().products).length === 1 && !!summary().products.bear && !summary().products.chocolate);
+
+    // N) formas de pago siguen cuadrando con total Products + Extras (mixto Efectivo + QR).
+    reset();
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-N', items: [
+        { kind: 'PRODUCT', productId: 'bear', quantity: 1 },
+        { kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 },
+    ], payments: [{ method: 'cash', amountCents: 5000 }, { method: 'qr', amountCents: 4500 }] }));
+    check('Y-N. Efectivo + QR sobre total 9500: cashCents 5000 + qrCents 4500 = totalCents', r.ok &&
+        sale('Y-N').cashCents === 5000 && sale('Y-N').qrCents === 4500 && sale('Y-N').totalCents === 9500, r.message);
+
+    // O) Gift Card como pago, con un Extra en el carrito: EXACTAMENTE el mismo flujo de siempre (plan sin cambios).
+    reset(); seedGiftCard(2000);
+    r = await outcome(call(createSale, 'seller', { saleId: 'Y-O', items: [{ kind: 'EXTRA', name: 'Chocolate', unitPriceCents: 1000, quantity: 2 }],
+        payments: [{ method: 'giftcard', amountCents: 2000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }));
+    check('Y-O. Gift Card paga un Extra con el flujo actual: ÉXITO, tarjeta redimida (AVAILABLE de nuevo)',
+        r.ok && store.get('giftCards/GC-1').status === 'AVAILABLE', r.message);
+
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);
 })();

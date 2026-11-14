@@ -199,7 +199,9 @@ export class SaleReceiptService {
                                 { text: this.t('columns.subtotal'), bold: true, alignment: 'right' },
                             ],
                             ...sale.items.map((item) => [
-                                item.code,
+                                item.kind === 'EXTRA'
+                                    ? this.translate.instant('app.sales.extra.badge')
+                                    : item.code,
                                 formatProductName(item.name),
                                 { text: String(item.quantity), alignment: 'center' },
                                 { text: this.money(item.unitPriceCents), alignment: 'right' },

@@ -79,6 +79,17 @@
             ></button>
         </form>
 
+        <div class="flex justify-end">
+            <button
+                pButton
+                type="button"
+                class="p-button-text p-button-sm"
+                icon="fas fa-plus"
+                [label]="'app.sales.extra.addAction' | translate"
+                (click)="openAddExtra()"
+            ></button>
+        </div>
+
         <div class="border border-gray-200 rounded-md">
             <div class="px-4 py-2 border-b border-gray-200 font-semibold">
                 {{ "app.sales.cart.title" | translate }}
@@ -100,10 +111,18 @@
                 </ng-template>
                 <ng-template pTemplate="body" let-line>
                     <tr>
-                        <td class="font-mono text-sm">{{ line.code }}</td>
+                        <td class="font-mono text-sm">
+                            @if (line.kind === 'EXTRA') {
+                            <span class="text-2xs font-sans font-semibold uppercase text-primary">{{
+                                "app.sales.extra.badge" | translate
+                            }}</span>
+                            } @else {
+                            {{ line.code }}
+                            }
+                        </td>
                         <td>
                             {{ line.name | productName }}
-                            @if (line.quantity > line.stockReference) {
+                            @if (line.kind === 'PRODUCT' && line.quantity > line.stockReference) {
                             <div class="text-xs text-danger">
                                 {{ "app.sales.cart.willGoNegative" | translate }}
                             </div>
@@ -479,3 +498,9 @@
         </div>
     </div>
 </div>
+
+<app-add-extra-dialog
+    [visible]="extraDialogVisible()"
+    (visibleChange)="extraDialogVisible.set($event)"
+    (added)="onExtraAdded($event)"
+></app-add-extra-dialog>
