@@ -496,4 +496,52 @@ describe('ReportsPdfService — cierre final: el TOTAL va al final, con jerarqu�
         const lastChild = lastNode.stack[lastNode.stack.length - 1] as { stack: { text: string }[] };
         expect(lastChild.stack[1].text).toBe('1.390,00 Bs'); // 390 + 1.000, nunca +0 de Gift Card otra vez (espacio U+00A0)
     });
+
+    /** Helper: ubica el nodo `{ table, layout }` dentro del stack del cierre. */
+    function findClosingTable(doc: Record<string, unknown>): { table: { body: unknown[][] } } {
+        const content = doc['content'] as unknown[];
+        const closingBlock = content[content.length - 1] as { stack: unknown[] };
+        const tableNode = closingBlock.stack.find(
+            (n): n is { table: { body: unknown[][] } } => typeof n === 'object' && n !== null && 'table' in n,
+        );
+        if (!tableNode) throw new Error('No se encontró ninguna tabla dentro del bloque "Resumen final"');
+        return tableNode;
+    }
+
+    it('F. "Resumen final" contiene una tabla de pdfmake (nunca HTML) con las 4 filas de detalle', async () => {
+        const { doc } = await exportAndCapture(data());
+        const { table } = findClosingTable(doc);
+        expect(table.body.length).toBe(4);
+        const labels = table.body.map((row) => (row[0] as string));
+        expect(labels).toEqual([
+            'app.reports.closing.merchandiseNet',
+            'app.reports.kpis.cashReceived',
+            'app.reports.kpis.qrReceived',
+            'app.reports.kpis.giftCardRedeemed',
+        ]);
+    });
+
+    it('G. los montos de la tabla siguen siendo exactamente los mismos (mismo formato "es" del resto del PDF)', async () => {
+        const { doc } = await exportAndCapture(data());
+        const { table } = findClosingTable(doc);
+        const amounts = table.body.map((row) => (row[1] as { text: string; alignment: string }).text);
+        expect(amounts).toEqual(['140,00 Bs', '390,00 Bs', '1.000,00 Bs', '0,00 Bs']);
+        // alineados a la derecha, para que "1.000,00 Bs" no se corte en la columna de monto.
+        expect(table.body.every((row) => (row[1] as { alignment: string }).alignment === 'right')).toBeTrue();
+    });
+
+    it('H. el TOTAL DINERO INGRESADO A CAJA queda FUERA de la tabla — sigue siendo su propio bloque destacado, al final', async () => {
+        const { doc } = await exportAndCapture(data());
+        const content = doc['content'] as unknown[];
+        const closingBlock = content[content.length - 1] as { stack: unknown[] };
+        const tableNode = closingBlock.stack.find((n) => typeof n === 'object' && n !== null && 'table' in n) as {
+            table: { body: unknown[][] };
+        };
+        // el total nunca es una fila de la tabla: sigue habiendo exactamente 4 filas.
+        expect(tableNode.table.body.length).toBe(4);
+        expect(tableNode.table.body.some((row) => JSON.stringify(row).includes('totalReceived'))).toBeFalse();
+        // y el finalKpi (último elemento del stack) tampoco es un nodo de tabla.
+        const lastChild = closingBlock.stack[closingBlock.stack.length - 1] as Record<string, unknown>;
+        expect('table' in lastChild).toBeFalse();
+    });
 });

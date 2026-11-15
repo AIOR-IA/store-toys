@@ -292,10 +292,23 @@ export class ReportsPdfService {
                     stack: [
                         { ...line, margin: [0, 10, 0, 6] as [number, number, number, number] },
                         this.sectionTitle(this.t('closing.title')),
-                        this.row(this.t('closing.merchandiseNet'), this.money(t.totalCents)),
-                        this.row(this.t('kpis.cashReceived'), this.money(data.cashReceivedCents)),
-                        this.row(this.t('kpis.qrReceived'), this.money(data.qrReceivedCents)),
-                        this.row(this.t('kpis.giftCardRedeemed'), this.money(t.giftCardCents)),
+                        // Tabla de detalle (solo visual, mismo `layout` ligero que la tabla
+                        // de conceptos) — el TOTAL final queda deliberadamente FUERA de
+                        // esta tabla, como su propio bloque destacado más abajo.
+                        {
+                            table: {
+                                widths: ['*', 'auto'],
+                                dontBreakRows: true,
+                                body: [
+                                    [this.t('closing.merchandiseNet'), { text: this.money(t.totalCents), alignment: 'right' }],
+                                    [this.t('kpis.cashReceived'), { text: this.money(data.cashReceivedCents), alignment: 'right' }],
+                                    [this.t('kpis.qrReceived'), { text: this.money(data.qrReceivedCents), alignment: 'right' }],
+                                    [this.t('kpis.giftCardRedeemed'), { text: this.money(t.giftCardCents), alignment: 'right' }],
+                                ],
+                            },
+                            layout: 'lightHorizontalLines',
+                            margin: [0, 2, 0, 4] as [number, number, number, number],
+                        },
                         {
                             text: allConsistent ? `✓ ${this.t('closing.consistent')}` : `⚠ ${this.t('closing.inconsistent')}`,
                             color: allConsistent ? 'green' : 'red',
