@@ -226,6 +226,23 @@ export class SalesPosComponent implements AfterViewInit {
     readonly giftCardDifferenceCents = computed(() => Math.max(0, this.totalCents() - this.giftCardBalanceCents()));
 
     /**
+     * Clases visuales del bloque de saldo de la Gift Card (ajuste UI/UX
+     * posterior a la Fase E): solo mapea el mismo estado ya calculado arriba
+     * a un color del lenguaje visual del sistema (success/info/primario) —
+     * no agrega ni cambia ningún cálculo de saldo.
+     */
+    readonly giftCardBalanceBoxClass = computed(() => {
+        if (this.giftCardWillBeExhausted()) return 'bg-success-soft border-success';
+        if (this.giftCardRemainingAfterCents() > 0) return 'bg-info-soft border-info';
+        return 'bg-primary-clear-soft border-primary';
+    });
+    readonly giftCardBalanceTextClass = computed(() => {
+        if (this.giftCardWillBeExhausted()) return 'text-success-dark';
+        if (this.giftCardRemainingAfterCents() > 0) return 'text-info-dark';
+        return 'text-primary-dark';
+    });
+
+    /**
      * Modo «Efectivo + QR» (Ajuste de Ventas, obs. 2): el vendedor SOLO teclea
      * el monto por QR — el que muestra la app del banco, exacto. El efectivo
      * aplicado es lo que falta para el total (`total − QR`), así el orden en

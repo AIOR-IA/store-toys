@@ -248,31 +248,48 @@
                     ></button>
                 </form>
                 } @else {
-                <div class="p-3 bg-primary-clear-soft rounded-md flex items-center justify-between">
-                    <div>
-                        <div class="font-mono font-semibold">{{ foundGiftCard()!.cardCode }}</div>
-                        <div class="text-xs text-gray-500">{{ "app.sales.giftCard.balanceLabel" | translate }}</div>
-                        <div class="text-sm text-gray-600">{{ giftCardBalanceCents() | money }}</div>
+                <div class="p-4 rounded-lg border-2 flex flex-col gap-3" [ngClass]="giftCardBalanceBoxClass()">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex flex-col gap-0.5">
+                            <span class="text-xs font-medium uppercase tracking-wide" [ngClass]="giftCardBalanceTextClass()">{{
+                                "app.sales.giftCard.balanceLabel" | translate
+                            }}</span>
+                            <span class="text-3xl font-bold leading-none" [ngClass]="giftCardBalanceTextClass()">{{
+                                giftCardBalanceCents() | money
+                            }}</span>
+                        </div>
+                        <i class="fas fa-gift text-2xl mt-1" [ngClass]="giftCardBalanceTextClass()"></i>
                     </div>
-                    <button
-                        pButton
-                        type="button"
-                        class="p-button-text p-button-sm"
-                        icon="fas fa-times"
-                        [label]="'app.sales.giftCard.change' | translate"
-                        (click)="clearGiftCardSelection()"
-                    ></button>
+
+                    @if (giftCardWillBeExhausted()) {
+                    <div class="text-sm font-semibold" [ngClass]="giftCardBalanceTextClass()">
+                        {{ "app.sales.giftCard.exhaustedNote" | translate }}
+                    </div>
+                    } @else if (giftCardRemainingAfterCents() > 0) {
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs" [ngClass]="giftCardBalanceTextClass()">{{
+                            "app.sales.giftCard.remainingAfterLabel" | translate
+                        }}</span>
+                        <span class="text-lg font-bold" [ngClass]="giftCardBalanceTextClass()">{{
+                            giftCardRemainingAfterCents() | money
+                        }}</span>
+                    </div>
+                    }
+
+                    <div class="flex items-center justify-between pt-2 border-t border-black/10">
+                        <span class="font-mono text-xs text-gray-500">{{ foundGiftCard()!.cardCode }}</span>
+                        <button
+                            pButton
+                            type="button"
+                            class="p-button-text p-button-sm"
+                            icon="fas fa-times"
+                            [label]="'app.sales.giftCard.change' | translate"
+                            (click)="clearGiftCardSelection()"
+                        ></button>
+                    </div>
                 </div>
 
-                @if (giftCardWillBeExhausted()) {
-                <div class="text-xs text-gray-500">
-                    {{ "app.sales.giftCard.exhaustedNote" | translate }}
-                </div>
-                } @else if (giftCardRemainingAfterCents() > 0) {
-                <div class="text-xs text-info">
-                    {{ "app.sales.giftCard.remainingOnCardLabel" | translate: { amount: (giftCardRemainingAfterCents() | money) } }}
-                </div>
-                } @if (giftCardDifferenceCents() > 0) {
+                @if (giftCardDifferenceCents() > 0) {
                 <div class="flex flex-col gap-2">
                     <div class="flex gap-4">
                         <div class="flex items-center gap-2">

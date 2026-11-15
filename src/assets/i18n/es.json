@@ -395,7 +395,7 @@
         "notActive": "Esta gift card no está activa: no se puede usar como pago.",
         "searchFirst": "Busca una gift card activa antes de confirmar.",
         "balanceLabel": "Saldo disponible",
-        "remainingOnCardLabel": "Saldo que queda en la tarjeta después de esta compra: {{amount}}",
+        "remainingAfterLabel": "Queda después de esta compra",
         "exhaustedNote": "Esta compra deja la tarjeta sin saldo.",
         "forfeitedLabel": "Sobrante perdido: {{amount}}",
         "differenceLabel": "Diferencia a cobrar: {{amount}}",
