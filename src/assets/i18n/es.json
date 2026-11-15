@@ -623,11 +623,9 @@
         "total": "Total QR recibido"
       },
       "closing": {
-        "totalSold": "Total vendido del período",
-        "moneyReceived": "Ingreso real cobrado",
-        "cash": "Efectivo",
-        "qr": "QR",
-        "giftCardApplied": "Gift Card aplicada",
+        "title": "Resumen final",
+        "merchandiseNet": "Ventas mercadería / extras (neto)",
+        "totalReceived": "Total dinero ingresado a caja",
         "consistent": "Reporte consistente",
         "inconsistent": "Diferencia detectada"
       },

@@ -102,6 +102,21 @@ export class ReportsPdfService {
         return { text, bold: true, fontSize: 11, margin: [0, 12, 0, 4] as [number, number, number, number] };
     }
 
+    /**
+     * El dato financiero principal del cierre (plan §18.4, ajuste posterior):
+     * el ÚLTIMO bloque importante del PDF, con más jerarquía visual que
+     * `bigKpi` (sin exagerar) — es lo que el dueño debe ver si solo mira el
+     * final del reporte.
+     */
+    private finalKpi(label: string, value: string): unknown {
+        return {
+            stack: [
+                { text: label, fontSize: 10, bold: true, margin: [0, 8, 0, 2] as [number, number, number, number] },
+                { text: value, fontSize: 20, bold: true },
+            ],
+        };
+    }
+
     private buildDocDefinition(data: ReportPdfData, settings: { storeName: string; timezone: string }): unknown {
         const line = { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1 }] };
         const t = data.rangeTotals;
@@ -265,25 +280,37 @@ export class ReportsPdfService {
                       ]
                     : []),
 
-                // ---- Cierre final ----
-                { ...line, margin: [0, 10, 0, 6] },
-                this.bigKpi(this.t('closing.totalSold'), this.money(t.totalCents)),
-                this.bigKpi(this.t('closing.moneyReceived'), this.money(data.moneyReceivedCents)),
-                this.row(this.t('closing.cash'), this.money(data.cashReceivedCents)),
-                this.row(this.t('closing.qr'), this.money(data.qrReceivedCents)),
-                this.row(this.t('closing.giftCardApplied'), this.money(t.giftCardCents)),
+                // ---- Cierre final (RESUMEN FINAL) ----
+                // El dato financiero principal (TOTAL DINERO INGRESADO A CAJA) va AL FINAL,
+                // como el último dato del PDF, con más jerarquía que el detalle que lo
+                // precede — nunca "Ganancia": todavía no se calcula costo/margen/utilidad.
+                // `unbreakable: true` mantiene TODO el bloque junto (detalle + consistencia +
+                // total) en la misma página siempre que razonablemente entre, para que el
+                // total nunca quede huérfano separado de su detalle.
                 {
-                    text: allConsistent ? `✓ ${this.t('closing.consistent')}` : `⚠ ${this.t('closing.inconsistent')}`,
-                    color: allConsistent ? 'green' : 'red',
-                    bold: true,
-                    margin: [0, 6, 0, 0] as [number, number, number, number],
+                    unbreakable: true,
+                    stack: [
+                        { ...line, margin: [0, 10, 0, 6] as [number, number, number, number] },
+                        this.sectionTitle(this.t('closing.title')),
+                        this.row(this.t('closing.merchandiseNet'), this.money(t.totalCents)),
+                        this.row(this.t('kpis.cashReceived'), this.money(data.cashReceivedCents)),
+                        this.row(this.t('kpis.qrReceived'), this.money(data.qrReceivedCents)),
+                        this.row(this.t('kpis.giftCardRedeemed'), this.money(t.giftCardCents)),
+                        {
+                            text: allConsistent ? `✓ ${this.t('closing.consistent')}` : `⚠ ${this.t('closing.inconsistent')}`,
+                            color: allConsistent ? 'green' : 'red',
+                            bold: true,
+                            margin: [0, 4, 0, 0] as [number, number, number, number],
+                        },
+                        ...(!merchandiseOk
+                            ? [{ text: `⚠ ${this.t('identities.mismatch')} (${this.money(merchandiseDiffCents)})`, color: 'red', fontSize: 8 }]
+                            : []),
+                        ...(data.integrity && data.integrityMismatch
+                            ? [{ text: `⚠ ${this.t('identities.integrity.mismatch')}`, color: 'red', fontSize: 8 }]
+                            : []),
+                        this.finalKpi(this.t('closing.totalReceived'), this.money(data.moneyReceivedCents)),
+                    ],
                 },
-                ...(!merchandiseOk
-                    ? [{ text: `⚠ ${this.t('identities.mismatch')} (${this.money(merchandiseDiffCents)})`, color: 'red', fontSize: 8 }]
-                    : []),
-                ...(data.integrity && data.integrityMismatch
-                    ? [{ text: `⚠ ${this.t('identities.integrity.mismatch')}`, color: 'red', fontSize: 8 }]
-                    : []),
             ],
         };
     }

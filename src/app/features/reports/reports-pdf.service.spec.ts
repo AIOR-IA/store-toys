@@ -1,10 +1,18 @@
-import { CurrencyPipe } from '@angular/common';
+import { CurrencyPipe, registerLocaleData } from '@angular/common';
+import localeEs from '@angular/common/locales/es';
+import { LOCALE_ID } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { firstValueFrom, of } from 'rxjs';
 import { SettingsService } from '@core/services';
 import { ReportPdfData, ReportsPdfService } from './reports-pdf.service';
 import { buildSellerBreakdown } from './reports.service';
+
+// Registra los DATOS del locale 'es' (igual que `app.config.ts`) — no cambia
+// el locale por defecto de ningún otro test de este archivo, solo hace que
+// la data exista para los tests que SÍ pasan `LOCALE_ID: 'es'` explícito
+// (el bloque "cierre final", para reproducir el formato real de la app).
+registerLocaleData(localeEs);
 
 /** Objeto cuyo valor para cualquier campo es 0 (agregados vacíos). */
 const zeros = (): unknown =>
@@ -381,5 +389,111 @@ describe('ReportsPdfService — giftCardsSoldCount: null (error) vs. 0 (real)', 
         const text = await exportAndCapture(baseData(0));
         expect(text).toMatch(/"text":"0"/);
         expect(text).not.toContain('"—"');
+    });
+});
+
+/**
+ * Cierre final (ajuste posterior): el dato financiero principal (TOTAL
+ * DINERO INGRESADO A CAJA) debe ser el ÚLTIMO dato importante del PDF, con
+ * más jerarquía visual, y el bloque completo debe mantenerse junto en una
+ * sola página (`unbreakable`) para que el total nunca quede huérfano.
+ */
+describe('ReportsPdfService — cierre final: el TOTAL va al final, con jerarquía, y el bloque no se parte', () => {
+    async function exportAndCapture(data: ReportPdfData): Promise<{ text: string; doc: Record<string, unknown> }> {
+        TestBed.configureTestingModule({
+            imports: [TranslateModule.forRoot()],
+            providers: [
+                // Mismo LOCALE_ID que `app.config.ts` ('es') — para que el formato
+                // monetario del test refleje exactamente el de la app real (grupo
+                // '.', decimal ',', símbolo "Bs" sufijo), no el locale por defecto
+                // de Angular (en-US) que usan el resto de tests de este archivo.
+                { provide: LOCALE_ID, useValue: 'es' },
+                CurrencyPipe,
+                { provide: SettingsService, useValue: { getSettings: () => of({ storeName: 'Mi Pimpollito', timezone: 'America/La_Paz' }) } },
+            ],
+        });
+        const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+            default: { createPdf: (doc: unknown) => unknown };
+        };
+        let doc: unknown;
+        spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((d: unknown) => {
+            doc = d;
+            return { print: () => undefined };
+        }) as never);
+        await TestBed.inject(ReportsPdfService).export(data);
+        return { text: JSON.stringify(doc), doc: doc as Record<string, unknown> };
+    }
+
+    // Ejemplo real del pedido: mercadería 140 Bs (toda en efectivo, 0 QR, 0 Gift Card
+    // aplicada → identidad "mercancía" cuadra), más una Gift Card vendida por Bs 250
+    // (efectivo 25000 / QR 100000) → efectivo recibido 390, QR recibido 1.000, total 1.390.
+    const data = (): ReportPdfData =>
+        ({
+            fromKey: '2026-09-01',
+            toKey: '2026-09-01',
+            rangeTotals: zerosWith({
+                totalCents: 14000,
+                cashCents: 14000,
+                qrCents: 0,
+                giftCardCents: 0,
+                giftCardIssuesCashCents: 25000,
+                giftCardIssuesQrCents: 100000,
+            }),
+            cashReceivedCents: 39000,
+            qrReceivedCents: 100000,
+            moneyReceivedCents: 139000,
+            integrity: null,
+            integrityMismatch: false,
+            giftCardInventory: zeros(),
+            giftCardsSoldCount: 0,
+            topConcepts: [],
+            sellerScope: null,
+        }) as unknown as ReportPdfData;
+
+    it('A. el orden dentro del cierre es: detalle (mercadería/efectivo/QR/GC) → consistencia → TOTAL al final', async () => {
+        const { text } = await exportAndCapture(data());
+        const iMerchandise = text.indexOf('closing.merchandiseNet');
+        const iCash = text.indexOf('kpis.cashReceived');
+        const iQr = text.indexOf('kpis.qrReceived');
+        const iGiftCard = text.indexOf('kpis.giftCardRedeemed');
+        const iConsistent = text.indexOf('closing.consistent');
+        const iTotal = text.lastIndexOf('closing.totalReceived'); // el del cierre, no uno anterior
+        expect([iMerchandise, iCash, iQr, iGiftCard, iConsistent, iTotal].every((i) => i >= 0)).toBeTrue();
+        expect(iMerchandise).toBeLessThan(iConsistent);
+        expect(iConsistent).toBeLessThan(iTotal);
+        expect(iTotal).toBeGreaterThan(iQr);
+        expect(iTotal).toBeGreaterThan(iGiftCard);
+    });
+
+    it('B. TOTAL DINERO INGRESADO A CAJA es el último nodo del documento (el bloque final del PDF)', async () => {
+        const { doc } = await exportAndCapture(data());
+        const content = doc['content'] as unknown[];
+        const lastNode = content[content.length - 1] as { stack: unknown[] };
+        const lastChild = lastNode.stack[lastNode.stack.length - 1] as { stack: { text: string; fontSize: number; bold: boolean }[] };
+        const [label, value] = lastChild.stack;
+        expect(label.text).toBe('app.reports.closing.totalReceived');
+        expect(value.fontSize).toBe(20);
+        expect(value.bold).toBeTrue();
+        expect(value.text).toBe('1.390,00 Bs'); // el locale 'es' usa espacio irrompible (U+00A0) antes del símbolo
+    });
+
+    it('C. el bloque completo del cierre es "unbreakable" (no se parte entre páginas)', async () => {
+        const { doc } = await exportAndCapture(data());
+        const content = doc['content'] as unknown[];
+        const closingBlock = content[content.length - 1] as { unbreakable?: boolean };
+        expect(closingBlock.unbreakable).toBeTrue();
+    });
+
+    it('D. nunca se usa la palabra "Ganancia" en ningún lado del PDF', async () => {
+        const { text } = await exportAndCapture(data());
+        expect(text.toLowerCase()).not.toContain('ganancia');
+    });
+
+    it('E. la fórmula no cambia: el TOTAL sigue siendo exactamente moneyReceivedCents (efectivo + QR, sin sumar Gift Card aplicada otra vez)', async () => {
+        const { doc } = await exportAndCapture(data());
+        const content = doc['content'] as unknown[];
+        const lastNode = content[content.length - 1] as { stack: unknown[] };
+        const lastChild = lastNode.stack[lastNode.stack.length - 1] as { stack: { text: string }[] };
+        expect(lastChild.stack[1].text).toBe('1.390,00 Bs'); // 390 + 1.000, nunca +0 de Gift Card otra vez (espacio U+00A0)
     });
 });
