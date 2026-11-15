@@ -24,6 +24,7 @@ import {
     GiftCardReceipt,
     GiftCardReplaceMode,
     GiftCardStatus,
+    GiftCardTopUpResult,
 } from './gift-card.model';
 
 export type GiftCardsFilter = 'all' | GiftCardStatus;
@@ -401,6 +402,35 @@ export class GiftCardsService {
             { cardCode: string; amountCents: number }
         >(this.functions, 'updateGiftCardAmount');
         return from(callable({ code, amountCents })).pipe(map((r) => r.data));
+    }
+
+    /**
+     * Genera el ID de recarga EN EL CLIENTE, sin escribir nada (Fase C, plan
+     * §16.22) — mismo mecanismo que `SalesService.generateSaleId()`: es lo
+     * que permite que `topUpGiftCard` sea idempotente con `tx.create()` — un
+     * doble clic reenvía el mismo `topUpId` y la segunda llamada devuelve el
+     * resultado ya guardado, sin volver a sumar saldo.
+     */
+    generateTopUpId(): string {
+        return doc(collection(this.firestore, 'giftCardTopUps')).id;
+    }
+
+    /**
+     * `topUpGiftCard` (Function, staff, Fase C, plan §16.22): recarga el
+     * saldo de una tarjeta `ACTIVE`, sobre el MISMO ciclo. `topUpId` debe
+     * venir de `generateTopUpId()` — nunca inventado en el momento, para que
+     * un reintento real sea detectable.
+     */
+    topUpGiftCard(
+        topUpId: string,
+        code: string,
+        payments: GiftCardIssuePayment[],
+    ): Observable<GiftCardTopUpResult> {
+        const callable = httpsCallable<
+            { topUpId: string; code: string; payments: GiftCardIssuePayment[] },
+            GiftCardTopUpResult
+        >(this.functions, 'topUpGiftCard');
+        return from(callable({ topUpId, code, payments })).pipe(map((r) => r.data));
     }
 
     /**

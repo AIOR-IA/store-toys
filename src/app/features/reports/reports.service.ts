@@ -52,6 +52,16 @@ export interface RangeTotals {
     giftCardForfeitedCents: number;
     giftCardIssuesCashCents: number;
     giftCardIssuesQrCents: number;
+    /**
+     * Recargas de saldo (Fase C, plan §16.22; integradas a Reportes en la
+     * Fase F, plan §18.6): dinero NUEVO que entra a caja sobre un ciclo YA
+     * abierto — mismo criterio que `giftCardsIssuedCents`/
+     * `giftCardIssues*Cents`, nunca mercancía vendida, nunca se mezcla con
+     * `giftCardCents` (saldo CONSUMIDO, que no es dinero nuevo).
+     */
+    giftCardTopUpsCents: number;
+    giftCardTopUpsCashCents: number;
+    giftCardTopUpsQrCents: number;
     products: Record<string, { code: string; name: string; qty: number; totalCents: number }>;
     /** Simétrico a `products`, agrupado por nombre normalizado (rediseño del PDF ejecutivo, plan §18.4). */
     extras: Record<string, { name: string; qty: number; totalCents: number }>;
@@ -72,6 +82,9 @@ function emptyRangeTotals(): RangeTotals {
         giftCardForfeitedCents: 0,
         giftCardIssuesCashCents: 0,
         giftCardIssuesQrCents: 0,
+        giftCardTopUpsCents: 0,
+        giftCardTopUpsCashCents: 0,
+        giftCardTopUpsQrCents: 0,
         products: {},
         extras: {},
         daysWithData: 0,
@@ -114,22 +127,31 @@ export function buildTopConcepts(t: Pick<RangeTotals, 'products' | 'extras'>): R
 
 /**
  * Cobros REALES del rango (regla de negocio: una Gift Card es ingreso cuando
- * SE VENDE, no cuando se canjea). ÚNICA fórmula — pantalla y PDF la comparten:
+ * SE VENDE o se RECARGA, no cuando se canjea). ÚNICA fórmula — pantalla y PDF
+ * la comparten:
  *
- * - efectivo recibido = efectivo de ventas + efectivo de emisiones de Gift Card
- * - QR recibido       = QR de ventas + QR de emisiones de Gift Card
+ * - efectivo recibido = efectivo de ventas + efectivo de emisiones de Gift Card + efectivo de recargas
+ * - QR recibido       = QR de ventas + QR de emisiones de Gift Card + QR de recargas
  * - cobros totales    = efectivo recibido + QR recibido
  *
  * `giftCardCents` (Gift Card APLICADA como pago) y `giftCardForfeitedCents`
  * (sobrante de un canje menor al nominal) NO entran: ese dinero ya se cobró al
  * vender la tarjeta. La diferencia que se paga en efectivo/QR durante un canje
  * sí entra, porque ya está dentro de `cashCents`/`qrCents` de la venta.
+ *
+ * Recargas (Fase F, plan §18.6): `giftCardTopUpsCashCents`/`QrCents` son
+ * OPCIONALES en la firma — `buildSellerBreakdown` (abajo) llama a esta misma
+ * función con solo 4 campos, porque una recarga no tiene atribución por
+ * vendedor disponible sin consultar `giftCardTopUps` (Rules cerradas, plan
+ * §16.22) ni tocar Functions; para ese caso faltan y se tratan como `0` — NO
+ * es un error, es "sin dato de recarga atribuible a este vendedor todavía".
  */
 export function receivedTotals(
-    t: Pick<RangeTotals, 'cashCents' | 'qrCents' | 'giftCardIssuesCashCents' | 'giftCardIssuesQrCents'>,
+    t: Pick<RangeTotals, 'cashCents' | 'qrCents' | 'giftCardIssuesCashCents' | 'giftCardIssuesQrCents'> &
+        Partial<Pick<RangeTotals, 'giftCardTopUpsCashCents' | 'giftCardTopUpsQrCents'>>,
 ): { cashCents: number; qrCents: number; totalCents: number } {
-    const cashCents = t.cashCents + t.giftCardIssuesCashCents;
-    const qrCents = t.qrCents + t.giftCardIssuesQrCents;
+    const cashCents = t.cashCents + t.giftCardIssuesCashCents + (t.giftCardTopUpsCashCents ?? 0);
+    const qrCents = t.qrCents + t.giftCardIssuesQrCents + (t.giftCardTopUpsQrCents ?? 0);
     return { cashCents, qrCents, totalCents: cashCents + qrCents };
 }
 
@@ -293,6 +315,9 @@ export function mergeDailySummaries(summaries: DailySummary[]): RangeTotals {
         totals.giftCardForfeitedCents += summary.giftCardForfeitedCents;
         totals.giftCardIssuesCashCents += summary.giftCardIssuesCashCents;
         totals.giftCardIssuesQrCents += summary.giftCardIssuesQrCents;
+        totals.giftCardTopUpsCents += summary.giftCardTopUpsCents;
+        totals.giftCardTopUpsCashCents += summary.giftCardTopUpsCashCents;
+        totals.giftCardTopUpsQrCents += summary.giftCardTopUpsQrCents;
         totals.daysWithData += 1;
 
         for (const [productId, entry] of Object.entries(summary.products ?? {})) {

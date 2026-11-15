@@ -338,6 +338,133 @@ describe('ReportsPdfService — top productos', () => {
 });
 
 /**
+ * Recargas de Gift Card en el PDF (Fase F, plan §18.6, puntos 6-8, 17 del
+ * pedido): bloque Efectivo/QR con la fila "De recargas Gift Card" y un
+ * bloque propio "RECARGAS DE GIFT CARD" en la sección de Gift Card —
+ * terminología clara, nunca `TOP_UP`/`giftCardTopUpsCents` visibles.
+ */
+describe('ReportsPdfService — recargas de Gift Card (Fase F)', () => {
+    async function exportAndCapture(data: ReportPdfData): Promise<string> {
+        TestBed.configureTestingModule({
+            imports: [TranslateModule.forRoot()],
+            providers: [
+                CurrencyPipe,
+                { provide: SettingsService, useValue: { getSettings: () => of({ storeName: 'Mi Pimpollito', timezone: 'America/La_Paz' }) } },
+            ],
+        });
+        const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+            default: { createPdf: (doc: unknown) => unknown };
+        };
+        let doc: unknown;
+        spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((d: unknown) => {
+            doc = d;
+            return { print: () => undefined };
+        }) as never);
+        await TestBed.inject(ReportsPdfService).export(data);
+        return JSON.stringify(doc);
+    }
+
+    const data = (overrides: Record<string, number> = {}): ReportPdfData =>
+        ({
+            fromKey: '2026-09-01',
+            toKey: '2026-09-01',
+            rangeTotals: zerosWith({
+                cashCents: 10000,
+                qrCents: 10000,
+                giftCardIssuesCashCents: 20000,
+                giftCardIssuesQrCents: 10000,
+                giftCardTopUpsCents: 7500,
+                giftCardTopUpsCashCents: 5000,
+                giftCardTopUpsQrCents: 2500,
+                ...overrides,
+            }),
+            cashReceivedCents: 35000,
+            qrReceivedCents: 22500,
+            moneyReceivedCents: 57500,
+            integrity: null,
+            integrityMismatch: false,
+            giftCardInventory: zeros(),
+            giftCardsSoldCount: 0,
+            topConcepts: [],
+            sellerScope: null,
+        }) as unknown as ReportPdfData;
+
+    it('F10. el PDF muestra el bloque "Recargas de Gift Card" con su título propio', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).toContain('app.reports.giftCards.topUps.title');
+    });
+
+    it('F11. el PDF muestra el monto recargado (nominal)', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).toContain('app.reports.giftCards.topUps.amount');
+        expect(text).toContain('75.00'); // 7500 centavos
+    });
+
+    it('F12. el PDF muestra el efectivo cobrado de recargas', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).toContain('app.reports.giftCards.topUps.cash');
+        expect(text).toContain('50.00');
+    });
+
+    it('F13. el PDF muestra el QR cobrado de recargas', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).toContain('app.reports.giftCards.topUps.qr');
+        expect(text).toContain('25.00');
+    });
+
+    it('F14. el bloque Efectivo incluye la fila "De recargas Gift Card"', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).toContain('app.reports.cash.fromTopUps');
+    });
+
+    it('F15. el bloque QR incluye la fila "De recargas Gift Card"', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).toContain('app.reports.qr.fromTopUps');
+    });
+
+    it('nunca imprime claves técnicas (TOP_UP, giftCardTopUpsCents) como texto visible', async () => {
+        const text = await exportAndCapture(data());
+        expect(text).not.toContain('"TOP_UP"');
+        expect(text).not.toContain('giftCardTopUpsCents');
+    });
+
+    it('F19. sin ninguna recarga (todo en 0): el bloque sigue apareciendo, con montos en 0,00 Bs, sin romper nada', async () => {
+        const text = await exportAndCapture(
+            data({ giftCardTopUpsCents: 0, giftCardTopUpsCashCents: 0, giftCardTopUpsQrCents: 0 }),
+        );
+        expect(text).toContain('app.reports.giftCards.topUps.title');
+        expect(text).toContain('0.00');
+    });
+
+    it('F18. el valor final (TOTAL DINERO INGRESADO A CAJA) ya incluye las recargas recibidas', async () => {
+        const { doc } = await (async () => {
+            TestBed.configureTestingModule({
+                imports: [TranslateModule.forRoot()],
+                providers: [
+                    CurrencyPipe,
+                    { provide: SettingsService, useValue: { getSettings: () => of({ storeName: 'Mi Pimpollito', timezone: 'America/La_Paz' }) } },
+                ],
+            });
+            const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+                default: { createPdf: (doc: unknown) => unknown };
+            };
+            let captured: unknown;
+            spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((d: unknown) => {
+                captured = d;
+                return { print: () => undefined };
+            }) as never);
+            await TestBed.inject(ReportsPdfService).export(data());
+            return { doc: captured as Record<string, unknown> };
+        })();
+        const content = doc['content'] as unknown[];
+        const closingBlock = content[content.length - 1] as { stack: unknown[] };
+        const lastChild = closingBlock.stack[closingBlock.stack.length - 1] as { stack: { text: string }[] };
+        // moneyReceivedCents = 57500 centavos = Bs 575.00, pasado explícitamente arriba.
+        expect(lastChild.stack[1].text).toContain('575');
+    });
+});
+
+/**
  * `giftCardsSoldCount: null` (consulta fallida, p. ej. índice todavía no
  * listo) jamás debe imprimirse como si fuera `0` (consulta válida, de
  * verdad cero Gift Cards vendidas) — distinción pedida explícitamente.

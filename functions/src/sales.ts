@@ -5,6 +5,7 @@ import { db, storage } from './admin';
 import { assertActive, assertAdmin } from './guards';
 import { dateKeys } from './date-keys';
 import { applyDiscount, parseDiscountCents } from './sale-discount';
+import { resolveGiftCardBalance, resolveGiftCardBalanceRevision } from './giftcards';
 
 /**
  * Cloud Functions de Ventas (plan §15).
@@ -512,19 +513,51 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 'sale.totalCents',
             );
 
-            // Consumo TOTAL, sin saldo remanente (plan §16.2, E3/E4): el
+            // Saldo persistente, consumo PARCIAL (Fase B, plan §16.18/§16.20
+            // — reemplaza el consumo TOTAL del plan §16.2/E3-E4 original): el
             // monto aplicado nunca lo decide el cliente — se recalcula desde
-            // el `amountCents` real de la tarjeta. Si la compra alcanza o
-            // supera el valor de la tarjeta, se aplica el valor completo (el
-            // resto, si sobra compra, se cubre con el segundo pago cash/qr);
-            // si la compra es menor, se aplica solo lo que cubre la compra y
-            // el resto se pierde como `forfeit` (plan §16.3, filas 4'/4'').
+            // el saldo EFECTIVO real de la tarjeta (`resolveGiftCardBalance`,
+            // nunca `amountCents` directo: una tarjeta ya adoptada por el
+            // modelo nuevo puede tener menos saldo que su monto nominal). Si
+            // la compra alcanza o supera el saldo, se aplica el saldo
+            // completo (el resto, si sobra compra, se cubre con el segundo
+            // pago cash/qr) y el ciclo se CIERRA (`giftCardBalanceAfterCents
+            // === 0`); si la compra es menor, se aplica solo lo que cubre la
+            // compra y el SOBRANTE QUEDA EN EL SALDO — ya no existe
+            // `forfeit` para ventas nuevas (plan §16.18, "FORFEITED se
+            // preserva históricamente, no se retroactiva"): el campo
+            // `giftCardForfeitCents` se mantiene por compatibilidad de forma
+            // con el snapshot histórico, pero para toda venta nueva es
+            // siempre `0`.
             let giftCardAppliedCents = 0;
-            let giftCardForfeitCents = 0;
-            if (giftcardPayment && giftCardSnap) {
-                const cardAmountCents = giftCardSnap.get('amountCents') as number;
-                giftCardAppliedCents = Math.min(cardAmountCents, totalCents);
-                giftCardForfeitCents = cardAmountCents - giftCardAppliedCents;
+            const giftCardForfeitCents = 0;
+            let giftCardBalanceBeforeCents = 0;
+            let giftCardBalanceAfterCents = 0;
+            // Contador balanceRevision (ajuste sobre Fase B, plan §16.21): el
+            // saldo solo no basta para que `cancelSale` detecte una
+            // operación posterior (puede repetir un valor tras una futura
+            // recarga) — `balanceRevision` sube 1 en CADA operación de
+            // saldo, nunca se repite dentro del mismo ciclo. Ver
+            // `resolveGiftCardBalanceRevision`.
+            let giftCardBalanceRevisionBefore = 0;
+            let giftCardBalanceRevisionAfter = 0;
+            if (giftcardPayment && giftCardSnap && giftCardIssueSnap) {
+                giftCardBalanceBeforeCents = resolveGiftCardBalance(
+                    {
+                        status: giftCardSnap.get('status') as string,
+                        amountCents: giftCardSnap.get('amountCents') as number,
+                        balanceCents: giftCardSnap.get('balanceCents') as number | undefined,
+                        pendingReplacement: giftCardSnap.get('pendingReplacement') as boolean | undefined,
+                    },
+                    { balanceCents: giftCardIssueSnap.get('balanceCents') as number | undefined },
+                );
+                giftCardBalanceRevisionBefore = resolveGiftCardBalanceRevision(
+                    { balanceRevision: giftCardSnap.get('balanceRevision') as number | undefined },
+                    { balanceRevision: giftCardIssueSnap.get('balanceRevision') as number | undefined },
+                );
+                giftCardAppliedCents = Math.min(giftCardBalanceBeforeCents, totalCents);
+                giftCardBalanceAfterCents = giftCardBalanceBeforeCents - giftCardAppliedCents;
+                giftCardBalanceRevisionAfter = giftCardBalanceRevisionBefore + 1;
                 if (giftcardPayment.amountCents !== giftCardAppliedCents) {
                     throw new HttpsError(
                         'failed-precondition',
@@ -581,12 +614,19 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     if (p.method === 'giftcard') {
                         return {
                             method: p.method,
-                            amountCents: p.amountCents,
+                            amountCents: p.amountCents, // = giftCardAppliedCents, el monto realmente tomado del saldo
                             giftCardId: p.giftCardId,
                             giftCardCode: p.giftCardId,
                             giftCardCycleNumber: giftCardSnap!.get('cycleNumber') as number,
                             giftCardCycleId: p.giftCardCycleId,
-                            giftCardForfeitedCents: giftCardForfeitCents,
+                            giftCardForfeitedCents: giftCardForfeitCents, // siempre 0 en ventas nuevas (Fase B) — campo conservado por forma histórica
+                            // Saldo persistente (Fase B, plan §16.18): snapshot que permite
+                            // reconstruir saldo antes/aplicado/después SIN leer el estado futuro
+                            // de la tarjeta — lo que `cancelSale` necesita para restaurar.
+                            giftCardBalanceBeforeCents,
+                            giftCardBalanceAfterCents,
+                            giftCardBalanceRevisionBefore,
+                            giftCardBalanceRevisionAfter,
                         };
                     }
                     return { method: p.method, amountCents: p.amountCents };
@@ -614,40 +654,76 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 });
             }
 
-            // Redención de la gift card (plan §22, prompt §22): TODO en esta
-            // misma transacción — la venta, el descuento de stock, el cierre
-            // del ciclo y la devolución del plástico a AVAILABLE nacen o
-            // fallan juntos. Dos cajas que intenten usar el mismo ciclo a la
-            // vez nunca pueden tener éxito las dos: la segunda pierde la
-            // carrera de la transacción (Firestore reintenta con una lectura
-            // fresca de `activeCycleId`, que ya no coincide) o, si llega a
+            // Redención de la gift card, saldo persistente (Fase B, plan
+            // §16.18/§16.20): TODO en esta misma transacción — la venta, el
+            // descuento de stock y la actualización de `giftCards`/
+            // `giftCardIssues` (invariante card.balanceCents ===
+            // issue.balanceCents, nunca uno sin el otro) nacen o fallan
+            // juntos. Dos cajas que intenten usar el mismo ciclo a la vez
+            // nunca pueden tener éxito las dos: la segunda pierde la carrera
+            // de la transacción (Firestore reintenta con una lectura fresca
+            // de `activeCycleId`/saldo, que ya no coincide) o, si llega a
             // ejecutarse igual, la comprobación de arriba la rechaza.
+            //
+            // `giftCardBalanceAfterCents > 0` → redención PARCIAL: el ciclo
+            // sigue abierto exactamente igual (mismo `activeCycleId`, mismo
+            // `cycleNumber`, card sigue `ACTIVE`, issue sigue `active`) —
+            // solo el saldo baja. `=== 0` → redención COMPLETA: el plástico
+            // vuelve a `AVAILABLE` y el ciclo se cierra, igual que el
+            // comportamiento histórico (`cycleNumber` NO cambia aquí — solo
+            // avanza en la PRÓXIMA activación real).
             if (giftcardPayment && giftCardRef && giftCardSnap && giftCardIssueSnap) {
                 const cycleId = giftcardPayment.giftCardCycleId!;
                 const cycleNumber = giftCardSnap.get('cycleNumber') as number;
                 const issueRef = db.doc(`giftCardIssues/${cycleId}`);
 
-                tx.update(giftCardRef, {
-                    status: 'AVAILABLE',
-                    activeCycleId: null,
-                    currentBuyerName: null,
-                    activatedAt: null,
-                    activatedBy: null,
-                    activatedByName: null,
-                    updatedAt: FieldValue.serverTimestamp(),
-                });
-                tx.update(issueRef, {
-                    status: 'redeemed',
-                    redeemedAt: FieldValue.serverTimestamp(),
-                    saleId,
-                    redeemedAmountCents: giftCardAppliedCents,
-                    forfeitedAmountCents: giftCardForfeitCents,
-                    closedAt: FieldValue.serverTimestamp(),
-                });
+                if (giftCardBalanceAfterCents > 0) {
+                    tx.update(giftCardRef, {
+                        balanceCents: giftCardBalanceAfterCents,
+                        balanceRevision: giftCardBalanceRevisionAfter,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                    tx.update(issueRef, {
+                        balanceCents: giftCardBalanceAfterCents,
+                        balanceRevision: giftCardBalanceRevisionAfter,
+                    });
+                } else {
+                    tx.update(giftCardRef, {
+                        status: 'AVAILABLE',
+                        balanceCents: 0,
+                        balanceRevision: giftCardBalanceRevisionAfter,
+                        activeCycleId: null,
+                        currentBuyerName: null,
+                        activatedAt: null,
+                        activatedBy: null,
+                        activatedByName: null,
+                        updatedAt: FieldValue.serverTimestamp(),
+                    });
+                    tx.update(issueRef, {
+                        status: 'redeemed',
+                        balanceCents: 0,
+                        balanceRevision: giftCardBalanceRevisionAfter,
+                        redeemedAt: FieldValue.serverTimestamp(),
+                        saleId,
+                        redeemedAmountCents: giftCardAppliedCents,
+                        forfeitedAmountCents: giftCardForfeitCents, // siempre 0 en ventas nuevas, campo conservado por forma
+                        closedAt: FieldValue.serverTimestamp(),
+                    });
+                }
+                // Un solo movimiento REDEEMED expresa tanto la redención
+                // parcial como la completa (plan §16.18/Fase B, prompt §9):
+                // `balanceBeforeCents`/`balanceAfterCents` ya dejan clara la
+                // diferencia, sin necesidad de un tipo de movimiento nuevo.
+                // `FORFEITED` NUNCA se crea para una venta nueva (prompt §7):
+                // ya no existe sobrante que perder con saldo persistente.
                 tx.create(db.collection('giftCardMovements').doc(), {
                     giftCardId: giftcardPayment.giftCardId,
                     codeSnapshot: giftcardPayment.giftCardId,
                     amountCents: giftCardAppliedCents,
+                    balanceRevisionBefore: giftCardBalanceRevisionBefore,
+                    balanceRevisionAfter: giftCardBalanceRevisionAfter,
+                    balanceBeforeCents: giftCardBalanceBeforeCents,
+                    balanceAfterCents: giftCardBalanceAfterCents,
                     cycleNumber,
                     cycleId,
                     type: 'REDEEMED' as const,
@@ -658,22 +734,6 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                     saleId,
                     reason: null,
                 });
-                if (giftCardForfeitCents > 0) {
-                    tx.create(db.collection('giftCardMovements').doc(), {
-                        giftCardId: giftcardPayment.giftCardId,
-                        codeSnapshot: giftcardPayment.giftCardId,
-                        amountCents: giftCardForfeitCents,
-                        cycleNumber,
-                        cycleId,
-                        type: 'FORFEITED' as const,
-                        createdAt: FieldValue.serverTimestamp(),
-                        performedBy: request.auth!.uid,
-                        performedByName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
-                        buyerNameSnapshot: giftCardIssueSnap.get('buyerName') ?? null,
-                        saleId,
-                        reason: null,
-                    });
-                }
             }
 
             if (!summarySnap.exists) {
@@ -883,6 +943,10 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                       giftCardCycleId?: string;
                       giftCardCycleNumber?: number;
                       giftCardForfeitedCents?: number;
+                      giftCardBalanceBeforeCents?: number;
+                      giftCardBalanceAfterCents?: number;
+                      giftCardBalanceRevisionBefore?: number;
+                      giftCardBalanceRevisionAfter?: number;
                   }[]
                 | undefined) ?? []
         ).find((p) => p.method === 'giftcard');
@@ -893,6 +957,20 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
             issueSnap: FirebaseFirestore.DocumentSnapshot;
             appliedCents: number;
             forfeitedCents: number;
+            // Saldo persistente (Fase B, plan §16.18/§16.20): 'balance' es una
+            // venta que ya guardó el snapshot before/after nuevo; 'legacy' es
+            // una venta ANTERIOR a esta fase (consumo TOTAL, sin saldo
+            // persistente) — su restauración sigue EXACTAMENTE como antes.
+            mode: 'legacy' | 'balance';
+            balanceBeforeCents: number;
+            balanceAfterCents: number;
+            // balanceRevision (ajuste sobre Fase B, plan §16.21): el valor que
+            // la venta dejó al terminar (= el actual, ya verificado). La
+            // restauración SIEMPRE avanza desde aquí (`+ 1`), nunca retrocede
+            // a `giftCardBalanceRevisionBefore` — si retrocediera,
+            // `balanceRevision` podría repetir un valor ya usado y dejaría de
+            // ser una garantía.
+            balanceRevisionAtCancel: number;
         } | null = null;
 
         if (giftcardPaymentEntry?.giftCardId && giftcardPaymentEntry.giftCardCycleId) {
@@ -900,30 +978,132 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
             const issueRef = db.doc(`giftCardIssues/${giftcardPaymentEntry.giftCardCycleId}`);
             const [cardSnap, issueSnap] = await Promise.all([tx.get(cardRef), tx.get(issueRef)]);
 
-            const safeToRevert =
-                cardSnap.exists &&
-                cardSnap.get('status') === 'AVAILABLE' &&
-                cardSnap.get('activeCycleId') === null &&
-                cardSnap.get('cycleNumber') === giftcardPaymentEntry.giftCardCycleNumber &&
-                issueSnap.exists &&
-                issueSnap.get('status') === 'redeemed' &&
-                issueSnap.get('saleId') === saleId;
+            const hasBalanceSnapshot =
+                typeof giftcardPaymentEntry.giftCardBalanceBeforeCents === 'number' &&
+                typeof giftcardPaymentEntry.giftCardBalanceAfterCents === 'number' &&
+                typeof giftcardPaymentEntry.giftCardBalanceRevisionBefore === 'number' &&
+                typeof giftcardPaymentEntry.giftCardBalanceRevisionAfter === 'number';
 
-            if (!safeToRevert) {
-                throw new HttpsError(
-                    'failed-precondition',
-                    'No se puede anular: la gift card usada en esta venta ya se reutilizó en otro ' +
-                        'ciclo. Resuélvelo manualmente (contacta al administrador del sistema).',
-                );
+            if (hasBalanceSnapshot) {
+                // Regla ESTRICTA (prompt §12, §14, ampliada por el hallazgo de
+                // balanceRevision): el saldo EFECTIVO actual debe ser
+                // EXACTAMENTE `giftCardBalanceAfterCents` — nunca contra
+                // `balanceBeforeCents` (ese no es el saldo real inmediatamente
+                // después de la propia venta). PERO el saldo solo no basta:
+                // tras una futura recarga puede repetir un valor que ya tuvo
+                // antes, sin que eso signifique "nada pasó". `balanceRevision`
+                // es el chequeo autoritativo — sube en cada operación de
+                // saldo y nunca se repite, así que SOLO si
+                // `currentBalanceRevision === giftCardBalanceRevisionAfter` es
+                // seguro afirmar que nada tocó el ciclo desde esta venta. Si
+                // cualquiera de los dos no coincide, se rechaza completo,
+                // nunca se restaura parcialmente ni se toca stock/resumen.
+                const afterCents = giftcardPaymentEntry.giftCardBalanceAfterCents!;
+                const beforeCents = giftcardPaymentEntry.giftCardBalanceBeforeCents!;
+                const balanceRevisionAfter = giftcardPaymentEntry.giftCardBalanceRevisionAfter!;
+                const wasFullyRedeemed = afterCents === 0;
+
+                const currentEffectiveBalance = cardSnap.exists
+                    ? resolveGiftCardBalance(
+                          {
+                              status: cardSnap.get('status') as string,
+                              amountCents: cardSnap.get('amountCents') as number,
+                              balanceCents: cardSnap.get('balanceCents') as number | undefined,
+                              pendingReplacement: cardSnap.get('pendingReplacement') as boolean | undefined,
+                          },
+                          {
+                              balanceCents: issueSnap.exists
+                                  ? (issueSnap.get('balanceCents') as number | undefined)
+                                  : undefined,
+                          },
+                      )
+                    : null;
+                const currentBalanceRevision = cardSnap.exists
+                    ? resolveGiftCardBalanceRevision(
+                          { balanceRevision: cardSnap.get('balanceRevision') as number | undefined },
+                          {
+                              balanceRevision: issueSnap.exists
+                                  ? (issueSnap.get('balanceRevision') as number | undefined)
+                                  : undefined,
+                          },
+                      )
+                    : null;
+
+                const cycleMatches =
+                    cardSnap.exists && cardSnap.get('cycleNumber') === giftcardPaymentEntry.giftCardCycleNumber;
+                // Redención COMPLETA: el ciclo debe seguir cerrado exactamente
+                // como la venta lo dejó (mismo criterio que la rama legacy).
+                // Redención PARCIAL: el ciclo nunca se cerró — debe seguir
+                // ACTIVE/active, sin reutilizarse.
+                const statusMatches = wasFullyRedeemed
+                    ? cardSnap.exists &&
+                      cardSnap.get('status') === 'AVAILABLE' &&
+                      cardSnap.get('activeCycleId') === null &&
+                      issueSnap.exists &&
+                      issueSnap.get('status') === 'redeemed' &&
+                      issueSnap.get('saleId') === saleId
+                    : cardSnap.exists &&
+                      cardSnap.get('status') === 'ACTIVE' &&
+                      issueSnap.exists &&
+                      issueSnap.get('status') === 'active';
+
+                const safeToRevert =
+                    cycleMatches &&
+                    statusMatches &&
+                    currentEffectiveBalance === afterCents &&
+                    currentBalanceRevision === balanceRevisionAfter;
+
+                if (!safeToRevert) {
+                    throw new HttpsError(
+                        'failed-precondition',
+                        'No se puede anular: el saldo de la gift card usada en esta venta ya cambió por ' +
+                            'una operación posterior. Resuélvelo manualmente (contacta al administrador del sistema).',
+                    );
+                }
+
+                giftCardRevert = {
+                    cardRef,
+                    issueRef,
+                    issueSnap,
+                    appliedCents: giftcardPaymentEntry.amountCents,
+                    forfeitedCents: giftcardPaymentEntry.giftCardForfeitedCents ?? 0,
+                    mode: 'balance',
+                    balanceBeforeCents: beforeCents,
+                    balanceAfterCents: afterCents,
+                    balanceRevisionAtCancel: balanceRevisionAfter,
+                };
+            } else {
+                // LEGACY (venta anterior a la Fase B): comportamiento EXACTO
+                // sin cambios — consumo TOTAL, sin saldo persistente.
+                const safeToRevert =
+                    cardSnap.exists &&
+                    cardSnap.get('status') === 'AVAILABLE' &&
+                    cardSnap.get('activeCycleId') === null &&
+                    cardSnap.get('cycleNumber') === giftcardPaymentEntry.giftCardCycleNumber &&
+                    issueSnap.exists &&
+                    issueSnap.get('status') === 'redeemed' &&
+                    issueSnap.get('saleId') === saleId;
+
+                if (!safeToRevert) {
+                    throw new HttpsError(
+                        'failed-precondition',
+                        'No se puede anular: la gift card usada en esta venta ya se reutilizó en otro ' +
+                            'ciclo. Resuélvelo manualmente (contacta al administrador del sistema).',
+                    );
+                }
+
+                giftCardRevert = {
+                    cardRef,
+                    issueRef,
+                    issueSnap,
+                    appliedCents: giftcardPaymentEntry.amountCents,
+                    forfeitedCents: giftcardPaymentEntry.giftCardForfeitedCents ?? 0,
+                    mode: 'legacy',
+                    balanceBeforeCents: 0,
+                    balanceAfterCents: 0,
+                    balanceRevisionAtCancel: 0, // no aplica en la rama legacy: nunca se escribe `balanceRevision`
+                };
             }
-
-            giftCardRevert = {
-                cardRef,
-                issueRef,
-                issueSnap,
-                appliedCents: giftcardPaymentEntry.amountCents,
-                forfeitedCents: giftcardPaymentEntry.giftCardForfeitedCents ?? 0,
-            };
         }
 
         // Solo escrituras de aquí en adelante.
@@ -951,37 +1131,94 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
             const cycleId = giftCardRevert.issueRef.id;
             const buyerName = (giftCardRevert.issueSnap.get('buyerName') as string | null) ?? null;
 
-            tx.update(giftCardRevert.cardRef, {
-                status: 'ACTIVE',
-                activeCycleId: cycleId,
-                currentBuyerName: buyerName,
-                activatedAt: giftCardRevert.issueSnap.get('activatedAt'),
-                activatedBy: giftCardRevert.issueSnap.get('activatedBy'),
-                activatedByName: giftCardRevert.issueSnap.get('activatedByName'),
-                updatedAt: FieldValue.serverTimestamp(),
-            });
-            tx.update(giftCardRevert.issueRef, {
-                status: 'active',
-                redeemedAt: null,
-                saleId: null,
-                redeemedAmountCents: null,
-                forfeitedAmountCents: null,
-                closedAt: null,
-            });
-            tx.create(db.collection('giftCardMovements').doc(), {
-                giftCardId: giftcardPaymentEntry!.giftCardId,
-                codeSnapshot: giftcardPaymentEntry!.giftCardId,
-                amountCents: giftCardRevert.appliedCents,
-                cycleNumber,
-                cycleId,
-                type: 'ADJUSTMENT' as const,
-                createdAt: FieldValue.serverTimestamp(),
-                performedBy: request.auth!.uid,
-                performedByName: adminName,
-                buyerNameSnapshot: buyerName,
-                saleId,
-                reason: `Reversión por anulación de venta: ${cancelReason}`,
-            });
+            if (giftCardRevert.mode === 'balance') {
+                // Saldo persistente (Fase B, prompt §14): se restaura EXACTO
+                // a `balanceBeforeCents` — nunca `actual + applied` — para
+                // dejar la intención explícita y nunca esconder una
+                // inconsistencia detrás de una suma que "da lo mismo".
+                const wasFullyRedeemed = giftCardRevert.balanceAfterCents === 0;
+                // balanceRevision (ajuste sobre Fase B, plan §16.21): SIEMPRE
+                // avanza (`balanceRevisionAtCancel + 1`), nunca retrocede a un
+                // valor anterior — si retrocediera, podría repetir un número
+                // ya usado y dejaría de servir como testigo fiable.
+                const balanceRevisionAfterRestore = giftCardRevert.balanceRevisionAtCancel + 1;
+                tx.update(giftCardRevert.cardRef, {
+                    status: 'ACTIVE',
+                    balanceCents: giftCardRevert.balanceBeforeCents,
+                    balanceRevision: balanceRevisionAfterRestore,
+                    ...(wasFullyRedeemed
+                        ? {
+                              // Redención COMPLETA: reabre EL MISMO ciclo
+                              // (prompt §15) — nunca crea uno nuevo.
+                              activeCycleId: cycleId,
+                              currentBuyerName: buyerName,
+                              activatedAt: giftCardRevert.issueSnap.get('activatedAt'),
+                              activatedBy: giftCardRevert.issueSnap.get('activatedBy'),
+                              activatedByName: giftCardRevert.issueSnap.get('activatedByName'),
+                          }
+                        : {}),
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+                tx.update(giftCardRevert.issueRef, {
+                    status: 'active',
+                    balanceCents: giftCardRevert.balanceBeforeCents,
+                    balanceRevision: balanceRevisionAfterRestore,
+                    ...(wasFullyRedeemed
+                        ? { redeemedAt: null, saleId: null, redeemedAmountCents: null, forfeitedAmountCents: null, closedAt: null }
+                        : {}),
+                });
+                tx.create(db.collection('giftCardMovements').doc(), {
+                    giftCardId: giftcardPaymentEntry!.giftCardId,
+                    codeSnapshot: giftcardPaymentEntry!.giftCardId,
+                    amountCents: giftCardRevert.appliedCents,
+                    balanceBeforeCents: giftCardRevert.balanceAfterCents, // el saldo justo ANTES de restaurar
+                    balanceAfterCents: giftCardRevert.balanceBeforeCents, // el saldo YA restaurado
+                    balanceRevisionBefore: giftCardRevert.balanceRevisionAtCancel,
+                    balanceRevisionAfter: balanceRevisionAfterRestore,
+                    cycleNumber,
+                    cycleId,
+                    type: 'BALANCE_RESTORED' as const,
+                    createdAt: FieldValue.serverTimestamp(),
+                    performedBy: request.auth!.uid,
+                    performedByName: adminName,
+                    buyerNameSnapshot: buyerName,
+                    saleId,
+                    reason: `Reversión por anulación de venta: ${cancelReason}`,
+                });
+            } else {
+                // LEGACY: comportamiento EXACTO sin cambios.
+                tx.update(giftCardRevert.cardRef, {
+                    status: 'ACTIVE',
+                    activeCycleId: cycleId,
+                    currentBuyerName: buyerName,
+                    activatedAt: giftCardRevert.issueSnap.get('activatedAt'),
+                    activatedBy: giftCardRevert.issueSnap.get('activatedBy'),
+                    activatedByName: giftCardRevert.issueSnap.get('activatedByName'),
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+                tx.update(giftCardRevert.issueRef, {
+                    status: 'active',
+                    redeemedAt: null,
+                    saleId: null,
+                    redeemedAmountCents: null,
+                    forfeitedAmountCents: null,
+                    closedAt: null,
+                });
+                tx.create(db.collection('giftCardMovements').doc(), {
+                    giftCardId: giftcardPaymentEntry!.giftCardId,
+                    codeSnapshot: giftcardPaymentEntry!.giftCardId,
+                    amountCents: giftCardRevert.appliedCents,
+                    cycleNumber,
+                    cycleId,
+                    type: 'ADJUSTMENT' as const,
+                    createdAt: FieldValue.serverTimestamp(),
+                    performedBy: request.auth!.uid,
+                    performedByName: adminName,
+                    buyerNameSnapshot: buyerName,
+                    saleId,
+                    reason: `Reversión por anulación de venta: ${cancelReason}`,
+                });
+            }
         }
 
         if (summarySnap.exists) {

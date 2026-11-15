@@ -251,7 +251,8 @@
                 <div class="p-3 bg-primary-clear-soft rounded-md flex items-center justify-between">
                     <div>
                         <div class="font-mono font-semibold">{{ foundGiftCard()!.cardCode }}</div>
-                        <div class="text-sm text-gray-600">{{ foundGiftCard()!.amountCents | money }}</div>
+                        <div class="text-xs text-gray-500">{{ "app.sales.giftCard.balanceLabel" | translate }}</div>
+                        <div class="text-sm text-gray-600">{{ giftCardBalanceCents() | money }}</div>
                     </div>
                     <button
                         pButton
@@ -263,9 +264,13 @@
                     ></button>
                 </div>
 
-                @if (giftCardForfeitCents() > 0) {
-                <div class="text-xs text-warning">
-                    {{ "app.sales.giftCard.forfeitWarning" | translate: { amount: (giftCardForfeitCents() | money) } }}
+                @if (giftCardWillBeExhausted()) {
+                <div class="text-xs text-gray-500">
+                    {{ "app.sales.giftCard.exhaustedNote" | translate }}
+                </div>
+                } @else if (giftCardRemainingAfterCents() > 0) {
+                <div class="text-xs text-info">
+                    {{ "app.sales.giftCard.remainingOnCardLabel" | translate: { amount: (giftCardRemainingAfterCents() | money) } }}
                 </div>
                 } @if (giftCardDifferenceCents() > 0) {
                 <div class="flex flex-col gap-2">

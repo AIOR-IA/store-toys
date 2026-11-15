@@ -26,7 +26,7 @@ import { MoneyPipe, ProductNamePipe } from '@shared/pipes';
 import { ImageCompressorService, ToastService } from '@core/services';
 import { toCents } from '@core/utils';
 import { formatProductName } from '@shared/utils';
-import { GiftCard, GiftCardIssuePaymentMethod } from '../../../gift-cards/gift-card.model';
+import { GiftCard, GiftCardIssuePaymentMethod, resolveGiftCardBalance } from '../../../gift-cards/gift-card.model';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { Product } from '../../../products/product.model';
 import { ProductsService } from '../../../products/products.service';
@@ -194,21 +194,36 @@ export class SalesPosComponent implements AfterViewInit {
         })),
     );
 
-    /** Monto que realmente se aplica de la tarjeta a esta compra (consumo total, plan §16.2). */
-    readonly giftCardAppliedCents = computed(() => {
+    /**
+     * Saldo persistente EFECTIVO de la tarjeta encontrada (Fase E, plan
+     * §16.18/§16.23) — NUNCA `amountCents` (el monto configurado/nominal es
+     * irrelevante para cobrar: lo único que importa en el mostrador es lo
+     * que realmente queda por gastar). `resolveGiftCardBalance` cubre tanto
+     * una tarjeta ya adoptada (`balanceCents` real) como una legacy
+     * `ACTIVE`/`SUSPENDED` que jamás se redimió (saldo real = `amountCents`).
+     */
+    readonly giftCardBalanceCents = computed(() => {
         const card = this.foundGiftCard();
-        return card ? Math.min(card.amountCents, this.totalCents()) : 0;
+        return card ? resolveGiftCardBalance(card) : 0;
     });
-    /** Sobrante que se pierde si la compra es menor a la denominación de la tarjeta. */
-    readonly giftCardForfeitCents = computed(() => {
+    /** Monto que realmente se aplica de la tarjeta a esta compra — consumo PARCIAL, nunca total (Fase B, plan §16.21). */
+    readonly giftCardAppliedCents = computed(() => Math.min(this.giftCardBalanceCents(), this.totalCents()));
+    /**
+     * Saldo que QUEDA en la tarjeta tras esta compra (saldo persistente: ya
+     * no hay "sobrante perdido" — el remanente sigue disponible en el mismo
+     * ciclo, plan §16.18/§16.21). `0` cuando la compra agota el saldo o lo
+     * supera.
+     */
+    readonly giftCardRemainingAfterCents = computed(() =>
+        Math.max(0, this.giftCardBalanceCents() - this.totalCents()),
+    );
+    /** La compra deja la tarjeta EXACTAMENTE en 0 — caso discreto, distinto de "sobra algo" (plan §16.21: solo en 0 exacto vuelve a AVAILABLE). */
+    readonly giftCardWillBeExhausted = computed(() => {
         const card = this.foundGiftCard();
-        return card ? Math.max(0, card.amountCents - this.totalCents()) : 0;
+        return !!card && this.totalCents() > 0 && this.giftCardBalanceCents() === this.totalCents();
     });
-    /** Diferencia a cobrar con el segundo método si la compra supera la denominación. */
-    readonly giftCardDifferenceCents = computed(() => {
-        const card = this.foundGiftCard();
-        return card ? Math.max(0, this.totalCents() - card.amountCents) : 0;
-    });
+    /** Diferencia a cobrar con el segundo método si la compra supera el saldo disponible de la tarjeta. */
+    readonly giftCardDifferenceCents = computed(() => Math.max(0, this.totalCents() - this.giftCardBalanceCents()));
 
     /**
      * Modo «Efectivo + QR» (Ajuste de Ventas, obs. 2): el vendedor SOLO teclea

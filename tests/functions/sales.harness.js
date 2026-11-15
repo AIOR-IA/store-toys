@@ -94,6 +94,7 @@ const { createSale, cancelSale } = require(path.join(libDir, 'sales.js'));
 const {
     activateGiftCard, cancelGiftCard, suspendGiftCard, reactivateGiftCard,
     registerGiftCard, registerGiftCardBatch, updateGiftCardAmount, replaceGiftCard,
+    resolveGiftCardBalance, resolveGiftCardBalanceRevision, topUpGiftCard,
 } = require(path.join(libDir, 'giftcards.js'));
 
 // ---------- datos base ----------
@@ -108,7 +109,11 @@ function reset() {
     store.set('products/big', { isActive: true, stock: 10, priceCents: 97000, code: 'MP000012', name: 'Grande' });
 }
 function seedGiftCard(amountCents) {
-    store.set('giftCards/GC-1', { status: 'ACTIVE', activeCycleId: 'cy1', cycleNumber: 1, amountCents });
+    // `lastCycleId` (Fase D, plan §16.23): `activateGiftCard` real siempre lo
+    // deja igual a `activeCycleId` al nacer el ciclo — se agrega aquí para
+    // que `replaceGiftCard` pueda recuperar el ciclo original de una tarjeta
+    // seeded-legacy, igual que podría con una activada de verdad.
+    store.set('giftCards/GC-1', { status: 'ACTIVE', activeCycleId: 'cy1', lastCycleId: 'cy1', cycleNumber: 1, amountCents });
     store.set('giftCardIssues/cy1', {
         status: 'active', cycleNumber: 1, buyerName: 'Comprador', activatedAt: 't', activatedBy: 'seller', activatedByName: 'V',
     });
@@ -202,15 +207,18 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
 
         // E. gift cards
         console.log('\nE. Gift Card con rebaja');
+        // Fase B (saldo persistente): tarjeta 1000, total 950 → aplica 950,
+        // sobran 50 EN EL SALDO (ya no se pierden como forfeit) — el ciclo
+        // sigue ACTIVE, nunca AVAILABLE.
         reset(); seedGiftCard(100000);
         r = await outcome(call(createSale, 'seller', { saleId: 'E1', items: [{ productId: 'big', quantity: 1 }], discountCents: 2000,
             payments: [{ method: 'giftcard', amountCents: 95000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }));
         check('tarjeta 1000, total 950 → aplica 950', r.ok && sale('E1').giftCardCents === 95000 && sale('E1').totalCents === 95000, r.message);
         if (r.ok) {
-            check('sobrante 50 (forfeit) en el pago y en el resumen', sale('E1').payments[0].giftCardForfeitedCents === 5000 && summary().giftCardForfeitedCents === 5000);
-            check('tarjeta → AVAILABLE, ciclo redimido', store.get('giftCards/GC-1').status === 'AVAILABLE' && store.get('giftCardIssues/cy1').status === 'redeemed');
+            check('sobrante 50 queda EN EL SALDO (balanceCents=5000), NUNCA forfeit', sale('E1').payments[0].giftCardForfeitedCents === 0 && summary().giftCardForfeitedCents === 0 && store.get('giftCards/GC-1').balanceCents === 5000);
+            check('tarjeta sigue ACTIVE (saldo > 0), ciclo sigue active — NUNCA AVAILABLE con saldo persistente', store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCardIssues/cy1').status === 'active');
             const mv = [...store].filter(([k]) => k.startsWith('giftCardMovements/')).map(([, v]) => [v.type, v.amountCents]);
-            check('movimientos REDEEMED 95000 + FORFEITED 5000', JSON.stringify(mv) === JSON.stringify([['REDEEMED', 95000], ['FORFEITED', 5000]]), JSON.stringify(mv));
+            check('un solo movimiento REDEEMED 95000, SIN FORFEITED', JSON.stringify(mv) === JSON.stringify([['REDEEMED', 95000]]), JSON.stringify(mv));
             check('el resumen NO suma la rebaja como cobro (cash+qr+gift == total)', summary().cashCents + summary().qrCents + summary().giftCardCents === summary().totalCents);
         }
         reset(); seedGiftCard(50000);
@@ -346,10 +354,15 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
         sc.r.ok && sc.d.totalCents === 100000 && sc.d.giftCardCents === 100000 && sc.d.cashCents === 0 && sc.d.qrCents === 0 && sc.d.giftCardForfeitedCents === 0, sc.r.message);
     check('3. entrada nueva = 0 (cash+qr de ventas)', received(sc.d).cash === 0 && received(sc.d).qr === 0);
 
+    // Fase B (saldo persistente): canje MENOR al saldo ya no pierde el
+    // sobrante como forfeit — queda disponible en balanceCents, la tarjeta
+    // sigue ACTIVE (nunca AVAILABLE).
     sc = await scenario('I4', 'p700', [gcPay(70000)]);
-    check('4. canje menor: mercadería 700, GC aplicada 700, sobrante 300 SOLO como dato (nunca en cash/qr)',
-        sc.r.ok && sc.d.totalCents === 70000 && sc.d.giftCardCents === 70000 && sc.d.giftCardForfeitedCents === 30000 && sc.d.cashCents === 0 && sc.d.qrCents === 0, sc.r.message);
-    check('4. entrada nueva = 0 y cash+qr+gc == total (el sobrante no entra en la identidad)', received(sc.d).cash === 0 && received(sc.d).qr === 0 && idsHold(sc.d));
+    check('4. canje PARCIAL: mercadería 700, GC aplicada 700, sobrante 300 EN EL SALDO, nunca forfeit',
+        sc.r.ok && sc.d.totalCents === 70000 && sc.d.giftCardCents === 70000 && sc.d.giftCardForfeitedCents === 0 && sc.d.cashCents === 0 && sc.d.qrCents === 0, sc.r.message);
+    check('4. entrada nueva = 0 y cash+qr+gc == total (el sobrante sigue en el saldo, no en la identidad de cobro)', received(sc.d).cash === 0 && received(sc.d).qr === 0 && idsHold(sc.d));
+    check('4. la tarjeta sigue ACTIVE con balanceCents=30000 (los 300 que sobraron)',
+        store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCards/GC-1').balanceCents === 30000);
 
     sc = await scenario('I5', 'p1080', [gcPay(100000), { method: 'cash', amountCents: 8000 }]);
     check('5. mayor + efectivo: mercadería 1080, GC 1000, efectivo nuevo 80, QR 0',
@@ -366,9 +379,10 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
 
     // (El negocio dijo «rebaja 100», pero el máximo vigente es Bs 30 — createSale rechaza 100. Mismo principio con la rebaja máxima.)
     sc = await scenario('I8', 'p800', [gcPay(77000)], 3000);
-    check('8. subtotal 800, rebaja 30, total 770, GC 1000: aplica 770, sobrante 230, efectivo/QR 0',
-        sc.r.ok && sc.s.totalCents === 77000 && sc.d.giftCardCents === 77000 && sc.d.giftCardForfeitedCents === 23000 && sc.d.cashCents === 0 && sc.d.qrCents === 0 && idsHold(sc.d), sc.r.message);
+    check('8. subtotal 800, rebaja 30, total 770, GC 1000: aplica 770, sobrante 230 EN EL SALDO, nunca forfeit',
+        sc.r.ok && sc.s.totalCents === 77000 && sc.d.giftCardCents === 77000 && sc.d.giftCardForfeitedCents === 0 && sc.d.cashCents === 0 && sc.d.qrCents === 0 && idsHold(sc.d), sc.r.message);
     check('8. entrada nueva = 0', received(sc.d).cash === 0 && received(sc.d).qr === 0);
+    check('8. la tarjeta sigue ACTIVE con balanceCents=23000', store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCards/GC-1').balanceCents === 23000);
     sc = await scenario('I8b', 'p800', [gcPay(70000)], 10000);
     check('8b. rebaja Bs 100 (fuera de la lista) sigue rechazada', !sc.r.ok && !sale('I8b'), sc.r.message);
 
@@ -762,8 +776,12 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     r = await outcome(call(createSale, 'seller', { saleId: 'T-sale', items: [{ productId: 'bear', quantity: 1 }], discountCents: 0,
         payments: [{ method: 'giftcard', amountCents: 7500, giftCardId: TC, giftCardCycleId: cycleTC }] }));
     const dT = summary();
-    check('T9. C se canjea (compra 75, sobrante 925 perdido): AVAILABLE, giftCardCents=7500, giftCardForfeitedCents=92500',
-        r.ok && store.get(`giftCards/${TC}`).status === 'AVAILABLE' && dT.giftCardCents === 7500 && dT.giftCardForfeitedCents === 92500, r.message + JSON.stringify(dT));
+    // Fase B (saldo persistente): compra 75 de un saldo de 1000 ya NO pierde
+    // el sobrante como forfeit/ingreso fantasma — queda en balanceCents, la
+    // tarjeta sigue ACTIVE (nunca ingresa dinero nuevo de todas formas, con
+    // o sin forfeit: eso es lo que esta prueba realmente audita).
+    check('T9. C se canjea (compra 75 de un saldo de 1000): aplica 7500, sobrante 92500 EN EL SALDO, sigue ACTIVE',
+        r.ok && store.get(`giftCards/${TC}`).status === 'ACTIVE' && store.get(`giftCards/${TC}`).balanceCents === 92500 && dT.giftCardCents === 7500 && dT.giftCardForfeitedCents === 0, r.message + JSON.stringify(dT));
     check('T9b. ingreso total histórico de la cadena completa = Bs 1000 (la venta ORIGINAL de A), NO Bs 3000 por los dos reemplazos',
         dT.giftCardsIssuedCents === 100000);
 
@@ -885,10 +903,14 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     check('VE. cadena V1→V2→V3: el tercer eslabón SIGUE mostrando Camila / Lenar Lima',
         r.ok && store.get(`giftCards/${V3}`).currentBuyerName === 'Camila' && store.get(`giftCards/${V3}`).activatedByName === 'Lenar Lima', r.message);
 
-    // F) V3 se canjea y luego se vende de verdad a Roberto, por otra vendedora: buyer/seller YA NO son Camila/Lenar.
+    // F) V3 se canjea (redención EXACTA, agota el saldo — Fase B: una compra
+    // MENOR ya no agota el plástico, así que para que este paso siga
+    // probando lo que probaba siempre —V3 vuelve a AVAILABLE— la compra
+    // cubre exactamente el valor de la tarjeta, 25000) y luego se vende de
+    // verdad a Roberto, por otra vendedora: buyer/seller YA NO son Camila/Lenar.
     const cycleV3 = store.get(`giftCards/${V3}`).activeCycleId;
-    await call(createSale, 'seller', { saleId: 'V-sale', items: [{ productId: 'bear', quantity: 1 }], discountCents: 0,
-        payments: [{ method: 'giftcard', amountCents: 7500, giftCardId: V3, giftCardCycleId: cycleV3 }] });
+    await call(createSale, 'seller', { saleId: 'V-sale', items: [{ productId: 'cheap', quantity: 50 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 25000, giftCardId: V3, giftCardCycleId: cycleV3 }] });
     check('VF1. tras canjearse: AVAILABLE (el plástico vuelve al inventario)', store.get(`giftCards/${V3}`).status === 'AVAILABLE');
     r = await outcome(call(activateGiftCard, 'nuevavendedora', { code: V3, buyerName: 'Roberto', payments: [{ method: 'qr', amountCents: 25000 }] }));
     check('VF2. nueva venta REAL a Roberto: buyer pasa a Roberto, seller a la nueva vendedora (ya NO Camila/Lenar)',
@@ -984,11 +1006,14 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     r = await outcome(call(replaceGiftCard, 'admin', { code: WG, mode: 'existing', targetCode: 'WG-OK' }));
     check('WH. tras los rechazos de arriba, eligiendo una tarjeta SÍ disponible: ÉXITO', r.ok && store.get(`giftCards/${WG}`).replacedByCode === 'WG-OK' && store.get('giftCards/WG-OK').status === 'ACTIVE', r.message);
 
-    // I) la tarjeta reutilizada puede canjearse después exactamente igual que cualquier otra (createSale real):
-    // 'cheap' cuesta Bs 5 (500), bien por debajo del valor heredado (Bs 300 = 30000) — paga el total exacto y pierde el sobrante.
+    // I) la tarjeta reutilizada puede canjearse después exactamente igual que
+    // cualquier otra (createSale real) — redención EXACTA (Fase B: una
+    // compra menor ya no agota el plástico, así que para seguir probando
+    // "vuelve a AVAILABLE" la compra cubre el valor heredado completo, Bs
+    // 300 = 30000, el de la fuente `WG`, NO los 20000 con que se sembró).
     const cycleWI = store.get('giftCards/WG-OK').activeCycleId;
-    r = await outcome(call(createSale, 'seller', { saleId: 'W-sale', items: [{ productId: 'cheap', quantity: 1 }], discountCents: 0,
-        payments: [{ method: 'giftcard', amountCents: 500, giftCardId: 'WG-OK', giftCardCycleId: cycleWI }] }));
+    r = await outcome(call(createSale, 'seller', { saleId: 'W-sale', items: [{ productId: 'cheap', quantity: 60 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 30000, giftCardId: 'WG-OK', giftCardCycleId: cycleWI }] }));
     check('WI. la tarjeta reutilizada se canjea con normalidad (vuelve a AVAILABLE)', r.ok && store.get('giftCards/WG-OK').status === 'AVAILABLE', r.message);
 
     // G6) fuente no CANCELLED / sin pendingReplacement: mismos rechazos que el modo "generate" (regla compartida) — escenario aparte, reset propio.
@@ -1005,8 +1030,12 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     const WJTgt = rg.value.cardCode;
     await call(activateGiftCard, 'seller', { code: WJTgt, buyerName: 'Roberto', payments: [{ method: 'qr', amountCents: 40000 }] });
     const cycleWJold = store.get(`giftCards/${WJTgt}`).activeCycleId;
-    await call(createSale, 'seller', { saleId: 'WJ-sale', items: [{ productId: 'cheap', quantity: 1 }], discountCents: 0,
-        payments: [{ method: 'giftcard', amountCents: 500, giftCardId: WJTgt, giftCardCycleId: cycleWJold }] }); // canjeada (parcial, sobrante perdido) → AVAILABLE
+    // Redención EXACTA (Fase B: una compra menor ya no agota el plástico —
+    // la compra cubre el valor completo de la tarjeta, 40000, para seguir
+    // probando "vuelve a AVAILABLE" sin que la semántica de consumo parcial
+    // interfiera con lo que esta prueba realmente audita, el ciclo/issue).
+    await call(createSale, 'seller', { saleId: 'WJ-sale', items: [{ productId: 'cheap', quantity: 80 }], discountCents: 0,
+        payments: [{ method: 'giftcard', amountCents: 40000, giftCardId: WJTgt, giftCardCycleId: cycleWJold }] }); // canjeada EXACTA → AVAILABLE
     check('WJ1. WJTgt de vuelta AVAILABLE tras canjearse (ciclo 1 cerrado)', store.get(`giftCards/${WJTgt}`).status === 'AVAILABLE' && store.get(`giftCards/${WJTgt}`).cycleNumber === 1);
     const WJSrc = await makeEligibleSource(90000);
     r = await outcome(call(replaceGiftCard, 'admin', { code: WJSrc, mode: 'existing', targetCode: WJTgt }));
@@ -1244,6 +1273,721 @@ const bear2 = [{ productId: 'bear', quantity: 2 }];
     await call(createSale, 'seller', { saleId: 'Y-T', items: [{ kind: 'PRODUCT', productId: 'bear', quantity: 1 }], payments: [{ method: 'cash', amountCents: 7500 }] });
     check('Y-T. resumen nuevo (solo Product) ya trae "extras": {} vacío, por simetría con "products"',
         summary().extras !== undefined && Object.keys(summary().extras).length === 0, JSON.stringify(summary()));
+
+    console.log('\nZ. Fase A — modelo balanceCents (saldo persistente, plan §16.18)');
+
+    // Z1/Z5 (puntos 1, 6). registerGiftCard (manual): AVAILABLE + balanceCents = 0.
+    reset();
+    r = await outcome(call(registerGiftCard, 'admin', { code: 'ZC-1', amountCents: 25000 }));
+    check('Z1. registerGiftCard: ÉXITO', r.ok, r.message);
+    check('Z1/Z5. nace AVAILABLE con balanceCents = 0 (amountCents intacto en 25000)',
+        r.ok && store.get('giftCards/ZC-1').status === 'AVAILABLE' &&
+        store.get('giftCards/ZC-1').balanceCents === 0 && store.get('giftCards/ZC-1').amountCents === 25000,
+        JSON.stringify(store.get('giftCards/ZC-1')));
+
+    // Z2. registerGiftCardBatch (manual, 2 códigos): ambas balanceCents = 0.
+    reset();
+    r = await outcome(call(registerGiftCardBatch, 'admin', { amountCents: 10000, codes: ['ZC-B1', 'ZC-B2'] }));
+    check('Z2. registerGiftCardBatch: ambas tarjetas del lote nacen con balanceCents = 0',
+        r.ok && store.get('giftCards/ZC-B1').balanceCents === 0 && store.get('giftCards/ZC-B2').balanceCents === 0,
+        JSON.stringify(r));
+
+    // Z3/Z4/Z6/Z7 (puntos 3, 4, 7, 8). activateGiftCard: ACTIVE + balanceCents = amountCents,
+    // tanto en giftCards como en el giftCardIssues nuevo — y amountCents NUNCA se toca.
+    reset();
+    await call(registerGiftCard, 'admin', { code: 'ZC-2', amountCents: 25000 });
+    r = await outcome(call(activateGiftCard, 'seller', { code: 'ZC-2', payments: [{ method: 'cash', amountCents: 25000 }] }));
+    check('Z3. activateGiftCard: ÉXITO', r.ok, r.message);
+    const zCard = store.get('giftCards/ZC-2');
+    const zIssue = r.ok ? store.get(`giftCardIssues/${r.value.cycleId}`) : null;
+    check('Z3/Z7. giftCards/ZC-2: status ACTIVE, balanceCents = 25000, amountCents SIGUE en 25000 (intacto)',
+        r.ok && zCard.status === 'ACTIVE' && zCard.balanceCents === 25000 && zCard.amountCents === 25000,
+        JSON.stringify(zCard));
+    check('Z4/Z6. el issue nuevo nace con amountCents = 25000 (snapshot inicial) y balanceCents = 25000 (igual al nacer)',
+        r.ok && zIssue && zIssue.amountCents === 25000 && zIssue.balanceCents === 25000,
+        JSON.stringify(zIssue));
+
+    // Z8 (punto 9). replaceGiftCard NO cambia de comportamiento en esta fase: el flujo
+    // completo (cancelar con ciclo abierto → reemplazar) sigue funcionando exactamente igual
+    // que antes de este ajuste — esta fase no le agrega ni le exige balanceCents.
+    reset();
+    await call(registerGiftCard, 'admin', { code: 'ZC-3', amountCents: 25000 });
+    await call(activateGiftCard, 'seller', { code: 'ZC-3', payments: [{ method: 'cash', amountCents: 25000 }] });
+    await call(cancelGiftCard, 'admin', { code: 'ZC-3', reason: 'dañada' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'ZC-3' }));
+    check('Z8. replaceGiftCard tras cancelar con ciclo abierto: ÉXITO, mismo comportamiento de siempre (ingreso 0, monto transferido)',
+        r.ok && r.value.amountCents === 25000 && store.get(`giftCards/${r.value.newCardCode}`).status === 'ACTIVE' &&
+        store.get(`giftCards/${r.value.newCardCode}`).amountCents === 25000,
+        JSON.stringify(r));
+
+    console.log('\nAA. resolveGiftCardBalance — saldo efectivo legacy, SIN backfill masivo (plan §16.18)');
+
+    check('AA1. AVAILABLE legacy sin balanceCents: efectivo 0',
+        resolveGiftCardBalance({ status: 'AVAILABLE', amountCents: 10000 }) === 0);
+    check('AA2. ACTIVE legacy sin balanceCents (caso real GC000002/GC000003): efectivo = amountCents, NUNCA 0',
+        resolveGiftCardBalance({ status: 'ACTIVE', amountCents: 25000 }) === 25000);
+    check('AA3. SUSPENDED legacy sin balanceCents: efectivo = amountCents (suspender nunca pierde saldo)',
+        resolveGiftCardBalance({ status: 'SUSPENDED', amountCents: 50000 }) === 50000);
+    check('AA4. CANCELLED legacy CON pendingReplacement: efectivo = amountCents (valor pagado aún sin transferir)',
+        resolveGiftCardBalance({ status: 'CANCELLED', amountCents: 25000, pendingReplacement: true }) === 25000);
+    check('AA5. CANCELLED legacy SIN pendingReplacement: efectivo 0',
+        resolveGiftCardBalance({ status: 'CANCELLED', amountCents: 10000, pendingReplacement: false }) === 0);
+    check('AA6. balanceCents YA PERSISTIDO (incluido 0 real) siempre gana sobre el status, nunca se recalcula',
+        resolveGiftCardBalance({ status: 'ACTIVE', amountCents: 25000, balanceCents: 0 }) === 0 &&
+        resolveGiftCardBalance({ status: 'ACTIVE', amountCents: 25000, balanceCents: 7000 }) === 7000);
+    check('AA7. sin balanceCents en la card pero SÍ en el issue: usa el del issue',
+        resolveGiftCardBalance({ status: 'ACTIVE', amountCents: 25000 }, { balanceCents: 12000 }) === 12000);
+
+    console.log('\nFASE B — consumo parcial + restauración en cancelSale (plan §16.18/§16.20)');
+    const movementsOfType = (type) =>
+        [...store].filter(([k, v]) => k.startsWith('giftCardMovements/') && v.type === type).map(([, v]) => v);
+
+    // B1/B2/B5/B7/B8/B17/B18. Legacy ACTIVE sin balanceCents (como GC000002/
+    // GC000003 reales): balance 100 - compra 30 = 70. Adopta sola, sin backfill.
+    reset();
+    seedGiftCard(10000); // GC-1, legacy: SIN balanceCents
+    r = await outcome(call(createSale, 'seller', {
+        saleId: 'B2',
+        items: [{ productId: 'cheap', quantity: 6 }], // Bs 30 = 3000 centavos
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    }));
+    check('B1/B2. legacy ACTIVE sin balanceCents: adopta sola (effectiveBalance=amountCents) y aplica 3000 de 10000 — ÉXITO', r.ok, r.message);
+    check('B2. card: ACTIVE, balanceCents=7000 (10000-3000)',
+        r.ok && store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCards/GC-1').balanceCents === 7000,
+        JSON.stringify(store.get('giftCards/GC-1')));
+    check('B2. issue: active, balanceCents=7000 — NO se cierra, NO card a AVAILABLE, NO nuevo ciclo',
+        r.ok && store.get('giftCardIssues/cy1').status === 'active' && store.get('giftCardIssues/cy1').balanceCents === 7000,
+        JSON.stringify(store.get('giftCardIssues/cy1')));
+    check('B8. invariante card.balanceCents === issue.balanceCents tras la redención parcial',
+        r.ok && store.get('giftCards/GC-1').balanceCents === store.get('giftCardIssues/cy1').balanceCents);
+    check('B5. redención parcial: giftCardForfeitedCents del pago = 0, NINGÚN movimiento FORFEITED',
+        r.ok && sale('B2').payments[0].giftCardForfeitedCents === 0 && movementsOfType('FORFEITED').length === 0);
+    check('B7. movement REDEEMED con amountCents/before/after correctos (3000 / 10000 / 7000)',
+        r.ok && movementsOfType('REDEEMED').some((m) => m.amountCents === 3000 && m.balanceBeforeCents === 10000 && m.balanceAfterCents === 7000),
+        JSON.stringify(movementsOfType('REDEEMED')));
+    check('B17. dailySummaries.giftCardCents = 3000 (lo REALMENTE aplicado, no el monto nominal)',
+        r.ok && summary().giftCardCents === 3000, JSON.stringify(summary()));
+    check('B18. dailySummaries.giftCardForfeitedCents NO aumenta (sigue 0)',
+        r.ok && summary().giftCardForfeitedCents === 0);
+
+    // B9/B10. Cancelar la redención PARCIAL de arriba: restaura EXACTO a 100 (nunca 70+30 "por las dudas").
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B2', reason: 'prueba B9' }));
+    check('B9. cancelSale de la redención parcial: ÉXITO', r.ok, r.message);
+    check('B9. card.balanceCents restaurado a 10000, status sigue ACTIVE, mismo ciclo',
+        r.ok && store.get('giftCards/GC-1').balanceCents === 10000 && store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCards/GC-1').activeCycleId === 'cy1',
+        JSON.stringify(store.get('giftCards/GC-1')));
+    check('B9. issue.balanceCents restaurado a 10000, status sigue active',
+        r.ok && store.get('giftCardIssues/cy1').balanceCents === 10000 && store.get('giftCardIssues/cy1').status === 'active');
+    check('B10. movement BALANCE_RESTORED: amountCents=3000 (lo aplicado), before=7000 (antes de restaurar), after=10000 (ya restaurado)',
+        r.ok && movementsOfType('BALANCE_RESTORED').some((m) => m.amountCents === 3000 && m.balanceBeforeCents === 7000 && m.balanceAfterCents === 10000),
+        JSON.stringify(movementsOfType('BALANCE_RESTORED')));
+
+    // B3/B6. Redención EXACTA (100 = 100): after=0, card AVAILABLE, issue redeemed.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(createSale, 'seller', {
+        saleId: 'B3',
+        items: [{ productId: 'cheap', quantity: 20 }], // Bs 100 = 10000 centavos
+        payments: [{ method: 'giftcard', amountCents: 10000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    }));
+    check('B3. redención exacta: ÉXITO', r.ok, r.message);
+    check('B3. card AVAILABLE, balanceCents=0, activeCycleId=null',
+        r.ok && store.get('giftCards/GC-1').status === 'AVAILABLE' && store.get('giftCards/GC-1').balanceCents === 0 && store.get('giftCards/GC-1').activeCycleId === null,
+        JSON.stringify(store.get('giftCards/GC-1')));
+    check('B3. issue redeemed, balanceCents=0, saleId=B3',
+        r.ok && store.get('giftCardIssues/cy1').status === 'redeemed' && store.get('giftCardIssues/cy1').balanceCents === 0 && store.get('giftCardIssues/cy1').saleId === 'B3');
+    check('B6. redención completa exacta: SIN FORFEITED (ni movimiento ni giftCardForfeitedCents)',
+        r.ok && movementsOfType('FORFEITED').length === 0 && sale('B3').payments[0].giftCardForfeitedCents === 0);
+
+    // B11. Cancelar la redención COMPLETA de arriba: reabre el MISMO issue/ciclo, nunca uno nuevo.
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B3', reason: 'prueba B11' }));
+    check('B11. cancelSale de la redención completa: ÉXITO', r.ok, r.message);
+    check('B11. card vuelve a ACTIVE, balanceCents=10000, MISMO activeCycleId (cy1)',
+        r.ok && store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCards/GC-1').balanceCents === 10000 && store.get('giftCards/GC-1').activeCycleId === 'cy1',
+        JSON.stringify(store.get('giftCards/GC-1')));
+    check('B11. issue vuelve a active, balanceCents=10000, saleId limpio (null)',
+        r.ok && store.get('giftCardIssues/cy1').status === 'active' && store.get('giftCardIssues/cy1').balanceCents === 10000 && store.get('giftCardIssues/cy1').saleId === null);
+
+    // B14. cancelSale DOBLE sobre la misma venta: la segunda falla (idempotencia ya existente, sin regresión con balance).
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B3', reason: 'segundo intento' }));
+    check('B14. segunda cancelación de B3: RECHAZADA (ya estaba cancelada)', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    // B4/B15/B16. Saldo menor al total: Gift Card cubre 100, complemento cash o QR cubre el resto.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(createSale, 'seller', {
+        saleId: 'B4cash',
+        items: [{ productId: 'cheap', quantity: 30 }], // Bs 150 = 15000
+        payments: [
+            { method: 'giftcard', amountCents: 10000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' },
+            { method: 'cash', amountCents: 5000 },
+        ],
+    }));
+    check('B4. Gift Card 100 + complemento cash 50 (total 150): ÉXITO, giftCardCents=10000, cashCents=5000',
+        r.ok && sale('B4cash').giftCardCents === 10000 && sale('B4cash').cashCents === 5000, JSON.stringify(r.ok ? sale('B4cash') : r));
+    check('B4. tras agotar el saldo con complemento: card AVAILABLE/balance 0 (igual que redención exacta)',
+        r.ok && store.get('giftCards/GC-1').status === 'AVAILABLE' && store.get('giftCards/GC-1').balanceCents === 0);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B4cash', reason: 'prueba B15' }));
+    check('B15. cancelar venta Gift Card+Cash: ÉXITO, el complemento CASH se revierte en el resumen (cashCents vuelve a 0)',
+        r.ok && summary().cashCents === 0, JSON.stringify(summary()));
+
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(createSale, 'seller', {
+        saleId: 'B4qr',
+        items: [{ productId: 'cheap', quantity: 30 }],
+        payments: [
+            { method: 'giftcard', amountCents: 10000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' },
+            { method: 'qr', amountCents: 5000 },
+        ],
+    }));
+    check('B4 (QR). Gift Card 100 + complemento QR 50: ÉXITO', r.ok, r.message);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B4qr', reason: 'prueba B16' }));
+    check('B16. cancelar venta Gift Card+QR: ÉXITO, el complemento QR se revierte en el resumen (qrCents vuelve a 0)',
+        r.ok && summary().qrCents === 0, JSON.stringify(summary()));
+
+    // B12. Operación posterior PARCIAL: 100 → venta A → 70, 70 → venta B → 20. Cancelar A: RECHAZADO (20 !== 70).
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', {
+        saleId: 'B12-A',
+        items: [{ productId: 'cheap', quantity: 6 }], // Bs 30
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    await call(createSale, 'seller', {
+        saleId: 'B12-B',
+        items: [{ productId: 'cheap', quantity: 10 }], // Bs 50
+        payments: [{ method: 'giftcard', amountCents: 5000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    check('B12. tras A (100→70) y B (70→20): balance actual = 20', store.get('giftCards/GC-1').balanceCents === 2000);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B12-A', reason: 'intento tras operación posterior' }));
+    check('B12. cancelar la venta A (balanceAfter=70) con el balance actual en 20: RECHAZADO COMPLETO',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('B12. el rechazo NO tocó el balance actual (sigue en 20, intacto)', store.get('giftCards/GC-1').balanceCents === 2000);
+
+    // B13. Redención completa + NUEVA activación (nuevo ciclo) antes de cancelar la venta original: RECHAZADO.
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', {
+        saleId: 'B13',
+        items: [{ productId: 'cheap', quantity: 20 }], // Bs 100, redención exacta
+        payments: [{ method: 'giftcard', amountCents: 10000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    await call(activateGiftCard, 'seller', { code: 'GC-1', payments: [{ method: 'cash', amountCents: 10000 }] });
+    check('B13. la tarjeta ya se volvió a vender (nuevo ciclo, cycleNumber avanzó)', store.get('giftCards/GC-1').cycleNumber === 2);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B13', reason: 'intento sobre ciclo reemplazado' }));
+    check('B13. cancelar la venta del ciclo ANTERIOR tras la nueva activación: RECHAZADO COMPLETO, nunca toca el ciclo nuevo',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('B13. el ciclo nuevo (cycleNumber 2) sigue intacto', store.get('giftCards/GC-1').cycleNumber === 2);
+
+    // B19. Doble gasto: el servidor SIEMPRE recalcula desde el saldo real — un
+    // segundo intento que asume el saldo viejo (stale read) se rechaza, nunca
+    // gasta dos veces el mismo dinero.
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', {
+        saleId: 'B19-first',
+        items: [{ productId: 'cheap', quantity: 12 }], // Bs 60
+        payments: [{ method: 'giftcard', amountCents: 6000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    check('B19. tras la primera venta: balance 100 -> 40', store.get('giftCards/GC-1').balanceCents === 4000);
+    r = await outcome(call(createSale, 'seller', {
+        saleId: 'B19-second',
+        items: [{ productId: 'cheap', quantity: 12 }], // Bs 60, asumiendo (stale) que el saldo seguía en 100
+        payments: [{ method: 'giftcard', amountCents: 6000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    }));
+    check('B19. segundo intento con el saldo ya consumido por el primero: RECHAZADO (el servidor recalculó 40, no 60)',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('B19. el balance real NO se gastó dos veces: sigue en 40', store.get('giftCards/GC-1').balanceCents === 4000);
+
+    // B20. Backward compatibility: una venta LEGACY (anterior a la Fase B, sin
+    // giftCardBalanceBeforeCents/AfterCents) sigue pudiendo cancelarse por la
+    // rama legacy — EXACTAMENTE el comportamiento de siempre, sin exigir balance.
+    reset();
+    store.set('giftCards/LEGACY-GC', { status: 'AVAILABLE', activeCycleId: null, cycleNumber: 1, amountCents: 20000 });
+    store.set('giftCardIssues/legacy-cy1', {
+        status: 'redeemed', cycleNumber: 1, buyerName: 'Legacy Buyer', activatedAt: 't', activatedBy: 'seller',
+        activatedByName: 'V', saleId: 'B20', redeemedAmountCents: 20000, forfeitedAmountCents: 0, closedAt: 't',
+    });
+    store.set('sales/B20', {
+        status: 'completed', dateKey: todayKey, totalCents: 20000, cashCents: 0, qrCents: 0, discountCents: 0,
+        items: [{ kind: 'PRODUCT', productId: 'bear', quantity: 1, subtotalCents: 20000 }],
+        payments: [{
+            method: 'giftcard', amountCents: 20000, giftCardId: 'LEGACY-GC', giftCardCycleId: 'legacy-cy1',
+            giftCardCycleNumber: 1, giftCardForfeitedCents: 0, // SIN giftCardBalanceBeforeCents/AfterCents: rama legacy
+        }],
+    });
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'B20', reason: 'prueba B20 legacy' }));
+    check('B20. cancelSale de una venta LEGACY (sin snapshot de balance): ÉXITO por la rama legacy, sin exigir balanceCents', r.ok, r.message);
+    check('B20. card LEGACY-GC vuelve a ACTIVE, mismo ciclo (legacy-cy1), sin romper por falta de balanceCents',
+        r.ok && store.get('giftCards/LEGACY-GC').status === 'ACTIVE' && store.get('giftCards/LEGACY-GC').activeCycleId === 'legacy-cy1',
+        JSON.stringify(store.get('giftCards/LEGACY-GC')));
+    check('B20. movement de reversión LEGACY sigue siendo ADJUSTMENT (nunca BALANCE_RESTORED, es la rama vieja)',
+        r.ok && movementsOfType('ADJUSTMENT').some((m) => m.giftCardId === 'LEGACY-GC'));
+
+    console.log('\nC. Corrección: contador balanceRevision — el saldo solo NO basta (plan §16.21)');
+    // `topUpGiftCard` todavía no existe (Fase C): se simula la recarga
+    // mutando el store directamente, EXACTAMENTE como esa Function futura
+    // tendría que hacerlo — balance y balanceRevision suben juntos, misma invariante.
+    const simulateTopUp = (cardCode, amountCents) => {
+        const card = store.get(`giftCards/${cardCode}`);
+        const issueId = card.activeCycleId;
+        const issue = store.get(`giftCardIssues/${issueId}`);
+        const newBalanceRevision = (card.balanceRevision ?? 0) + 1;
+        store.set(`giftCards/${cardCode}`, { ...card, balanceCents: card.balanceCents + amountCents, balanceRevision: newBalanceRevision });
+        store.set(`giftCardIssues/${issueId}`, { ...issue, balanceCents: issue.balanceCents + amountCents, balanceRevision: newBalanceRevision });
+    };
+
+    // C1. Reproduce EXACTO el caso real: 100→A→70, recarga 70→100, 100→C→70.
+    // Con saldo solo (antes de esta corrección) esto pasaba de largo porque
+    // el saldo "coincidía" con el de A. Con `balanceRevision`, se rechaza.
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', {
+        saleId: 'C-A',
+        items: [{ productId: 'cheap', quantity: 6 }], // Bs 30: 100 -> 70
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    check('C1a. tras A: balance 70, balanceRevision 1', store.get('giftCards/GC-1').balanceCents === 7000 && store.get('giftCards/GC-1').balanceRevision === 1);
+    simulateTopUp('GC-1', 3000); // 70 -> 100 (recarga simulada)
+    check('C1b. tras la recarga simulada: balance 100 (coincide con el ORIGINAL), balanceRevision 2', store.get('giftCards/GC-1').balanceCents === 10000 && store.get('giftCards/GC-1').balanceRevision === 2);
+    await call(createSale, 'seller', {
+        saleId: 'C-C',
+        items: [{ productId: 'cheap', quantity: 6 }], // Bs 30: 100 -> 70 (coincide con el after de A)
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    check('C1c. tras C: balance 70 (coincide numéricamente con A.after), balanceRevision 3', store.get('giftCards/GC-1').balanceCents === 7000 && store.get('giftCards/GC-1').balanceRevision === 3);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'C-A', reason: 'intento tras recarga + otra venta' }));
+    check('C1. cancelar A: el SALDO coincide por casualidad (70=70) pero balanceRevision no (3≠1) — RECHAZADO',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('C1. el rechazo no tocó nada: balance sigue en 70, balanceRevision sigue en 3', store.get('giftCards/GC-1').balanceCents === 7000 && store.get('giftCards/GC-1').balanceRevision === 3);
+
+    // C2. La venta legítima más reciente (C) SÍ se puede cancelar con normalidad.
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'C-C', reason: 'cancelación legítima' }));
+    check('C2. cancelar C (la más reciente, balanceRevision coincide 3=3): ÉXITO', r.ok, r.message);
+    check('C2. balance restaurado a 100, balanceRevision avanza a 4 (NUNCA retrocede a 2)', store.get('giftCards/GC-1').balanceCents === 10000 && store.get('giftCards/GC-1').balanceRevision === 4);
+
+    // C3. Endurecimiento esperado: cancelar una venta ANTERIOR después de ya
+    // haber cancelado una POSTERIOR sobre el mismo ciclo. Con saldo solo esto
+    // "daba la cuenta exacta" por aritmética y se permitía — con
+    // `balanceRevision` se RECHAZA, que es el comportamiento conservador
+    // correcto (plan §16.7: cualquier otra operación sobre el ciclo,
+    // incluida una cancelación, bloquea tocar una anterior).
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', {
+        saleId: 'C3-A',
+        items: [{ productId: 'cheap', quantity: 6 }], // 100 -> 70
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    await call(createSale, 'seller', {
+        saleId: 'C3-B',
+        items: [{ productId: 'cheap', quantity: 6 }], // 70 -> 40
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    });
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'C3-B', reason: 'cancelar la más nueva primero' }));
+    check('C3a. cancelar B (la más nueva) primero: ÉXITO, balance vuelve a 70', r.ok && store.get('giftCards/GC-1').balanceCents === 7000, r.message);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'C3-A', reason: 'cancelar la anterior después' }));
+    check('C3b. cancelar A DESPUÉS de haber cancelado B: RECHAZADO (balanceRevision ya avanzó por la cancelación de B, aunque el saldo "cuadraría" matemáticamente)',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    console.log('\nD. Fase C — topUpGiftCard: recarga de saldo (plan §16.22)');
+
+    // C1. ACTIVE legacy sin balance (caso real GC000002/GC000003): 250 -> topUp 100 -> 350.
+    reset();
+    seedGiftCard(25000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c1', code: 'GC-1', payments: [{ method: 'cash', amountCents: 10000 }] }));
+    check('C1. topUpGiftCard sobre ACTIVE legacy: ÉXITO', r.ok, r.message);
+    check('C1. balance 25000 -> 35000, balanceRevision 0 -> 1 (adopta sola, sin backfill)',
+        r.ok && store.get('giftCards/GC-1').balanceCents === 35000 && store.get('giftCards/GC-1').balanceRevision === 1,
+        JSON.stringify(store.get('giftCards/GC-1')));
+
+    // C2. ACTIVE ya ADOPTADA (balanceCents/balanceRevision ya persistidos, distintos de amountCents): 20 -> topUp 100 -> 120.
+    reset();
+    store.set('giftCards/GC-1', { status: 'ACTIVE', activeCycleId: 'cy1', cycleNumber: 1, amountCents: 100000, balanceCents: 2000, balanceRevision: 3 });
+    store.set('giftCardIssues/cy1', { status: 'active', cycleNumber: 1, balanceCents: 2000, balanceRevision: 3, buyerName: 'Comprador', activatedAt: 't', activatedBy: 'seller', activatedByName: 'V' });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c2', code: 'GC-1', payments: [{ method: 'cash', amountCents: 10000 }] }));
+    check('C2. topUpGiftCard sobre ACTIVE ya adoptada: ÉXITO', r.ok, r.message);
+    check('C2. balance 2000 -> 12000, balanceRevision 3 -> 4 (nunca a ciegas desde 0)',
+        r.ok && store.get('giftCards/GC-1').balanceCents === 12000 && store.get('giftCards/GC-1').balanceRevision === 4,
+        JSON.stringify(store.get('giftCards/GC-1')));
+    check('C3. amountCents permanece intacto (100000, el nominal — nunca se toca)', store.get('giftCards/GC-1').amountCents === 100000);
+    check('C4. issue.balanceCents === card.balanceCents (12000 == 12000)',
+        store.get('giftCardIssues/cy1').balanceCents === store.get('giftCards/GC-1').balanceCents);
+    check('C5. issue.balanceRevision === card.balanceRevision (4 == 4)',
+        store.get('giftCardIssues/cy1').balanceRevision === store.get('giftCards/GC-1').balanceRevision);
+    check('C6. balanceRevision incrementó EXACTAMENTE +1 (3 -> 4, no +2 ni +0)', store.get('giftCards/GC-1').balanceRevision === 4);
+
+    const topUpMovements = () => [...store].filter(([k, v]) => k.startsWith('giftCardMovements/') && v.type === 'TOP_UP').map(([, v]) => v);
+    check('C7. movement TOP_UP guarda amountCents/before/after/revisions correctos (10000/2000/12000/3/4)',
+        topUpMovements().some((m) => m.amountCents === 10000 && m.balanceBeforeCents === 2000 && m.balanceAfterCents === 12000 && m.balanceRevisionBefore === 3 && m.balanceRevisionAfter === 4),
+        JSON.stringify(topUpMovements()));
+
+    // C8/C9/C10. cash / QR / cash+QR — mismo modelo de pago que activateGiftCard.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c8', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('C8. recarga solo CASH: ÉXITO, balance 100 -> 150', r.ok && store.get('giftCards/GC-1').balanceCents === 15000, r.message);
+
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c9', code: 'GC-1', payments: [{ method: 'qr', amountCents: 5000 }] }));
+    check('C9. recarga solo QR: ÉXITO, balance 100 -> 150', r.ok && store.get('giftCards/GC-1').balanceCents === 15000, r.message);
+
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c10', code: 'GC-1', payments: [{ method: 'cash', amountCents: 3000 }, { method: 'qr', amountCents: 2000 }] }));
+    check('C10. recarga CASH + QR: ÉXITO, balance 100 -> 150 (30 cash + 20 qr)', r.ok && store.get('giftCards/GC-1').balanceCents === 15000, r.message);
+
+    // C11. Pago inconsistente — método no soportado (mismo validador que
+    // activateGiftCard: ISSUE_PAYMENT_METHODS = ['cash', 'qr'], 'giftcard'
+    // no es válido para pagar una recarga). Nota: dos pagos del MISMO método
+    // (ej. cash + cash) NO se rechazan — `validateIssuePayments` nunca lo
+    // prohibió ni para `activateGiftCard`; reutilizarlo tal cual (sin
+    // inventar una regla nueva) es exactamente lo que se pidió.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c11', code: 'GC-1', payments: [{ method: 'giftcard', amountCents: 5000 }] }));
+    check('C11. método no soportado ("giftcard") para pagar una recarga: RECHAZADO', !r.ok && r.code === 'invalid-argument', JSON.stringify(r));
+
+    // C12. Monto <= 0 -> rechazo.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c12', code: 'GC-1', payments: [{ method: 'cash', amountCents: 0 }] }));
+    check('C12. monto 0: RECHAZADO', !r.ok && r.code === 'invalid-argument', JSON.stringify(r));
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c12b', code: 'GC-1', payments: [{ method: 'cash', amountCents: -500 }] }));
+    check('C12b. monto negativo: RECHAZADO', !r.ok && r.code === 'invalid-argument', JSON.stringify(r));
+
+    // C13/C14/C15. Solo ACTIVE puede recargarse.
+    reset();
+    store.set('giftCards/GC-AVAIL', { status: 'AVAILABLE', activeCycleId: null, cycleNumber: 0, amountCents: 10000 });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c13', code: 'GC-AVAIL', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('C13. AVAILABLE: RECHAZADO (se vende/activa, no se recarga)', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    store.set('giftCards/GC-SUSP', { status: 'SUSPENDED', activeCycleId: 'cy-susp', cycleNumber: 1, amountCents: 10000, balanceCents: 7000, balanceRevision: 1 });
+    store.set('giftCardIssues/cy-susp', { status: 'suspended', cycleNumber: 1, balanceCents: 7000, balanceRevision: 1 });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c14', code: 'GC-SUSP', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('C14. SUSPENDED: RECHAZADO (debe reactivarse primero)', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    store.set('giftCards/GC-CANC', { status: 'CANCELLED', activeCycleId: null, cycleNumber: 1, amountCents: 10000, pendingReplacement: true });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c15', code: 'GC-CANC', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('C15. CANCELLED: RECHAZADO (terminal, nunca se recarga)', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    // C16/C17. Permisos: admin + vendedor SÍ, cualquier otro rol NO.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'admin', { topUpId: 'c16a', code: 'GC-1', payments: [{ method: 'cash', amountCents: 1000 }] }));
+    check('C16a. ADMIN puede recargar', r.ok, r.message);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c16b', code: 'GC-1', payments: [{ method: 'cash', amountCents: 1000 }] }));
+    check('C16b. SELLER (rol "user") puede recargar', r.ok, r.message);
+    store.set('users/outsider', { isActive: true, role: 'guest' });
+    r = await outcome(call(topUpGiftCard, 'outsider', { topUpId: 'c17', code: 'GC-1', payments: [{ method: 'cash', amountCents: 1000 }] }));
+    check('C17. un rol no autorizado (ni admin ni user): RECHAZADO', !r.ok && r.code === 'permission-denied', JSON.stringify(r));
+
+    // C18. Secuencia topUp + redemption (en ambos órdenes): cada operación lee
+    // el saldo FRESCO dentro de su propia transacción, así que el resultado
+    // final es correcto sin importar el orden — es la propiedad que
+    // garantiza que ninguna actualización se "pierda". El mock de este
+    // harness ejecuta todo secuencialmente (nunca en paralelo real): esto
+    // demuestra la propiedad de fondo (lectura fresca -> resultado correcto),
+    // no la concurrencia real de Firestore (eso lo garantiza Firestore, no
+    // el código de la aplicación).
+    reset();
+    seedGiftCard(7000); // Bs 70, revision legacy -> 0
+    await call(topUpGiftCard, 'seller', { topUpId: 'c18a', code: 'GC-1', payments: [{ method: 'cash', amountCents: 3000 }] }); // 70 -> 100, rev 0->1
+    await call(createSale, 'seller', { saleId: 'c18a-sale', items: [{ productId: 'cheap', quantity: 4 }], payments: [{ method: 'giftcard', amountCents: 2000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }); // 100 -> 80, rev 1->2
+    check('C18 (orden A: topUp luego venta): balance final 80, revision final 2',
+        store.get('giftCards/GC-1').balanceCents === 8000 && store.get('giftCards/GC-1').balanceRevision === 2,
+        JSON.stringify(store.get('giftCards/GC-1')));
+
+    reset();
+    seedGiftCard(7000);
+    await call(createSale, 'seller', { saleId: 'c18b-sale', items: [{ productId: 'cheap', quantity: 4 }], payments: [{ method: 'giftcard', amountCents: 2000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }); // 70 -> 50, rev 0->1
+    await call(topUpGiftCard, 'seller', { topUpId: 'c18b', code: 'GC-1', payments: [{ method: 'cash', amountCents: 3000 }] }); // 50 -> 80, rev 1->2
+    check('C18 (orden B: venta luego topUp): MISMO balance final 80, revision final 2 — resultado consistente en ambos órdenes',
+        store.get('giftCards/GC-1').balanceCents === 8000 && store.get('giftCards/GC-1').balanceRevision === 2,
+        JSON.stringify(store.get('giftCards/GC-1')));
+
+    // C19. Fase B ya protege esto con balanceRevision: recarga posterior hace que cancelSale de una venta vieja rechace.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(createSale, 'seller', {
+        saleId: 'c19-A', items: [{ productId: 'cheap', quantity: 6 }], // 100 -> 70, rev 0->1
+        payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }],
+    }));
+    check('C19. venta A: ÉXITO (balance 70, revision 1)', r.ok && store.get('giftCards/GC-1').balanceCents === 7000 && store.get('giftCards/GC-1').balanceRevision === 1, r.message);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c19-topup', code: 'GC-1', payments: [{ method: 'cash', amountCents: 10000 }] })); // 70 -> 170, rev 1->2
+    check('C19. recarga REAL (no simulada) posterior: ÉXITO, balance 170, revision 2', r.ok && store.get('giftCards/GC-1').balanceCents === 17000 && store.get('giftCards/GC-1').balanceRevision === 2, r.message);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'c19-A', reason: 'intento tras recarga real' }));
+    check('C19. cancelar la venta A tras la recarga REAL: RECHAZADO (sale.revisionAfter=1, current=2)',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    // C20. El saldo puede terminar por encima de amountCents tras una recarga — nunca se impone balanceCents <= amountCents.
+    reset();
+    seedGiftCard(10000); // nominal 100
+    await call(createSale, 'seller', { saleId: 'c20-sale', items: [{ productId: 'cheap', quantity: 16 }], payments: [{ method: 'giftcard', amountCents: 8000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }); // 100 -> 20
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c20-topup', code: 'GC-1', payments: [{ method: 'cash', amountCents: 10000 }] })); // 20 -> 120
+    check('C20. balance 120 > amountCents 100 nominal: VÁLIDO, sin rechazo', r.ok && store.get('giftCards/GC-1').balanceCents === 12000 && store.get('giftCards/GC-1').amountCents === 10000, r.message);
+
+    // C21/C22. Idempotencia: el MISMO topUpId nunca suma dos veces; dos topUpId DISTINTOS sí suman dos veces.
+    reset();
+    seedGiftCard(10000);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c21-same', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    const firstResult = r.value;
+    check('C21. primera llamada: ÉXITO, balance 100 -> 150', r.ok && store.get('giftCards/GC-1').balanceCents === 15000, r.message);
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'c21-same', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('C21. MISMO topUpId reenviado (doble clic/retry): el saldo NO vuelve a subir (sigue en 150, no 200)',
+        r.ok && store.get('giftCards/GC-1').balanceCents === 15000, JSON.stringify(r));
+    check('C21. el reintento devuelve EXACTAMENTE el mismo resultado que la primera llamada (sin recalcular)',
+        r.ok && JSON.stringify(r.value) === JSON.stringify(firstResult), JSON.stringify({ first: firstResult, retry: r.value }));
+    check('C21. balanceRevision tampoco avanzó de nuevo (sigue en 1, no 2)', store.get('giftCards/GC-1').balanceRevision === 1);
+
+    reset();
+    seedGiftCard(10000);
+    await call(topUpGiftCard, 'seller', { topUpId: 'c22-first', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }); // 100 -> 150, rev 0->1
+    await call(topUpGiftCard, 'seller', { topUpId: 'c22-second', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }); // 150 -> 200, rev 1->2
+    check('C22. dos recargas DISTINTAS (topUpId diferente): SÍ suman las dos veces (balance 200) y avanzan revisión dos veces (2)',
+        store.get('giftCards/GC-1').balanceCents === 20000 && store.get('giftCards/GC-1').balanceRevision === 2,
+        JSON.stringify(store.get('giftCards/GC-1')));
+
+    // C23/C24/C25. dailySummaries: total recargado + desglose cash/QR.
+    reset();
+    seedGiftCard(10000);
+    await call(topUpGiftCard, 'seller', { topUpId: 'c23', code: 'GC-1', payments: [{ method: 'cash', amountCents: 3000 }, { method: 'qr', amountCents: 2000 }] });
+    check('C23. dailySummaries.giftCardTopUpsCents = 5000 (total recargado)', summary().giftCardTopUpsCents === 5000, JSON.stringify(summary()));
+    check('C24. dailySummaries.giftCardTopUpsCashCents = 3000', summary().giftCardTopUpsCashCents === 3000);
+    check('C25. dailySummaries.giftCardTopUpsQrCents = 2000', summary().giftCardTopUpsQrCents === 2000);
+
+    console.log('\nE. Fase C — endurecimiento: mismo topUpId SOLO puede representar la MISMA operación');
+
+    // CI1/CI6/CI7/CI8. Retry VÁLIDO (mismo topUpId, mismo payload exacto):
+    // éxito idempotente — balance sube una sola vez, un solo movimiento
+    // TOP_UP, dailySummaries no se vuelve a tocar, balanceRevision no avanza
+    // de nuevo, y la respuesta es EXACTAMENTE la misma.
+    reset();
+    seedGiftCard(10000);
+    let ci1First = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'ci1', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('CI1a. primera llamada: ÉXITO, balance 100 -> 150', ci1First.ok && store.get('giftCards/GC-1').balanceCents === 15000, ci1First.message);
+    const summaryAfterFirst = JSON.stringify(summary());
+    let ci1Retry = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'ci1', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('CI1b. retry con el MISMO payload: ÉXITO idempotente, balance NO vuelve a subir (sigue en 150, no 200)',
+        ci1Retry.ok && store.get('giftCards/GC-1').balanceCents === 15000, JSON.stringify(ci1Retry));
+    check('CI1c. la respuesta del retry es EXACTAMENTE la misma que la primera llamada',
+        ci1Retry.ok && JSON.stringify(ci1Retry.value) === JSON.stringify(ci1First.value), JSON.stringify({ first: ci1First.value, retry: ci1Retry.value }));
+    check('CI6. el retry NO crea un segundo movement TOP_UP (sigue habiendo exactamente 1)', topUpMovements().length === 1, JSON.stringify(topUpMovements()));
+    check('CI7. el retry NO vuelve a modificar dailySummaries (sigue exactamente igual que tras la primera llamada)', JSON.stringify(summary()) === summaryAfterFirst, JSON.stringify(summary()));
+    check('CI8. el retry NO incrementa balanceRevision (sigue en 1, no 2)', store.get('giftCards/GC-1').balanceRevision === 1);
+
+    // CI2. Mismo topUpId reutilizado con OTRA Gift Card: RECHAZO, nunca
+    // devuelve silenciosamente el resultado de la primera tarjeta.
+    reset();
+    seedGiftCard(10000); // GC-1
+    store.set('giftCards/GC-2', { status: 'ACTIVE', activeCycleId: 'cy2', cycleNumber: 1, amountCents: 5000 });
+    store.set('giftCardIssues/cy2', { status: 'active', cycleNumber: 1, buyerName: 'Otro', activatedAt: 't', activatedBy: 'seller', activatedByName: 'V' });
+    await call(topUpGiftCard, 'seller', { topUpId: 'ci2', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'ci2', code: 'GC-2', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('CI2. mismo topUpId + OTRA tarjeta: RECHAZADO (nunca aplica a GC-2 ni devuelve el resultado de GC-1)',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('CI2. GC-2 quedó intacta (nunca se le aplicó nada)', store.get('giftCards/GC-2').balanceCents === undefined);
+
+    // CI3. Mismo topUpId + mismo card pero OTRO monto: RECHAZO.
+    reset();
+    seedGiftCard(10000);
+    await call(topUpGiftCard, 'seller', { topUpId: 'ci3', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'ci3', code: 'GC-1', payments: [{ method: 'cash', amountCents: 7000 }] }));
+    check('CI3. mismo topUpId + mismo card + OTRO monto (5000 vs 7000): RECHAZADO', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('CI3. el balance NO cambió por el intento rechazado (sigue en 150, no 220 ni 150+70)', store.get('giftCards/GC-1').balanceCents === 15000);
+
+    // CI4. Mismo topUpId + MISMO total pero reparto cash/QR distinto: RECHAZO
+    // (el ejemplo exacto del prompt: 100 cash vs 50 cash + 50 QR).
+    reset();
+    seedGiftCard(10000);
+    await call(topUpGiftCard, 'seller', { topUpId: 'ci4', code: 'GC-1', payments: [{ method: 'cash', amountCents: 10000 }] });
+    r = await outcome(call(topUpGiftCard, 'seller', { topUpId: 'ci4', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }, { method: 'qr', amountCents: 5000 }] }));
+    check('CI4. mismo total (100) pero reparto cash/QR distinto (100 cash vs 50+50): RECHAZADO — NO es la misma solicitud financiera',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    // CI5. Mismo topUpId + OTRO actor (uid distinto): RECHAZO — el identificador
+    // representa exactamente la intención de QUIEN la originó, nunca se adopta
+    // a nombre de otro actor.
+    reset();
+    seedGiftCard(10000);
+    await call(topUpGiftCard, 'seller', { topUpId: 'ci5', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] });
+    r = await outcome(call(topUpGiftCard, 'admin', { topUpId: 'ci5', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] }));
+    check('CI5. mismo topUpId/card/monto pero OTRO actor (admin en vez de seller): RECHAZADO', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    // CI9. Dos topUpId DISTINTOS con payload idéntico: son dos recargas REALES
+    // distintas — ambas se aplican, ninguna se trata como retry de la otra.
+    reset();
+    seedGiftCard(10000);
+    await call(topUpGiftCard, 'seller', { topUpId: 'ci9-a', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] });
+    await call(topUpGiftCard, 'seller', { topUpId: 'ci9-b', code: 'GC-1', payments: [{ method: 'cash', amountCents: 5000 }] });
+    check('CI9. dos topUpId distintos, mismo payload: AMBAS se aplican (balance 100 -> 200, no 150)', store.get('giftCards/GC-1').balanceCents === 20000, JSON.stringify(store.get('giftCards/GC-1')));
+
+    // CI10. generateTopUpId (frontend puro, sin red): cubierto en
+    // src/app/features/gift-cards/gift-cards.service.spec.ts — no tiene
+    // equivalente de backend que probar aquí.
+
+    console.log('\nF. Fase D — replaceGiftCard con saldo persistente (plan §16.23)');
+    const topUpDocsCount = () => [...store].filter(([k]) => k.startsWith('giftCardTopUps/')).length;
+    const replacedMovements = () => [...store].filter(([k, v]) => k.startsWith('giftCardMovements/') && v.type === 'REPLACED').map(([, v]) => v);
+    const replacementCreatedMovements = () => [...store].filter(([k, v]) => k.startsWith('giftCardMovements/') && v.type === 'REPLACEMENT_CREATED').map(([, v]) => v);
+
+    // D1. Legacy pending replacement SIN balanceCents: transfiere el
+    // efectivo (= amountCents, por fallback legacy), nunca 0. Destino nace
+    // en modo 'generate': balanceRevision=0, amountCents nominal conservado.
+    reset();
+    seedGiftCard(25000); // GC-1, legacy: nunca tocó balanceCents/balanceRevision
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'dañada' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1' }));
+    check('D1. replacement de legacy pending: ÉXITO, transfiere 25000 (amountCents, vía fallback legacy)', r.ok && r.value.amountCents === 25000, r.message);
+    let d1New = r.value.newCardCode;
+    check('D5/D7/D8/D9. destino (modo generate): balanceCents=25000, amountCents=25000 (nominal), balanceRevision=0',
+        store.get(`giftCards/${d1New}`).balanceCents === 25000 && store.get(`giftCards/${d1New}`).amountCents === 25000 && store.get(`giftCards/${d1New}`).balanceRevision === 0,
+        JSON.stringify(store.get(`giftCards/${d1New}`)));
+    check('D6. source (GC-1) queda SIN saldo efectivo (balanceCents=0)', store.get('giftCards/GC-1').balanceCents === 0);
+    check('D10. source.balanceRevision avanzó +1 (0 legacy -> 1, la transferencia ES una mutación del saldo)', store.get('giftCards/GC-1').balanceRevision === 1);
+
+    // D2. Consumo PARCIAL antes de cancelar: solo se transfiere lo que
+    // realmente queda (20 de 100), nunca el nominal completo.
+    reset();
+    seedGiftCard(10000); // nominal 100
+    await call(createSale, 'seller', { saleId: 'd2-sale', items: [{ productId: 'cheap', quantity: 16 }], payments: [{ method: 'giftcard', amountCents: 8000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }); // 100 -> 20, revision 0 -> 1
+    check('D2 (previo). tras la venta parcial: balance 20, revision 1', store.get('giftCards/GC-1').balanceCents === 2000 && store.get('giftCards/GC-1').balanceRevision === 1);
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'dañada tras uso parcial' });
+    check('D20. cancelGiftCard sobre ACTIVE con saldo: preserva balanceCents=20 y balanceRevision=1 (NUNCA los pone a 0 antes de transferir)',
+        store.get('giftCards/GC-1').balanceCents === 2000 && store.get('giftCards/GC-1').balanceRevision === 1 && store.get('giftCards/GC-1').pendingReplacement === true);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1' }));
+    check('D2. replacement tras consumo parcial: transfiere 2000 (20), NUNCA 10000 (100)', r.ok && r.value.amountCents === 2000, r.message);
+    let d2New = r.value.newCardCode;
+    check('D7. destino.amountCents sigue siendo el NOMINAL de origen (10000), no el transferido', store.get(`giftCards/${d2New}`).amountCents === 10000);
+    const d2NewIssue = store.get(`giftCardIssues/${store.get(`giftCards/${d2New}`).activeCycleId}`);
+    check('D8/D9. issue destino: balanceCents=2000, balanceRevision=0', d2NewIssue.balanceCents === 2000 && d2NewIssue.balanceRevision === 0, JSON.stringify(d2NewIssue));
+    check('D10. source.balanceRevision avanza 1 -> 2 (la transferencia 20->0 es otra mutación)', store.get('giftCards/GC-1').balanceRevision === 2);
+    check('D13. movement REPLACED: amountCents=2000 (transferido, no 10000), before=2000, after=0, revisionBefore=1, revisionAfter=2',
+        replacedMovements().some((m) => m.giftCardId === 'GC-1' && m.amountCents === 2000 && m.balanceBeforeCents === 2000 && m.balanceAfterCents === 0 && m.balanceRevisionBefore === 1 && m.balanceRevisionAfter === 2),
+        JSON.stringify(replacedMovements()));
+    check('D13. movement REPLACEMENT_CREATED: amountCents=2000, before=0, after=2000, revisionBefore=0, revisionAfter=0',
+        replacementCreatedMovements().some((m) => m.giftCardId === d2New && m.amountCents === 2000 && m.balanceBeforeCents === 0 && m.balanceAfterCents === 2000 && m.balanceRevisionBefore === 0 && m.balanceRevisionAfter === 0),
+        JSON.stringify(replacementCreatedMovements()));
+
+    // D3/D22. Recarga antes de cancelar: el saldo transferido puede superar
+    // el nominal — válido, sin tope.
+    reset();
+    seedGiftCard(10000); // nominal 100
+    await call(topUpGiftCard, 'seller', { topUpId: 'd3-topup', code: 'GC-1', payments: [{ method: 'cash', amountCents: 2000 }] }); // 100 -> 120
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'dañada tras recarga' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1' }));
+    check('D3/D22. replacement tras recarga: transfiere 12000 (120), POR ENCIMA del nominal 10000 (100) — válido, sin tope',
+        r.ok && r.value.amountCents === 12000, r.message);
+    let d3New = r.value.newCardCode;
+    check('D3. destino.balanceCents (12000) > destino.amountCents (10000): válido', store.get(`giftCards/${d3New}`).balanceCents === 12000 && store.get(`giftCards/${d3New}`).amountCents === 10000);
+
+    // D4. Destino 'existing': una Gift Card AVAILABLE ya registrada recibe
+    // el saldo transferido correcto (y su propio amountCents configurado se
+    // sobreescribe con el nominal de la FUENTE — comportamiento histórico,
+    // sin cambios).
+    reset();
+    seedGiftCard(7000); // GC-1, nominal 70, nunca tocado -> legacy fallback = 70
+    store.set('giftCards/D4-TGT', { status: 'AVAILABLE', activeCycleId: null, cycleNumber: 0, amountCents: 3000 });
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'dañada' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1', mode: 'existing', targetCode: 'D4-TGT' }));
+    check('D4. replacement modo existing: ÉXITO, transfiere 7000', r.ok && r.value.amountCents === 7000, r.message);
+    check('D4. D4-TGT: balanceCents=7000, amountCents=7000 (heredado de la fuente), balanceRevision=0, cycleNumber=1 (0+1, nunca reinicia a 1 "de cero")',
+        store.get('giftCards/D4-TGT').balanceCents === 7000 && store.get('giftCards/D4-TGT').amountCents === 7000 && store.get('giftCards/D4-TGT').balanceRevision === 0 && store.get('giftCards/D4-TGT').cycleNumber === 1,
+        JSON.stringify(store.get('giftCards/D4-TGT')));
+
+    // D11/D12. Replacement NO es dinero nuevo: dailySummaries no se toca, no
+    // se crea ningún giftCardTopUps.
+    reset();
+    seedGiftCard(10000);
+    const topUpCountBefore = topUpDocsCount();
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'x' });
+    await call(replaceGiftCard, 'admin', { code: 'GC-1' });
+    check('D11. dailySummaries sigue sin existir (replacement nunca lo crea ni lo toca)', summary() === undefined);
+    check('D12. ningún documento giftCardTopUps nuevo (replacement NUNCA es una recarga)', topUpDocsCount() === topUpCountBefore);
+
+    // D14. Identidad (comprador/vendedor originales) se conserva con saldo persistente.
+    reset();
+    store.set('users/lenar', { isActive: true, role: 'user', firstName: 'Lenar', lastName: 'Lima' });
+    rg = await outcome(call(registerGiftCard, 'admin', { amountCents: 25000, codeMode: 'generated' }));
+    const d14Src = rg.value.cardCode;
+    await call(activateGiftCard, 'lenar', { code: d14Src, buyerName: 'Camila', payments: [{ method: 'cash', amountCents: 25000 }] });
+    await call(cancelGiftCard, 'admin', { code: d14Src, reason: 'dañada' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: d14Src }));
+    check('D14. destino conserva comprador=Camila y vendido-por=Lenar Lima (nunca el admin del reemplazo), CON el saldo (25000) correcto',
+        r.ok && store.get(`giftCards/${r.value.newCardCode}`).currentBuyerName === 'Camila' &&
+        store.get(`giftCards/${r.value.newCardCode}`).activatedByName === 'Lenar Lima' &&
+        store.get(`giftCards/${r.value.newCardCode}`).balanceCents === 25000,
+        JSON.stringify(r));
+
+    // D15. Doble reemplazo: la segunda transferencia se rechaza, sin
+    // duplicar saldo ni tocar un destino nuevo.
+    reset();
+    seedGiftCard(7000);
+    store.set('giftCards/D15-TGT', { status: 'AVAILABLE', activeCycleId: null, cycleNumber: 0, amountCents: 1000 });
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'x' });
+    let d15First = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1' }));
+    check('D15. primer reemplazo: ÉXITO, B recibe 7000', d15First.ok && store.get(`giftCards/${d15First.value.newCardCode}`).balanceCents === 7000, d15First.message);
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1', mode: 'existing', targetCode: 'D15-TGT' }));
+    check('D15. segundo intento hacia OTRO destino: RECHAZADO', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('D15. B sigue con 7000 (intacto)', store.get(`giftCards/${d15First.value.newCardCode}`).balanceCents === 7000);
+    check('D15. D15-TGT (el "C" del intento rechazado) sigue en 0 / AVAILABLE, nunca recibió nada', store.get('giftCards/D15-TGT').status === 'AVAILABLE' && store.get('giftCards/D15-TGT').balanceCents === undefined);
+
+    // D16/D17. Destino 'existing' debe ser realmente AVAILABLE sin valor pendiente.
+    reset();
+    seedGiftCard(7000);
+    store.set('giftCards/D16-ACTIVE', { status: 'ACTIVE', activeCycleId: 'd16-cy', cycleNumber: 1, amountCents: 5000, balanceCents: 5000, balanceRevision: 0 });
+    store.set('giftCardIssues/d16-cy', { status: 'active', cycleNumber: 1, balanceCents: 5000, balanceRevision: 0 });
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'x' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1', mode: 'existing', targetCode: 'D16-ACTIVE' }));
+    check('D16. destino existing ACTIVE (con saldo propio): RECHAZADO', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('D16. D16-ACTIVE queda intacto (balance 5000, sin tocar)', store.get('giftCards/D16-ACTIVE').balanceCents === 5000);
+
+    reset();
+    seedGiftCard(7000);
+    store.set('giftCards/D17-CANC', { status: 'CANCELLED', activeCycleId: null, cycleNumber: 1, amountCents: 5000, pendingReplacement: true, replacedByCode: null });
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'x' });
+    r = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1', mode: 'existing', targetCode: 'D17-CANC' }));
+    check('D17. destino existing CANCELLED con valor pendiente (effectiveBalance=5000>0): RECHAZADO', !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+
+    // D18/D19. suspend/reactivate preservan saldo y balanceRevision — NUNCA los tocan.
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', { saleId: 'd18-sale', items: [{ productId: 'cheap', quantity: 6 }], payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }); // 100 -> 70, rev 0 -> 1
+    await call(suspendGiftCard, 'seller', { code: 'GC-1', reason: 'perdida' });
+    check('D18. suspend: balance SIGUE en 7000, balanceRevision SIGUE en 1 (no los toca)',
+        store.get('giftCards/GC-1').status === 'SUSPENDED' && store.get('giftCards/GC-1').balanceCents === 7000 && store.get('giftCards/GC-1').balanceRevision === 1,
+        JSON.stringify(store.get('giftCards/GC-1')));
+    await call(reactivateGiftCard, 'seller', { code: 'GC-1' });
+    check('D19. reactivate: balance SIGUE en 7000, balanceRevision SIGUE en 1 (no crea ciclo, no los toca)',
+        store.get('giftCards/GC-1').status === 'ACTIVE' && store.get('giftCards/GC-1').balanceCents === 7000 && store.get('giftCards/GC-1').balanceRevision === 1,
+        JSON.stringify(store.get('giftCards/GC-1')));
+
+    // D21. cancelSale de una venta anterior, DESPUÉS de cancelar+reemplazar
+    // la tarjeta: debe rechazarse (protección ya existente de Fase B, vía
+    // `status` — nunca intenta restaurar saldo sobre el source ni el destino).
+    reset();
+    seedGiftCard(10000);
+    await call(createSale, 'seller', { saleId: 'd21-sale', items: [{ productId: 'cheap', quantity: 6 }], payments: [{ method: 'giftcard', amountCents: 3000, giftCardId: 'GC-1', giftCardCycleId: 'cy1' }] }); // 100 -> 70
+    await call(cancelGiftCard, 'admin', { code: 'GC-1', reason: 'x' });
+    let d21Replace = await outcome(call(replaceGiftCard, 'admin', { code: 'GC-1' }));
+    check('D21 (previo). replacement: ÉXITO', d21Replace.ok, d21Replace.message);
+    r = await outcome(call(cancelSale, 'admin', { saleId: 'd21-sale', reason: 'intento tras cancelar+reemplazar la tarjeta' }));
+    check('D21. cancelSale de la venta ANTERIOR al cancelar+reemplazar: RECHAZADO (status ya no es ACTIVE)',
+        !r.ok && r.code === 'failed-precondition', JSON.stringify(r));
+    check('D21. ni el source ni el destino quedaron tocados por el intento rechazado',
+        store.get('giftCards/GC-1').balanceCents === 0 && store.get(`giftCards/${d21Replace.value.newCardCode}`).balanceCents === 7000);
+
+    // D23/D24/D25. resolveGiftCardBalance endurecido por status — unitario, sin transacción.
+    check('D23. AVAILABLE con balanceCents residual inconsistente (5000): SIEMPRE 0, el status manda',
+        resolveGiftCardBalance({ status: 'AVAILABLE', amountCents: 10000, balanceCents: 5000 }) === 0);
+    check('D24. CANCELLED ya reemplazada (pendingReplacement=false) con balanceCents residual (5000): SIEMPRE 0',
+        resolveGiftCardBalance({ status: 'CANCELLED', amountCents: 10000, balanceCents: 5000, pendingReplacement: false }) === 0);
+    check('D25a. CANCELLED con pendingReplacement=true y balanceCents persistido (5000): devuelve el saldo pendiente real',
+        resolveGiftCardBalance({ status: 'CANCELLED', amountCents: 10000, balanceCents: 5000, pendingReplacement: true }) === 5000);
+    check('D25b. CANCELLED con pendingReplacement=true SIN balanceCents (legacy): cae al fallback amountCents (10000)',
+        resolveGiftCardBalance({ status: 'CANCELLED', amountCents: 10000, pendingReplacement: true }) === 10000);
 
     console.log(`\n${label}: ${pass} PASS, ${fail} FAIL`);
     process.exit(fail ? 1 : 0);

@@ -26,6 +26,9 @@ describe('receivedTotals — Gift Card como ingreso al venderse', () => {
             giftCardForfeitedCents: 0,
             giftCardIssuesCashCents: 0,
             giftCardIssuesQrCents: 0,
+            giftCardTopUpsCents: 0,
+            giftCardTopUpsCashCents: 0,
+            giftCardTopUpsQrCents: 0,
             products: {},
             extras: {},
             ...o,
@@ -156,6 +159,154 @@ describe('receivedTotals — Gift Card como ingreso al venderse', () => {
         delete (legacy as { extras?: unknown }).extras;
         const merged = mergeDailySummaries([legacy as DailySummary]);
         expect(merged.extras).toEqual({});
+    });
+});
+
+/**
+ * Recargas de Gift Card integradas a Reportes (Fase F, plan §18.6): dinero
+ * NUEVO que entra a caja sobre un ciclo YA abierto — mismo criterio que una
+ * emisión, nunca mercadería, nunca se mezcla con `giftCardCents` (saldo
+ * CONSUMIDO). `dailySummaries.giftCardTopUpsCents`/`CashCents`/`QrCents` ya
+ * los escribe `topUpGiftCard` (Fase C) dentro de la misma transacción —
+ * Reportes solo los agrega, SIN consultar `giftCardTopUps` (Rules cerradas)
+ * ni tocar Functions.
+ */
+describe('receivedTotals/mergeDailySummaries — recargas de Gift Card (Fase F, plan §18.6)', () => {
+    const summary = (o: Partial<DailySummary>): DailySummary =>
+        ({
+            dateKey: '2026-09-01',
+            monthKey: '2026-09',
+            year: 2026,
+            salesCount: 0,
+            itemsCount: 0,
+            totalCents: 0,
+            discountCents: 0,
+            cashCents: 0,
+            qrCents: 0,
+            giftCardCents: 0,
+            giftCardsIssuedCents: 0,
+            giftCardForfeitedCents: 0,
+            giftCardIssuesCashCents: 0,
+            giftCardIssuesQrCents: 0,
+            giftCardTopUpsCents: 0,
+            giftCardTopUpsCashCents: 0,
+            giftCardTopUpsQrCents: 0,
+            products: {},
+            extras: {},
+            ...o,
+        }) as DailySummary;
+    const bs = (n: number) => n * 100;
+
+    it('F2. mergeDailySummaries suma giftCardTopUpsCents de varios días', () => {
+        const merged = mergeDailySummaries([
+            summary({ giftCardTopUpsCents: bs(50) }),
+            summary({ giftCardTopUpsCents: bs(30) }),
+        ]);
+        expect(merged.giftCardTopUpsCents).toBe(bs(80));
+    });
+
+    it('F3. mergeDailySummaries suma giftCardTopUpsCashCents de varios días', () => {
+        const merged = mergeDailySummaries([
+            summary({ giftCardTopUpsCashCents: bs(20) }),
+            summary({ giftCardTopUpsCashCents: bs(30) }),
+        ]);
+        expect(merged.giftCardTopUpsCashCents).toBe(bs(50));
+    });
+
+    it('F4. mergeDailySummaries suma giftCardTopUpsQrCents de varios días', () => {
+        const merged = mergeDailySummaries([
+            summary({ giftCardTopUpsQrCents: bs(10) }),
+            summary({ giftCardTopUpsQrCents: bs(15) }),
+        ]);
+        expect(merged.giftCardTopUpsQrCents).toBe(bs(25));
+    });
+
+    it('F5. receivedTotals: el efectivo recibido incluye el efectivo de recargas', () => {
+        const merged = mergeDailySummaries([summary({ cashCents: bs(100), giftCardTopUpsCashCents: bs(50) })]);
+        expect(receivedTotals(merged).cashCents).toBe(bs(150));
+    });
+
+    it('F6. receivedTotals: el QR recibido incluye el QR de recargas', () => {
+        const merged = mergeDailySummaries([summary({ qrCents: bs(100), giftCardTopUpsQrCents: bs(25) })]);
+        expect(receivedTotals(merged).qrCents).toBe(bs(125));
+    });
+
+    it('F7. moneyReceived = ventas + activaciones + recargas, las tres fuentes de dinero nuevo juntas', () => {
+        const merged = mergeDailySummaries([
+            summary({
+                cashCents: bs(100),
+                qrCents: bs(100),
+                giftCardIssuesCashCents: bs(200),
+                giftCardIssuesQrCents: bs(100),
+                giftCardTopUpsCashCents: bs(50),
+                giftCardTopUpsQrCents: bs(25),
+            }),
+        ]);
+        const r = receivedTotals(merged);
+        expect(r.cashCents).toBe(bs(350));
+        expect(r.qrCents).toBe(bs(225));
+        expect(r.totalCents).toBe(bs(575));
+    });
+
+    it('F8. Gift Card APLICADA (giftCardCents) nunca entra a moneyReceived, aunque haya recargas en el mismo día', () => {
+        const merged = mergeDailySummaries([
+            summary({
+                totalCents: bs(300),
+                giftCardCents: bs(100), // aplicada: consumo de saldo ya pagado antes
+                cashCents: bs(200),
+                giftCardsIssuedCents: bs(200),
+                giftCardIssuesCashCents: bs(200),
+                giftCardTopUpsCashCents: bs(50),
+            }),
+        ]);
+        const r = receivedTotals(merged);
+        // 200 (venta) + 200 (activación) + 50 (recarga) = 450 — los 100 de la aplicada NUNCA se suman otra vez.
+        expect(r.totalCents).toBe(bs(450));
+        expect(r.totalCents).not.toBe(bs(550));
+    });
+
+    it('F9. el total vendido en mercadería/extras (totalCents) nunca incluye recargas', () => {
+        const merged = mergeDailySummaries([
+            summary({ totalCents: bs(300), cashCents: bs(300), giftCardTopUpsCashCents: bs(9999) }),
+        ]);
+        expect(merged.totalCents).toBe(bs(300));
+    });
+
+    /**
+     * F21/punto 21 del pedido — ejemplo financiero explícito: ventas cash 100
+     * + QR 100, Gift Card aplicada 100 (no suma), activación cash 200 + QR
+     * 100, recarga cash 50 + QR 25 → efectivo 350, QR 225, total 575. NUNCA
+     * 675 (que sería sumar la Gift Card aplicada otra vez).
+     */
+    it('F21. ejemplo financiero del pedido: cash 350 + QR 225 = 575 Bs, nunca 675', () => {
+        const merged = mergeDailySummaries([
+            summary({
+                totalCents: bs(300), // 100 ventas directas + 100 canjeado con GC + ... (mercadería, no es foco de este test)
+                cashCents: bs(100),
+                qrCents: bs(100),
+                giftCardCents: bs(100),
+                giftCardsIssuedCents: bs(300),
+                giftCardIssuesCashCents: bs(200),
+                giftCardIssuesQrCents: bs(100),
+                giftCardTopUpsCashCents: bs(50),
+                giftCardTopUpsQrCents: bs(25),
+            }),
+        ]);
+        const r = receivedTotals(merged);
+        expect(r.cashCents).toBe(bs(350));
+        expect(r.qrCents).toBe(bs(225));
+        expect(r.totalCents).toBe(bs(575));
+        expect(r.totalCents).not.toBe(bs(675));
+    });
+
+    it('F19. un día sin ninguna recarga (todo en 0) sigue funcionando exactamente igual que antes de esta fase', () => {
+        const merged = mergeDailySummaries([
+            summary({ cashCents: bs(100), qrCents: bs(50), giftCardIssuesCashCents: bs(200) }),
+        ]);
+        expect(merged.giftCardTopUpsCents).toBe(0);
+        expect(merged.giftCardTopUpsCashCents).toBe(0);
+        expect(merged.giftCardTopUpsQrCents).toBe(0);
+        expect(receivedTotals(merged)).toEqual({ cashCents: bs(300), qrCents: bs(50), totalCents: bs(350) });
     });
 });
 

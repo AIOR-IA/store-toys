@@ -135,6 +135,9 @@ describe('Reportes por vendedor — fórmulas', () => {
             giftCardForfeitedCents: 0,
             giftCardIssuesCashCents: bs(1000),
             giftCardIssuesQrCents: bs(500),
+            giftCardTopUpsCents: 0,
+            giftCardTopUpsCashCents: 0,
+            giftCardTopUpsQrCents: 0,
             products: {},
         } as DailySummary;
 

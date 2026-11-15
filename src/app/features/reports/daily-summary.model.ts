@@ -44,6 +44,17 @@ export interface DailySummary {
     giftCardIssuesCashCents: number;
     giftCardIssuesQrCents: number;
 
+    /**
+     * Recargas de saldo (Fase C, plan §16.22, `topUpGiftCard`): dinero NUEVO,
+     * mismo criterio que `giftCardsIssuedCents`/`giftCardIssues*Cents` —
+     * nunca mercancía vendida, nunca se mezcla con `giftCardCents` (saldo
+     * CONSUMIDO, que no es dinero nuevo). Un resumen anterior a esta fase no
+     * tiene estos tres campos: `dailySummaryConverter` los lee como `0`.
+     */
+    giftCardTopUpsCents: number;
+    giftCardTopUpsCashCents: number;
+    giftCardTopUpsQrCents: number;
+
     // Detalle por producto del día — solo los que se vendieron. Es la razón
     // de ser de esta colección: `items[]` de una venta no es agregable con
     // `sum()` (plan §8.7, §19). `totalCents` de cada producto es su importe a

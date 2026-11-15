@@ -287,14 +287,83 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   ciclo, se rechazan limpio (nunca doble gasto).
 - **Emitir/activar una gift card NO es una venta.** No crea documento en `sales`. Es un
   pasivo. Es lo que hace imposible la doble contabilización.
-- **Consumo total, sin saldo remanente.** Si la compra es menor, el sobrante se extingue con
-  un movimiento **`FORFEITED`** — así se mantiene `Σ payments == totalCents` sin perder el
-  rastro del dinero.
+- **⟳ Saldo persistente (Fase B implementada, plan §16.18/§16.21): ya NO es consumo total.**
+  Si la compra es menor al saldo, el sobrante **queda en `balanceCents`** — la tarjeta sigue
+  `ACTIVE`, el ciclo sigue abierto, nunca se crea un movimiento `FORFEITED` para una venta
+  nueva (el tipo y los documentos `FORFEITED` históricos se conservan, nunca se reescriben).
+  La tarjeta solo vuelve a `AVAILABLE` cuando el saldo llega EXACTAMENTE a `0`. `cancelSale`
+  compara el saldo efectivo actual contra `giftCardBalanceAfterCents` de la venta — si no
+  coincide (hubo otra compra o recarga de por medio), rechaza completo; si coincide, restaura
+  `balanceCents` al valor exacto de `giftCardBalanceBeforeCents` y registra `BALANCE_RESTORED`.
+  **El saldo solo no basta** (puede repetir un valor tras una recarga): `giftCards.balanceRevision`/
+  `giftCardIssues.balanceRevision` es un contador que sube en cada operación de saldo y nunca
+  retrocede — `cancelSale` exige `currentBalanceRevision === sale.giftCardBalanceRevisionAfter`
+  como chequeo autoritativo de "nada pasó desde esta venta"; al restaurar, `balanceRevision`
+  SIEMPRE avanza (`actual + 1`), nunca vuelve al valor de antes. Detalle: plan §16.21.
 - Si la compra supera el valor de la tarjeta, la diferencia va en efectivo o QR: con la gift
   card, ese es el **único** pago mixto (no Gift Card + Efectivo + QR). Desde el Ajuste de Ventas
   obs. 2 existe además Efectivo + QR sin gift card (ver *Ventas*).
-- No caducan, no se recargan, el plástico se reutiliza. Activan admin y vendedor; registrar
-  plástico nuevo y cancelar definitivamente es solo del admin.
+- No caducan, el plástico se reutiliza. Activan admin y vendedor; registrar plástico nuevo y
+  cancelar definitivamente es solo del admin.
+- **⟳ Ajuste posterior — saldo persistente, revoca "no se recargan" (plan §16.18, en curso,
+  Fase A):** `giftCards`/`giftCardIssues` ganan `balanceCents` (saldo disponible AHORA),
+  separado de `amountCents` (monto configurado/nominal del ciclo, que NUNCA se reutiliza como
+  saldo). Invariantes: `AVAILABLE` → balance 0; `ACTIVE`/`SUSPENDED` → balance > 0 (se suspende
+  sin perder saldo); `CANCELLED` puede conservar balance > 0 pendiente de `replaceGiftCard`.
+  Una `ACTIVE` cuyo balance llega exactamente a 0 cierra su ciclo y vuelve a `AVAILABLE` (la
+  próxima venta es una activación nueva, `cycleNumber++`); una **recarga** exige `ACTIVE` y
+  nunca abre un ciclo nuevo. **SIN backfill masivo:** las 80 Gift Cards físicas ya impresas
+  no se tocan en bloque — `resolveGiftCardBalance`/`resolveGiftCardIssueBalance` (mismo
+  nombre en backend y frontend) resuelven el saldo EFECTIVO de una tarjeta legacy sin
+  `balanceCents` por su `status` (nunca `?? 0` a ciegas: una `ACTIVE` legacy nunca redimida
+  tiene saldo real = `amountCents`); cada tarjeta se "adopta" (escribe `balanceCents`
+  explícito en card + issue) recién en su primera operación con el backend nuevo.
+  **✅ Fase B implementada:** `createSale`/`cancelSale` ya trabajan con saldo persistente
+  (ver el bullet de Ventas, "Saldo persistente", y plan §16.21).
+  **✅ Fase C implementada:** `topUpGiftCard` (admin + vendedor, `assertStaffRole`) — solo
+  `ACTIVE`; reutiliza el mismo modelo de pago cash/qr de `activateGiftCard`; nueva colección
+  `giftCardTopUps/{topUpId}` (ID generado en el cliente, `tx.create()` falla limpio en un
+  duplicado — mismo patrón de idempotencia que `sales/{saleId}`, la ÚNICA forma segura de
+  evitar un doble cobro: ni `status` ni `balanceRevision` por sí solos detectan un reintento).
+  **Mismo `topUpId` solo puede representar la MISMA operación:** el documento guarda el
+  snapshot canónico (`cardCode`/`cashCents`/`qrCents`/`performedBy`) y un reintento se compara
+  contra él — coincide exacto → devuelve el resultado guardado sin tocar nada; no coincide →
+  `failed-precondition` genérico, nunca revela la operación original. Rules de
+  `giftCardTopUps`: `allow read, write: if false` — cerrada por completo, ni lectura admin
+  (sin consumidor real todavía); el Admin SDK de Functions nunca depende de esta Rule.
+  `dailySummaries` ya tiene `giftCardTopUpsCents`/`giftCardTopUpsCashCents`/
+  `giftCardTopUpsQrCents`. Sin cancelación de recarga (no existe un precedente de "anular una
+  activación" en todo el sistema — sería definitiva, igual que vender/activar).
+  **✅ Fase D implementada:** `replaceGiftCard` transfiere `resolveGiftCardBalance(source,
+  sourceIssue)` (nunca `amountCents`) — el destino SIEMPRE nace con `balanceRevision = 0`
+  (replacement siempre crea un ciclo/issue nuevo, confirmado por auditoría) y puede terminar
+  con `balanceCents > amountCents` (recarga previa) sin problema; la fuente queda con
+  `balanceCents = 0` y su propia `balanceRevision` avanza (el traspaso es una mutación).
+  `resolveGiftCardBalance` quedó ENDURECIDO: `AVAILABLE` y `CANCELLED` sin `pendingReplacement`
+  devuelven SIEMPRE `0`, sin mirar ningún `balanceCents` residual — el `status` manda sobre
+  cualquier dato persistido. `cancelGiftCard`/`suspendGiftCard`/`reactivateGiftCard`
+  confirmados seguros sin cambios de código (nunca tocan balance/revision).
+  **✅ Fase E implementada (solo UI/UX, sin tocar Functions ni Rules):** POS usa el saldo
+  resuelto (`resolveGiftCardBalance`) en vez de `amountCents` — el antiguo "sobrante perdido"
+  se reemplaza por "saldo que queda en la tarjeta" / "tarjeta quedará sin saldo" (caso
+  discreto del `0` exacto). El recibo de venta imprime el saldo antes/después desde el
+  SNAPSHOT congelado de la venta (`giftCardBalanceBeforeCents`/`AfterCents`), con "Saldo
+  agotado" en vez de "Saldo restante: Bs 0"; una venta legacy (sin esos campos) se imprime
+  exactamente igual que siempre. "Recargar saldo" es un `PanelMode` más de
+  `GiftCardDetailDialogComponent` (no un diálogo separado), admin + vendedor, solo ACTIVE,
+  con el mismo modelo de pago cash/qr/cash+qr del POS; el `topUpId` se genera nuevo al abrir
+  el panel y se REUTILIZA tal cual en un reintento con el mismo payload (timeout, doble
+  clic) — cambiar el monto/método antes de reintentar genera uno nuevo, nunca se reenvía un
+  payload distinto con un id viejo. El comprobante de recarga (`GiftCardReceiptService.
+  printTopUp`) se construye íntegro desde la respuesta de `topUpGiftCard` + los pagos
+  enviados, SIN releer `giftCardTopUps` (sigue cerrada). Listado y detalle distinguen
+  "Saldo disponible" / "Monto configurado" / "Saldo pendiente de reemplazo" según el estado,
+  nunca el mismo número con ambigüedad; el historial de movimientos imprime saldo
+  antes→después para `TOP_UP`/`BALANCE_RESTORED`/`REDEEMED` parcial, y `balanceRevision`
+  nunca se expone en pantalla. Reportes/recibos de recarga sigue pendiente (Fase F). Antes
+  del rollout se resetea `sales`/`dailySummaries`/`qr-vouchers` (datos de prueba, plan
+  §16.19) — nunca `giftCards`/`giftCardIssues`/`giftCardMovements`/`giftCardTopUps`. Detalle
+  completo: plan §16.18-§16.24.
 - **Código: manual O generado** (ajuste posterior a la Fase 6, admin-only en ambos). Manual:
   el código lo trae la imprenta, tecleado tal cual. Generado: el servidor decide
   `GC{secuencia global}` (mín. 6 dígitos, p. ej. `GC000001` — **ajuste posterior, plan §16.16:
@@ -323,7 +392,8 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
 - El cierre de caja **compara** el resumen contra `sum()` sobre `sales` y avisa si difieren.
 - Dos identidades que deben cuadrar en pantalla:
   `mercancía vendida == Σ pagos de las ventas` y
-  `dinero recibido == (cash+qr de ventas) + (cash+qr de emisiones)`.
+  `dinero recibido == (cash+qr de ventas) + (cash+qr de emisiones) + (cash+qr de recargas)`
+  (recargas integradas en la Fase F, plan §18.6 — ver más abajo).
 - Exportación solo a **PDF** (`pdfmake`, hoja carta). Sin Excel ni CSV.
 - **PDF ejecutivo** (rediseño posterior a la Fase 7, plan §18.4): compacto, pocos KPIs grandes
   (`totalCents` — mercadería/Extras — e ingreso real cobrado), tres bloques por método de pago
@@ -340,6 +410,30 @@ Un `user` **no** ve reportes, **no** cambia precios y **solo ve sus propias vent
   `ReportsService.getSoldIssuesCountInRange`). El inventario de Gift Cards traduce su estado con
   `status.toLowerCase()` (mismo patrón que el dashboard en pantalla) — el PDF anterior tenía un bug
   de case-sensitivity que imprimía la clave técnica sin traducir.
+- **✅ Fase F implementada (plan §18.6):** las recargas de Gift Card (`dailySummaries.
+  giftCardTopUpsCents`/`CashCents`/`QrCents`, ya escritos por `topUpGiftCard` desde la Fase C)
+  entran a `receivedTotals`/`RangeTotals`/`mergeDailySummaries` igual que una activación —
+  dinero nuevo, nunca mercadería. Pantalla y PDF ganan un bloque "Recargas de Gift Card"
+  (monto recargado/cobrado en efectivo/cobrado en QR) y las filas Efectivo/QR ganan "De
+  recargas Gift Card"; el "Resumen final"/cierre no gana fila nueva (ya las incluye por
+  construcción). Sin cambios en Functions, Rules ni `giftCardTopUps` (sigue cerrada: todo sale
+  de `dailySummaries`). **Auditado y dejado SIN cambios a propósito:** el desglose "por
+  vendedor" (`SellerBreakdown`) no incluye recargas — no existe atribución por vendedor para
+  una recarga sin abrir `giftCardTopUps` o agregar un campo nuevo en `topUpGiftCard`, ambos
+  fuera de esta fase.
+- **✅ Fase G (auditoría final, plan §18.6):** bug encontrado y corregido — "Pasivo
+  pendiente" en pantalla sumaba el monto NOMINAL de las tarjetas ACTIVE/SUSPENDED en vez de
+  su saldo real (`balanceCents`); el PDF nunca imprimía ese KPI, así que el reporte ejecutivo
+  no estaba afectado. Resto de la auditoría (balanceCents/balanceRevision, idempotencia de
+  recarga, dinero nuevo, Rules, legacy) sin hallazgos nuevos — ver el registro completo de la
+  Fase G en el historial de la sesión. Datos reales de `mi-pimpollito-dev` re-confirmados por
+  lectura (nunca escritura): 80 giftCards (78 AVAILABLE, 2 ACTIVE sin adoptar —
+  GC000002/GC000003 — 0 SUSPENDED, 0 CANCELLED), 0 `giftCardTopUps` reales, 0 vouchers QR en
+  Storage ligados a las 4 `sales` de prueba. Script de reset controlado:
+  `scripts/reset-sales-test-data.js` (dry-run por defecto, `--apply` explícito, scope
+  hardcodeado a `sales`+`dailySummaries`+sus vouchers QR demostrablemente relacionados,
+  aborta si el proyecto detectado no es `mi-pimpollito-dev`) — todavía SIN ejecutar con
+  `--apply`.
 
 ## Estado actual
 

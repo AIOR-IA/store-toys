@@ -199,6 +199,22 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Ledger de idempotencia + comprobante de recarga (Fase C, plan §16.22):
+    // CERRADA POR COMPLETO en esta fase, ni lectura admin — a diferencia de
+    // `giftCardIssues`/`giftCardMovements`, todavía no existe ningún
+    // consumidor real desde Angular (esta fase solo LLAMA a `topUpGiftCard`,
+    // nunca lee la colección directo); abrir lectura sin una necesidad
+    // funcional concreta sería una superficie innecesaria sobre una
+    // colección financiera/de idempotencia. Cuando una fase futura exponga
+    // historial/recibo de recarga, esta es la Rule a relajar explícitamente
+    // (`allow get, list: if isAdmin()`, mismo patrón que las otras dos).
+    // `write: if false` es lo que hace que `tx.create()` dentro de
+    // `topUpGiftCard` sea la ÚNICA vía real — y el Admin SDK de Cloud
+    // Functions nunca depende de esta Rule en absoluto.
+    match /giftCardTopUps/{topUpId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }

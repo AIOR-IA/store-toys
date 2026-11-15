@@ -168,7 +168,7 @@
 </p-card>
 
 <!-- Desglose por forma de pago (prompt §33) -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     <p-card [header]="'app.reports.breakdown.merchandiseTitle' | translate">
         @if (rangeTotals().discountCents > 0) {
         <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.grossMerchandise" | translate }}</span><span>{{ (rangeTotals().totalCents + rangeTotals().discountCents) | money }}</span></div>
@@ -183,6 +183,11 @@
         <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.totalNominal" | translate }}</span><span class="font-semibold">{{ rangeTotals().giftCardsIssuedCents | money }}</span></div>
         <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.collectedCash" | translate }}</span><span>{{ rangeTotals().giftCardIssuesCashCents | money }}</span></div>
         <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.breakdown.collectedQr" | translate }}</span><span>{{ rangeTotals().giftCardIssuesQrCents | money }}</span></div>
+    </p-card>
+    <p-card [header]="'app.reports.giftCards.topUps.title' | translate">
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.giftCards.topUps.amount" | translate }}</span><span class="font-semibold">{{ rangeTotals().giftCardTopUpsCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.giftCards.topUps.cash" | translate }}</span><span>{{ rangeTotals().giftCardTopUpsCashCents | money }}</span></div>
+        <div class="flex justify-between text-sm py-1"><span>{{ "app.reports.giftCards.topUps.qr" | translate }}</span><span>{{ rangeTotals().giftCardTopUpsQrCents | money }}</span></div>
     </p-card>
 </div>
 

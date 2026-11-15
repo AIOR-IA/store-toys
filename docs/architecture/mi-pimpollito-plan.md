@@ -2623,7 +2623,7 @@ Modelos en §8.8.
 | Sobrante si la compra es menor | Se extingue como movimiento `FORFEITED` (§2.1 C-2) | derivado de E3+E4 |
 | Compra mayor al valor de la tarjeta | Pago mixto: gift card + la diferencia en cash o QR (desde el Ajuste de Ventas obs. 2 ya no es el único mixto: §15.7) | E3+E4, §16.8 |
 | Caducidad | **No caducan** | E5 |
-| Recarga | **No** | E6 |
+| Recarga | **⟳ REVOCADA (ajuste posterior, §16.18):** ahora **SÍ**, solo mientras `ACTIVE` — ver §16.18 para el diseño de saldo persistente que esto exige | E6 revocada en §16.18 |
 | Pérdida o robo | **⟳ Fase 6 — nuevo estado `SUSPENDED`**: bloquea la tarjeta sin cerrar el ciclo; `reactivateGiftCard` la recupera sin crear un ciclo nuevo. E8 quedó sin responder en el cuestionario original — esta es la respuesta, dada en vivo en la Fase 6 | E8 resuelta en Fase 6 |
 | Baja definitiva del plástico | **⟳ Fase 6 — nuevo estado `CANCELLED`**, terminal: la tarjeta física sale de circulación para siempre. Política conservadora (sin decisión previa distinta): **solo admin** | decisión Fase 6 |
 | Quién activa/vende | **Admin y vendedor** (*"ambos, en caso no esté el administrador"*) | E7 |
@@ -3066,6 +3066,659 @@ llamaba así.
   tenía además la vista "todos los vendedores" en Historial (`isAdmin()` en
   `gift-card-history.component.ts`, sin tocar en este ajuste).
 
+### 16.18 Saldo persistente (`balanceCents`) — ajuste posterior, **revoca E6**
+
+> **Motivo:** el cliente pidió, como el último feature grande de Mi Pimpollito, que una Gift
+> Card deje de consumirse siempre entera (E3 original: *"se gasta todo de una vez"*) y admita
+> consumo parcial, múltiples compras sobre el mismo ciclo y **recarga** — explícitamente
+> revocando la respuesta E6 original (*"no"*). E3/E4 (sin saldo remanente, sin vuelto en
+> efectivo) y la auditoría previa completa quedan documentadas tal cual se hicieron; este
+> ajuste describe el diseño aprobado para construir sobre ellas, **sin eliminar ni reescribir**
+> §16.1-§16.17.
+
+**Modelo de datos — `amountCents` NUNCA se reutiliza como saldo:**
+- `giftCards.amountCents` sigue siendo el monto CONFIGURADO (igual que hoy: editable solo
+  `AVAILABLE`, congelado al activarse).
+- `giftCards.balanceCents` (nuevo) — el saldo disponible AHORA MISMO, denormalizado para
+  resolver el mostrador en 1 lectura, igual criterio que el resto de esta colección.
+- `giftCardIssues.amountCents` sigue siendo el snapshot INMUTABLE del monto con el que nació
+  ESE ciclo (nunca cambia después de activarse).
+- `giftCardIssues.balanceCents` (nuevo) — el saldo CORRIENTE de ese ciclo. Vive en ambos
+  documentos (no es redundancia accidental): `giftCards` es el acceso rápido del mostrador/POS;
+  `giftCardIssues` es la fuente de auditoría del ciclo, necesaria para que `cancelSale` pueda
+  comparar el saldo en el momento exacto de cada venta (§16.18, bloque de `cancelSale` más
+  abajo) sin depender de que nadie más haya tocado `giftCards` entre medio.
+
+**Invariantes de estado (definitivos):**
+- `AVAILABLE` → `balanceCents = 0`.
+- `ACTIVE` → `balanceCents > 0`.
+- `SUSPENDED` → `balanceCents > 0` (se suspende con saldo, nunca se pierde).
+- `CANCELLED` → puede conservar `balanceCents > 0` si queda valor pendiente de transferir vía
+  `replaceGiftCard` (`pendingReplacement === true`) — **nunca se pone a 0 automáticamente al
+  cancelar** una tarjeta con valor; el dinero sigue "vivo" hasta que un reemplazo lo transfiere.
+
+**Cierre de ciclo — regla definitiva:** `ACTIVE` + `balanceCents` llega EXACTAMENTE a `0` tras
+una venta → `giftCards.status = 'AVAILABLE'`, el ciclo (`giftCardIssues`) se cierra, el plástico
+vuelve a la tienda. La siguiente venta de esa tarjeta es una **activación nueva**
+(`cycleNumber++`, `giftCardIssues` nuevo) — nunca una "recarga" de un ciclo ya cerrado. Una
+**recarga**, en cambio, exige `status === 'ACTIVE'` y nunca abre un ciclo nuevo: solo aumenta
+`balanceCents` del ciclo vigente. `AVAILABLE`/`SUSPENDED`/`CANCELLED` nunca admiten recarga.
+
+**Adopción progresiva — SIN backfill masivo (ajuste sobre esta misma sección, antes de
+ejecutar nada sobre datos reales):** las 80 Gift Cards físicas ya existen y ya están
+**impresas** — minimizar escrituras masivas sobre ellas pesa más que la limpieza de tener
+`balanceCents` en todos los documentos desde el día 1. En vez de un backfill de las 80
+`giftCards` + 2 `giftCardIssues`, la arquitectura adopta **compatibilidad progresiva**:
+
+- Un helper puro central, **`resolveGiftCardBalance(card, issue?)`** (mismo nombre en backend
+  — `functions/src/giftcards.ts` — y en frontend — `gift-card.model.ts`, usado por el
+  converter), resuelve el saldo EFECTIVO: si `balanceCents` ya está persistido (en la card o,
+  en su defecto, en el issue), se usa tal cual; si NO existe todavía, se reconstruye por
+  `status` — `AVAILABLE → 0`; `ACTIVE`/`SUSPENDED → amountCents`; `CANCELLED → amountCents` si
+  `pendingReplacement`, si no `0`. **Nunca `balanceCents ?? 0` a ciegas**: las 2 tarjetas
+  `ACTIVE` reales (`GC000002`/`GC000003`) nunca fueron redimidas — mostrarlas con saldo `0`
+  sería inventar una pérdida de dinero que nunca ocurrió.
+- **Adopción en la primera escritura:** cuando una Gift Card legacy participa por primera vez
+  en una operación del backend NUEVO (Fase B+: redención parcial, recarga, reemplazo,
+  restauración), esa operación debe escribir `balanceCents` EXPLÍCITO — en `giftCards` Y en el
+  `giftCardIssues` vigente, en la MISMA transacción. Desde ese momento la tarjeta queda
+  "adoptada": el fallback por `status` deja de aplicarle para siempre, y vale el invariante
+  `giftCards.balanceCents === activeIssue.balanceCents`.
+- Las 78 `AVAILABLE` no necesitan ningún toque previo: su próxima activación ya escribe
+  `balanceCents` (ver punto 5 del alcance de Fase A, sin cambios). Las 2 `ACTIVE` se adoptan
+  solas en cuanto Fase B les aplique su primera operación real (redención o recarga).
+- **No hay backfill de 82 documentos.** El backfill READ-ONLY que se preparó para esta sección
+  queda **descartado como estrategia** — el helper de arriba hace innecesaria la escritura
+  masiva.
+
+**`FORFEITED` — se preserva históricamente, no se retroactiva (✅ IMPLEMENTADO en Fase B,
+ver §16.21):** con saldo persistente, el sobrante de un canje ya NO se pierde — deja de
+generar `giftCardForfeitedCents`/movimiento `FORFEITED` en ventas NUEVAS. Las ventas y
+movimientos `FORFEITED` ya existentes en Firestore **se conservan intactos, sin reescribirse
+ni reinterpretarse** — son el registro correcto de cómo funcionaba el sistema en el momento en
+que ocurrieron.
+
+**`cancelSale` con saldo persistente (✅ IMPLEMENTADO en Fase B, ver §16.21 para el algoritmo
+final exacto):** comparar el saldo ACTUAL contra `balanceBeforeCents` es incorrecto, porque
+inmediatamente después de la propia venta el saldo real YA es `balanceAfterCents`, no
+`balanceBeforeCents`. La condición de reversión segura es:
+```
+current effectiveBalance === sale.giftCardBalanceAfterCents
+  && mismo cycleNumber
+  && status compatible (ACTIVE/active si fue parcial; AVAILABLE/redeemed+saleId si fue completa)
+```
+Si coincide: `balanceCents = sale.giftCardBalanceBeforeCents` (restauración exacta, nunca una
+resta/suma a ciegas) y se registra un movimiento `BALANCE_RESTORED` (nuevo tipo, **nunca
+reutiliza `ADJUSTMENT`**, que ya significa otra cosa en el libro mayor — `ADJUSTMENT` sigue
+siendo el tipo de la rama LEGACY, ventas anteriores a esta fase). Si el saldo actual no
+coincide con `balanceAfterCents`, hubo una operación posterior (otra compra, una recarga) y la
+anulación se RECHAZA completa — mismo principio de seguridad que §16.7, adaptado a saldo
+parcial.
+
+**Reportes futuros (Fase F, no esta):** `dailySummaries` gana `giftCardTopUpsCents` /
+`giftCardTopUpsCashCents` / `giftCardTopUpsQrCents`, simétricos a los `giftCardIssues*`
+existentes — nunca se reutiliza `giftCardsIssuedCents` para recargas (es otra magnitud). La
+fórmula de "dinero ingresado a caja" (§18.1-§18.2) se amplía a:
+```
+cash/QR de ventas + cash/QR de activaciones Gift Card + cash/QR de RECARGAS Gift Card
+```
+Gift Card aplicada (`giftCardCents`) sigue sin sumar — ese dinero ya se cobró antes.
+
+**Alcance de ESTA sesión — Fase A, exclusivamente modelo y compatibilidad (actualizado: sin
+backfill masivo):**
+1. `balanceCents` en `GiftCard` y `GiftCardIssue` (modelo + converters), resuelto con
+   `resolveGiftCardBalance`/`resolveGiftCardIssueBalance` — **nunca** `?? 0` a ciegas ni un
+   fallback a `amountCents` sin mirar el `status`.
+2. `balanceBeforeCents`/`balanceAfterCents` opcionales en `GiftCardMovement` — solo tipos,
+   ninguna Function los escribe todavía.
+3. Tipos de movimiento nuevos `TOP_UP`/`BALANCE_RESTORED` en el union — solo el tipo, sus
+   flujos (`topUpGiftCard`, la reversión de `cancelSale`) son Fase C/B, no esta.
+4. `registerGiftCard`/`registerGiftCardBatch` escriben `balanceCents: 0` en la tarjeta nueva
+   (`AVAILABLE`).
+5. `activateGiftCard` escribe `balanceCents = amountCents` tanto en `giftCards` como en el
+   `giftCardIssues` que crea.
+6. Helper `resolveGiftCardBalance` (backend, `functions/src/giftcards.ts`, listo para que lo
+   use Fase B+ — todavía sin wiring en ninguna Function existente) y su equivalente de
+   display en frontend (`resolveGiftCardBalance`/`resolveGiftCardIssueBalance`,
+   `gift-card.model.ts`, ya conectado a los converters).
+
+**Ya NO en el alcance (descartado, ver bloque de adopción progresiva arriba):** backfill
+masivo de las 80 `giftCards` + 2 `giftCardIssues` — queda reemplazado por el helper de
+adopción progresiva.
+
+**Explícitamente NO en esta fase:** consumo parcial en `createSale`, `topUpGiftCard`,
+restauración de `cancelSale`, diálogo "Recargar", cambios de POS, `replaceGiftCard` con
+balance, reportes/recibos de recarga — todo eso son las Fases B-G del plan de implementación
+que la auditoría ya dejó propuesto.
+
+### 16.19 Reset controlado de Ventas/Reportes previo al rollout — **PLANEADO, NO ejecutado**
+
+> **Motivo:** todavía no existen ventas reales en `mi-pimpollito-dev` — los datos actuales de
+> `sales`/`dailySummaries` son de prueba, de sesiones de desarrollo anteriores. El cliente
+> autorizó dejarlos en `0` antes de poner en producción el flujo nuevo de Gift Cards, para que
+> Reportes arranque limpio con el sistema nuevo — **sin necesidad de preservar compatibilidad
+> financiera con ventas de prueba**.
+
+**Inventario exacto (READ-ONLY, confirmado en `mi-pimpollito-dev`):**
+- `sales`: 4 documentos.
+- `dailySummaries`: 3 documentos.
+- Storage `qr-vouchers/`: 0 archivos (ninguna venta de prueba llegó a adjuntar un voucher).
+- Storage `products/`: 307 archivos — **no es parte del reset**, son imágenes reales de
+  catálogo, nada que ver con ventas.
+
+**Alcance exacto del reset (cuando se autorice, Fase H del orden actualizado §16.20):**
+`sales` (4 docs) + `dailySummaries` (3 docs) + los objetos de `qr-vouchers/` que existan al
+momento de ejecutar (hoy 0, pero una venta de prueba nueva podría adjuntar uno antes del
+rollout). Nada más — `qr-vouchers/{saleId}/` es la única ubicación de Storage cuya existencia
+depende exclusivamente de `sales`.
+
+**Lo que el reset NUNCA toca** (confirmado por auditoría de código, no solo por la lista que
+pidió el cliente): `products`, `barcodes`, `counters/internalCode`, `stock` (campo de
+`products`), `users`, Firebase Auth, `giftCards`, `giftCardCodeCounters`, `giftCardIssues`,
+`giftCardMovements`, Storage `products/`. `settings/app` tampoco se toca — es configuración
+compartida (`allowSaleWithoutStock`, `timezone`), no un dato derivado de ventas.
+
+**Efecto documentado en Reportes:** tras el reset, `giftCardIssues`/`giftCardMovements`
+históricos de Gift Cards **permanecen intactos** (no son parte del reset), pero el reporte
+ejecutivo (`dailySummaries`) arranca desde `0` en el momento del reset — cualquier
+`giftCardsIssuedCents`/`giftCardForfeitedCents`/etc. de pruebas anteriores desaparece junto
+con los `dailySummaries` que los contenían. Es intencional: Reportes empieza limpio para el
+sistema nuevo, no para las pruebas.
+
+**Estado: solo auditado.** No se ha borrado ni modificado ningún documento — la ejecución
+real del reset queda para cuando el cliente la autorice explícitamente (Fase H).
+
+### 16.20 Orden de implementación actualizado (sin backfill masivo, con reset planeado)
+
+Reemplaza el orden de fases propuesto en la auditoría original — mismo contenido por fase,
+reordenado para que **nada se despliegue a producción con una mezcla de backend antiguo +
+modelo balance nuevo** (decisión explícita del cliente) y para que el reset de datos de
+prueba ocurra justo antes del rollout, nunca a mitad de desarrollo:
+
+- **Fase A** — modelo + compatibilidad legacy (`resolveGiftCardBalance`). ✅ en progreso local.
+- **Fase B** — `createSale`/`cancelSale` con balance parcial.
+- **Fase C** — `topUpGiftCard`.
+- **Fase D** — `replaceGiftCard`/`cancelGiftCard`/`suspendGiftCard`/`reactivateGiftCard`
+  totalmente compatibles con `resolveGiftCardBalance` (nunca asumen `0` sobre una tarjeta
+  legacy).
+- **Fase E** — POS + UI + historial + recibos.
+- **Fase F** — `dailySummaries` + reportes de recarga.
+- **Fase G** — tests integrales de punta a punta.
+- **Fase H** — reset controlado de `sales`/`dailySummaries`/`qr-vouchers` (§16.19) — **después**
+  de que B-G estén probadas, para no perder datos de prueba todavía útiles mientras se
+  desarrolla.
+- **Fase I** — deploy coordinado backend + frontend, de una sola vez (nunca Fase A sola).
+
+### 16.21 Fase B ✅ IMPLEMENTADA — `createSale`/`cancelSale` con saldo persistente
+
+**`createSale` (consumo parcial, `functions/src/sales.ts`):** con la gift card YA leída
+(card + issue, dentro de la transacción), `giftCardBalanceBeforeCents =
+resolveGiftCardBalance(card, issue)`; `giftCardAppliedCents = min(before, totalCents)`;
+`giftCardBalanceAfterCents = before - applied`. El servidor sigue sin confiar en el monto que
+manda el cliente: lo recalcula y rechaza si no coincide (igual que siempre). Si
+`after > 0` → la tarjeta/ciclo **no cambian de estado**, solo `balanceCents` baja (en
+`giftCards` Y `giftCardIssues`, misma transacción — invariante card/issue). Si `after === 0` →
+cierre idéntico al histórico (`AVAILABLE`/`redeemed`), más `balanceCents: 0` en ambos
+documentos. Un único movimiento `REDEEMED` lleva `balanceBeforeCents`/`balanceAfterCents` —
+nunca un tipo nuevo para distinguir parcial de completa, esos dos campos ya lo dicen. `FORFEITED`
+dejó de escribirse: `giftCardForfeitCents` es una constante `0` para toda venta nueva (el campo
+se conserva en el snapshot por forma, nunca se omite). El snapshot del pago gift card en
+`sales.payments[]` ganó `giftCardBalanceBeforeCents`/`giftCardBalanceAfterCents` — con eso más
+el `amountCents` ya existente (que ES lo aplicado) se reconstruye antes/aplicado/después sin
+leer nada futuro de la tarjeta.
+
+**`cancelSale` (dos ramas, backward-compatible):** la presencia de
+`giftCardBalanceBeforeCents`/`giftCardBalanceAfterCents` en el pago decide la rama:
+- **`'balance'`** (venta de Fase B+): exige, dentro de la transacción, `cardSnap.cycleNumber
+  === sale.giftCardCycleNumber` Y `resolveGiftCardBalance(cardSnap, issueSnap) ===
+  sale.giftCardBalanceAfterCents` Y el status compatible con si fue parcial (`ACTIVE`/`active`)
+  o completa (`AVAILABLE`/`activeCycleId null`/`redeemed`+`saleId` propio). Si todo coincide,
+  restaura `balanceCents = sale.giftCardBalanceBeforeCents` EXACTO (nunca `actual + applied`,
+  decisión explícita para no esconder una inconsistencia detrás de una suma que "da lo mismo")
+  en `giftCards` y `giftCardIssues`; si fue completa, además reabre el MISMO `activeCycleId`
+  (nunca un ciclo nuevo) con los datos originales del issue. Registra `BALANCE_RESTORED` con
+  `balanceBeforeCents`/`balanceAfterCents` del movimiento de reversión. Si algo no coincide
+  (otra compra, una futura recarga, un ciclo reemplazado) → rechazo completo, ni stock ni
+  resumen se tocan — misma filosofía conservadora que §16.7.
+- **`'legacy'`** (venta anterior a Fase B, sin esos dos campos): comportamiento **EXACTO** al
+  histórico, sin ningún cambio — `ADJUSTMENT` como tipo de movimiento, reapertura por
+  `status === 'AVAILABLE'`/`activeCycleId === null`/`issue.status === 'redeemed'`/`issue.saleId
+  === saleId`, sin tocar `balanceCents` en absoluto (y correctamente: `resolveGiftCardBalance`
+  reconstruye el valor correcto por `status` de todas formas).
+
+**Qué NO entró en Fase B (confirmado, sin cambios):** `topUpGiftCard` no existía todavía
+(✅ implementada en Fase C, ver §16.22); `replaceGiftCard`/`cancelGiftCard`/`suspendGiftCard`/
+`reactivateGiftCard` siguen exactamente como estaban (auditados en la entrega de Fase B: las
+tres últimas ya son seguras con saldo porque nunca tocan `balanceCents`; `replaceGiftCard`
+queda pendiente para la Fase D, con el cambio puntual de transferir `resolveGiftCardBalance`
+en vez de `amountCents`); reportes de recarga/presentación quedan para Fase F; POS sin cambios
+visuales (Fase E).
+
+**Pruebas reales que cambiaron de expectativa (regresión esperada, no un bug):** varias
+pruebas de `tests/functions/sales.harness.js` escritas para la Fase 6 (secciones E, I, V, W, T)
+compraban deliberadamente MENOS que el valor de la tarjeta para forzar el "consumo total +
+forfeit" del modelo viejo — con saldo persistente eso ya es, correctamente, una redención
+PARCIAL. Se ajustaron sus montos/expectativas a la semántica nueva (documentado en cada punto
+del archivo) sin tocar lo que realmente auditaban (identidad del reemplazo, lineage de ciclos,
+permisos).
+
+**⚠️ Hallazgo corregido antes de cerrar la Fase B — el saldo NO basta para detectar "algo
+pasó entre medio":** el chequeo estricto de `cancelSale` (arriba) compara
+`balanceCents`/`giftCardBalanceAfterCents`. Es seguro HOY porque sin recarga el saldo de un
+ciclo abierto solo puede bajar — nunca repite un valor. En cuanto exista la recarga (Fase C),
+el saldo puede subir y volver a coincidir con un valor que ya tuvo antes:
+```
+Activación:  balance 100, balanceRevision 0
+Venta A:     100 → 70    balanceRevision 0 → 1   (A.balanceAfter=70, A.balanceRevisionAfter=1)
+Recarga:      70 → 100   balanceRevision 1 → 2
+Compra C:    100 → 70    balanceRevision 2 → 3   (C.balanceAfter=70, C.balanceRevisionAfter=3)
+```
+Cancelar A después de la recarga + C: `currentBalance(70) === A.balanceAfter(70)` — coincide
+por casualidad, aunque dos operaciones reales ocurrieron en medio. `cycleNumber` tampoco lo
+detecta (ni la recarga ni una redención parcial avanzan el ciclo). **Corrección: un contador
+monotónico `balanceRevision`, nunca el saldo, es el chequeo autoritativo de "nada pasó desde
+esta venta". El nombre es deliberadamente explícito** (no un `revision` genérico): representa
+EXCLUSIVAMENTE la secuencia de operaciones que modifican `balanceCents` — nunca cambios de
+`status`, comprador ni ningún otro campo.
+
+- `giftCards.balanceRevision` / `giftCardIssues.balanceRevision` — mismo invariante que
+  `balanceCents` (viven en ambos, misma transacción), nace en `0` en cada activación nueva
+  (junto con `cycleNumber`/`balanceCents`) y sube `+1` en CADA operación que toque el saldo del
+  ciclo (redención parcial o completa, recarga futura, restauración). `suspendGiftCard`/
+  `reactivateGiftCard` NO incrementan (no tocan el saldo). Documentos legacy sin el campo:
+  `resolveGiftCardBalanceRevision` lo reconstruye como `0` (nunca hay historial previo que
+  reconstruir — a diferencia del saldo, acá no aplica el fallback por `status`).
+- `createSale` guarda `giftCardBalanceRevisionBefore`/`giftCardBalanceRevisionAfter` en el
+  snapshot del pago (mismo patrón que `giftCardBalanceBefore/AfterCents`), con
+  `balanceRevisionAfter = balanceRevisionBefore + 1`.
+- `cancelSale` exige, ADEMÁS de todo lo que ya exigía, `currentBalanceRevision ===
+  sale.giftCardBalanceRevisionAfter` — el chequeo de saldo se conserva como verificación
+  secundaria (defensa en profundidad), pero `balanceRevision` es el que de verdad no se puede
+  falsificar por coincidencia numérica.
+- **La restauración de `balanceRevision` es SIEMPRE hacia adelante, nunca hacia atrás:** al
+  restaurar, `balanceCents` vuelve exactamente a `giftCardBalanceBeforeCents` (retrocede en
+  VALOR), pero `balanceRevision` avanza a `currentBalanceRevision + 1` (nunca a
+  `giftCardBalanceRevisionBefore`) — si retrocediera, podría repetir un valor ya usado y el
+  propio contador dejaría de ser una garantía monotónica para siempre. Esto además endurece
+  correctamente el caso "cancelar una venta anterior después de cancelar una posterior sobre
+  el mismo ciclo": con saldo solo, esa cancelación en cadena "daba la cuenta exacta" por
+  aritmética — con `balanceRevision` se RECHAZA, que es el comportamiento conservador que esta
+  función siempre quiso tener (§16.7: cualquier otra operación sobre el ciclo, incluida una
+  cancelación, bloquea tocar algo anterior — nunca "resuelve sola" encadenando reversiones).
+
+### 16.22 Fase C ✅ IMPLEMENTADA — `topUpGiftCard` (recarga de saldo)
+
+**Contrato:** `topUpGiftCard({ topUpId, code, payments })`, `onCall`, región
+`southamerica-west1`. `payments` reutiliza EXACTAMENTE `IssuePaymentInput`/
+`validateIssuePayments`/`ISSUE_PAYMENT_METHODS` que ya usa `activateGiftCard` (cash/qr, 1-2
+pagos, sin método repetido) — auditado antes de escribir una línea: no existía ningún motivo
+para un modelo de pago paralelo.
+
+**Permisos:** `assertStaffRole` (admin + user), mismo criterio que `activateGiftCard`/
+`updateGiftCardAmount` — recargar no es más sensible que vender/activar.
+
+**Estados permitidos:** solo `ACTIVE`. `AVAILABLE` (se vuelve a vender, no se recarga),
+`SUSPENDED` (debe reactivarse primero) y `CANCELLED` (terminal) se rechazan con
+`failed-precondition`.
+
+**Adopción legacy (sin backfill, mismo principio que Fase B):** `balanceBefore =
+resolveGiftCardBalance(card, issue)`, `balanceRevisionBefore = resolveGiftCardBalanceRevision(card,
+issue)` — una `ACTIVE` legacy sin `balanceCents` (ej. `GC000002`) se recarga correctamente
+sobre su saldo efectivo real, nunca sobre `0` ni sobre `amountCents`. La escritura siguiente
+YA deja `balanceCents`/`balanceRevision` explícitos en `giftCards` Y `giftCardIssues` (misma
+transacción) — desde ese momento la tarjeta queda adoptada.
+
+**`amountCents` NUNCA se toca** (sigue siendo el monto nominal del ciclo, congelado desde la
+activación) — `balanceCents` SÍ puede terminar **por encima** de `amountCents` tras una
+recarga (ejemplo real: nominal 100, saldo 20, recarga 100 → saldo 120). No se impone
+`balanceCents <= amountCents`: sería incorrecto con recargas.
+
+**Idempotencia — el hallazgo central de esta fase:** ni el `status` ni `cycleNumber` ni
+`activeCycleId` cambian con una recarga (a diferencia de `activateGiftCard`, que sí tiene una
+transición de estado que bloquea un reintento de forma natural) — **no hay ninguna guarda de
+estado que detecte un doble clic**, y `balanceRevision` tampoco sirve para esto: distingue
+*orden*, no identifica si dos llamadas son el *mismo* reintento o dos recargas distintas. La
+solución reutiliza el ÚNICO patrón de idempotencia que el proyecto ya tiene
+(`sales/{saleId}` generado en el cliente, `tx.create()` falla limpio en un duplicado — plan
+§15.3): nueva colección `giftCardTopUps/{topUpId}`, con `topUpId` generado EN EL CLIENTE
+(`GiftCardsService.generateTopUpId()`, mismo mecanismo que `generateSaleId()` — un ID de
+Firestore local, sin red). La transacción lee `giftCardTopUps/{topUpId}` COMO SU PRIMERA
+LECTURA.
+
+**Endurecimiento posterior (antes de cerrar la fase): mismo `topUpId` solo puede representar
+la MISMA operación.** La versión inicial devolvía el resultado guardado con solo comprobar que
+el documento existiera — eso acepta silenciosamente un `topUpId` reutilizado con un payload
+DISTINTO (otra tarjeta, otro monto, otro reparto cash/QR, otro actor). El documento YA guarda
+el snapshot canónico de la solicitud (`cardCode`, `cashCents`, `qrCents`, `performedBy` — ver
+el schema completo más abajo), así que la comprobación es gratis, sin campos nuevos ni hash:
+- **Si existe Y coincide exactamente** en `cardCode`/`cashCents`/`qrCents`/`performedBy` (el
+  `uid` real, no el nombre) → es un RETRY válido (timeout, doble clic, reenvío de red): se
+  devuelve el resultado ya guardado tal cual — balance, `balanceRevision`, movimiento y
+  `dailySummaries` quedan exactamente como los dejó la primera llamada, la segunda no toca
+  nada.
+- **Si existe y NO coincide** → se rechaza con `failed-precondition` y un mensaje genérico
+  ("Este identificador de recarga ya fue utilizado para otra operación.") — nunca se revela
+  el detalle de la operación original (ni la tarjeta, ni el monto, ni quién la hizo).
+- **Si no existe** → procede y lo crea con `tx.create()` en la MISMA transacción que mueve el
+  saldo — ambas cosas nacen o fallan juntas, como antes.
+
+Esta colección cumple doble función: ledger de idempotencia Y comprobante de la recarga (igual
+rol dual que `sales/{saleId}` para una venta) — y ahora también sirve como el propio snapshot
+de la solicitud contra el que se compara un reintento.
+
+**`generateTopUpId()` — auditado, sin cambios:** usa `doc(collection(firestore,
+'giftCardTopUps')).id` — el generador de IDs del SDK de Firestore (20 caracteres, alfabeto de
+64 símbolos ⇒ ~64²⁰ combinaciones), el MISMO mecanismo ya aprobado para `generateSaleId()`.
+Suficiente entropía, no depende de timestamp ni de un contador local, probabilidad de colisión
+entre dos navegadores distintos despreciable — es literalmente el mecanismo con el que
+Firestore genera cualquier ID automático en producción, en todo el mundo. No hace falta
+`crypto.randomUUID()`: cambiarlo divergiría del patrón ya probado de `generateSaleId()` sin
+ninguna ganancia real.
+
+**Momento de generar el ID (guía para la Fase E, UI):** un intento NUEVO de recarga genera un
+`topUpId` nuevo. Si la MISMA petición necesita reintentarse por timeout, error de red o
+respuesta perdida, el reintento debe reenviar EL MISMO `topUpId` — generar uno nuevo en cada
+reintento automático destruiría la idempotencia (cada reintento se vería como una recarga
+distinta y sí sumaría saldo de nuevo).
+
+**`balanceRevision`:** se reutiliza `resolveGiftCardBalanceRevision` sin cambios;
+`balanceRevisionAfter = balanceRevisionBefore + 1`, escrito en `giftCards` Y `giftCardIssues`
+en la misma transacción (invariante ya establecido en Fase B).
+
+**Movimiento `TOP_UP`:** un solo movimiento por recarga real (nunca por un reintento
+idempotente) con `amountCents` (lo recargado), `balanceBeforeCents`/`balanceAfterCents`,
+`balanceRevisionBefore`/`balanceRevisionAfter`, `cycleNumber`, `cycleId`. El desglose de pago
+(cash/qr) vive SOLO en `giftCardTopUps/{topUpId}` — **nunca se agrega a `giftCardIssues.payments`**:
+ese array significa específicamente "cómo se pagó la ACTIVACIÓN", y `sumIssues()`
+(`reports.service.ts`) ya lo suma para "Gift Cards vendidas" — mezclar ahí el dinero de una
+recarga inflaría esa métrica con dinero que es otra cosa.
+
+**Schema final de `giftCardTopUps/{topUpId}`** (ledger de idempotencia + snapshot canónico de
+la solicitud + futuro comprobante/historial de recarga — nunca `payments[]`: `cashCents`/
+`qrCents` ya son el desglose completo, un array sería redundante; nunca `topUpId` como campo,
+igual criterio que `GiftCard`/`GiftCardIssue`/`Sale`, que tampoco duplican su propio ID como
+campo; sin `status`, porque el documento solo existe cuando la operación ya se completó — si
+algo falla, nunca se llega a crear):
+```
+cardCode: string                    // la tarjeta recargada
+cycleId: string                     // el ciclo vigente en el momento de recargar
+cycleNumber: number
+amountCents: number                 // = cashCents + qrCents, el total recargado
+cashCents: number
+qrCents: number
+balanceBeforeCents: number
+balanceAfterCents: number
+balanceRevisionBefore: number
+balanceRevisionAfter: number
+performedBy: string                 // uid — parte de la comparación de idempotencia
+performedByName: string
+dateKey: string                     // America/La_Paz, calculado en servidor
+createdAt: Timestamp                // serverTimestamp()
+```
+`cardCode`/`cashCents`/`qrCents`/`performedBy` son, a la vez, el snapshot canónico contra el
+que se compara un reintento (punto anterior) — ningún campo adicional hace falta para eso.
+
+**`dateKey`/`createdAt` — servidor, nunca el cliente:** mismo criterio que
+`activateGiftCard`/`createSale` — `dateKeys(new Date(), timezone)` con el `timezone` leído de
+`settings/app`, `createdAt` con `FieldValue.serverTimestamp()`. El frontend nunca envía una
+fecha; si la enviara, la Function la ignora por completo.
+
+**Firestore Rules — `giftCardTopUps` cerrada por completo esta fase:**
+```
+match /giftCardTopUps/{topUpId} {
+  allow read, write: if false;
+}
+```
+Ni siquiera lectura para staff/admin — a diferencia de `giftCardIssues`/`giftCardMovements`
+(`allow get, list: if isAdmin()`), esta colección todavía no tiene ningún consumidor real
+desde el cliente (el frontend de esta fase solo LLAMA a la Function, nunca lee la colección
+directo) — abrir lectura sin una necesidad funcional concreta sería una superficie innecesaria
+sobre una colección financiera/de idempotencia. Cuando una fase futura decida exponer
+historial/recibo de recarga desde Angular, esa será la Rule a relajar explícitamente (`allow
+get, list: if isAdmin()`, mismo patrón que las otras dos). **Confirmado:** `topUpGiftCard`
+sigue funcionando exactamente igual con `write: if false`, porque las Security Rules nunca
+aplican a llamadas con el Admin SDK de Cloud Functions — solo gobiernan el acceso desde el SDK
+de cliente. Mismo principio que ya protege las otras dos colecciones de Gift Cards desde la
+Fase 6.
+
+**`dailySummaries` (campos ya aprobados, implementados ahora):** `giftCardTopUpsCents`/
+`giftCardTopUpsCashCents`/`giftCardTopUpsQrCents`, mismo patrón transaccional
+(crear-si-no-existe / sumar-literal-si-existe) que ya usa `activateGiftCard` para sus propios
+campos. `reports.service.ts`/`reports-pdf.service.ts` **no se tocan** — quedan para la Fase F;
+no hizo falta para que nada compile (son campos adicionales, no rompen el tipado estructural
+de `RangeTotals`/`mergeDailySummaries`).
+
+**Cancelación de una recarga — NO existe, por decisión explícita:** auditado — no hay ningún
+precedente de "anular una activación/emisión" en todo el sistema (`cancelGiftCard` da de baja
+el PLÁSTICO, nunca devuelve el ingreso de su venta, CLAUDE.md §Gift Cards). Una recarga exitosa
+es, por el mismo principio, **definitiva** — igual que una venta/activación de Gift Card. Si
+el negocio necesitara reversión algún día, sería una Function nueva y explícita
+(`reverseTopUp` o similar), fuera de alcance de esta fase.
+
+**Respuesta de la Function:** `{ cardCode, amountAddedCents, balanceBeforeCents,
+balanceAfterCents, balanceRevision, cycleNumber }` — lo mínimo que el frontend futuro (Fase E)
+necesita para refrescar la pantalla sin releer la tarjeta.
+
+**Frontend (mínimo, sin UI todavía):** `GiftCardsService.generateTopUpId()` (idéntico a
+`generateSaleId()`) + `GiftCardsService.topUpGiftCard(...)` — el diálogo visual queda para la
+Fase E.
+
+**Hallazgo de infraestructura de tests (aplica a TODO el proyecto, no solo a esta Function):**
+se intentó dar `gift-cards.service.spec.ts` una prueba directa de
+callable/payload/respuesta/error de `topUpGiftCard`, primero con `spyOn` (rechazado:
+"httpsCallable is not declared writable or has no setter") y después con
+`Object.defineProperty` (rechazado con un `TypeError` real: "Cannot redefine property:
+httpsCallable") — el export compilado de `httpsCallable` (`@angular/fire/functions`) es un
+getter de solo lectura, no configurable; no hay forma de interceptarlo sin un emulador real de
+Functions. Esto no es una laguna de `topUpGiftCard`: NINGUNO de los métodos basados en
+`httpsCallable` de todo el proyecto (más de una decena: `createSale`, `activateGiftCard`,
+`registerGiftCard`...) tiene jamás una spec que pruebe su invocación de esta forma — se
+verifican por otra vía, ya establecida: el comportamiento real de la Function en
+`tests/functions/sales.harness.js`, y el contrato que consume cada componente mockeando el
+SERVICIO completo. `gift-cards.service.spec.ts` prueba solo `generateTopUpId()` (puro, sin
+red) — consistente con ese patrón ya existente, no una laguna nueva.
+
+**Qué NO entró en Fase C:** diálogo "Recargar" (Fase E); `replaceGiftCard` sigue sin saldo
+(✅ implementada en Fase D, ver §16.23); reportes/recibos de recarga (Fase F); reset de
+`sales`/`dailySummaries` (Fase H).
+
+### 16.23 Fase D ✅ IMPLEMENTADA — `replaceGiftCard` con saldo persistente
+
+**Auditoría previa (antes de tocar código) — ciclo real de `replaceGiftCard`:**
+- El `cycleNumber` de la fuente **nunca se toca** (queda congelado en el valor que tenía al
+  cancelarse).
+- El destino SIEMPRE nace con un **ciclo nuevo**: modo `'generate'` → `cycleNumber = 1`; modo
+  `'existing'` → `(target.cycleNumber ?? 0) + 1` (continúa el historial del plástico
+  reutilizado, nunca reinicia a 1).
+- `replaceGiftCard` SIEMPRE crea un `giftCardIssues` nuevo (`db.collection('giftCardIssues').doc()`,
+  auto-ID) — en **ambos** modos. El issue anterior de la fuente ya quedó cerrado por
+  `cancelGiftCard` (`status: 'cancelled'`) y `replaceGiftCard` nunca vuelve a tocarlo.
+- Relación entre fuente y destino: `giftCards.replacedByCode`/`replacesCode` (un solo salto,
+  nunca una lista — la cadena completa vive en `giftCardMovements`, append-only) y
+  `giftCardIssues.origin = 'replacement'` en el issue nuevo. No existen campos
+  `sourceIssueId`/`destinationIssueId` separados — innecesarios, el lineage ya está cubierto.
+- **Conclusión crítica para `balanceRevision`:** técnicamente SIEMPRE es un ciclo nuevo, nunca
+  la continuación del mismo — confirmado por el punto anterior (issue nuevo, siempre). Esto
+  resuelve sin ambigüedad la decisión del punto siguiente.
+
+**Regla financiera confirmada:** replacement NUNCA es venta, recarga ni dinero nuevo. No crea
+`TOP_UP`, no crea `giftCardTopUps`, no toca `dailySummaries` — exactamente igual que antes de
+esta fase, ahora también verificado con saldo persistente de por medio (tests D11/D12).
+
+**Saldo a transferir:** `transferredBalanceCents = resolveGiftCardBalance(source, sourceIssue)`
+— **nunca** `source.amountCents`. Cubre los tres casos reales: legacy sin `balanceCents`
+(fallback a `amountCents`), consumo parcial (transfiere menos que el nominal) y recarga
+(transfiere más que el nominal, sin tope — `balanceCents > amountCents` es válido).
+
+**`amountCents` — semántica confirmada, sin cambios:** el destino sigue heredando
+`amountCents = source.amountCents` (el nominal, no el saldo) — auditado y conservado tal
+cual. Resultado típico: destino con `amountCents: 100, balanceCents: 20` (o `120`) — nominal y
+saldo son cosas distintas, y ahora pueden divergir en cualquier dirección.
+
+**Fuente después del replacement:** `balanceCents = 0` explícito (preferencia confirmada, sin
+razón fuerte en contra) — el valor ya vive en el destino, nunca debe parecer disponible en dos
+plásticos a la vez. El historial del monto transferido queda en movements/issues/lineage, no
+como saldo simultáneo.
+
+**`resolveGiftCardBalance` — ENDURECIDO por `status` (hallazgo de esta auditoría):** antes de
+este ajuste, un `balanceCents` persistido ganaba SIEMPRE, sin mirar el `status` — lo que
+significaba que una tarjeta `CANCELLED` ya reemplazada (`pendingReplacement: false`) que
+todavía arrastrara un `balanceCents` residual (dato previo a que `replaceGiftCard` empezara a
+zonificarlo) podía parecer "con saldo utilizable". Ahora el `status` manda primero: `AVAILABLE`
+→ siempre `0`; `CANCELLED` sin `pendingReplacement` → siempre `0`; en cualquier otro caso
+(`ACTIVE`/`SUSPENDED`/`CANCELLED` con `pendingReplacement`), el saldo persistido manda si
+existe, si no reconstruye por `amountCents`. Tests D23-D25.
+
+**`balanceRevision` — decisión final (según el ciclo REAL, confirmado en la auditoría):**
+como `replaceGiftCard` SIEMPRE crea un ciclo/issue nuevo, el destino SIEMPRE nace con
+`balanceRevision = 0` — nunca copia una revisión vieja arbitraria. La fuente, en cambio, SÍ
+incrementa la suya: el propio traspaso (saldo → 0) es una mutación real de `balanceCents` de
+ese ciclo, y `balanceRevision` representa *cualquier* mutación del saldo, sin excepción para
+el cierre vía reemplazo — decisión explícita, no hay alternativa documentada porque no hace
+falta: no existe ningún consumidor que necesite comparar la revisión de un ciclo ya
+`CANCELLED` (las protecciones de `cancelSale` ya rechazan por `status` antes de llegar a mirar
+revisión). Tests D9/D10.
+
+**Movements `REPLACED`/`REPLACEMENT_CREATED` — ganan snapshot de saldo:** `amountCents` pasa a
+significar el saldo TRANSFERIDO (no el nominal — mismo criterio que `REDEEMED`/`TOP_UP`: el
+monto de un movimiento es el efecto monetario real del evento), más
+`balanceBeforeCents`/`balanceAfterCents`/`balanceRevisionBefore`/`balanceRevisionAfter` según
+corresponda a cada lado (fuente: saldo→0, revisión+1; destino: 0→saldo, revisión 0→0 — un
+nacimiento no es una mutación posterior). La respuesta de la Function (`amountCents` en
+`{cardCode, newCardCode, amountCents}`) también pasa a representar el saldo transferido.
+
+**Modo `'existing'` — elegibilidad reforzada:** además de `status === 'AVAILABLE'`, se
+verifica explícitamente `resolveGiftCardBalance(target) === 0` — con el helper ya endurecido
+esto nunca dispara distinto del chequeo de `status` hoy, pero documenta la invariante y no
+depende solo de una lectura de `status` si el helper cambiara en el futuro.
+
+**`cancelGiftCard`/`suspendGiftCard`/`reactivateGiftCard` — confirmado, SIN cambios de
+código:** las tres ya eran seguras con saldo persistente desde que se auditaron en la Fase B
+(nunca tocan `balanceCents`/`balanceRevision`) — `cancelGiftCard` gana únicamente un snapshot
+de auditoría (`balanceBeforeCents === balanceAfterCents`, el saldo pendiente en el momento de
+cancelar) en su movimiento `CANCELLED`, sin mutar ningún documento. Tests D18-D20.
+
+**`cancelSale` después de un replacement:** se rechaza por la protección YA EXISTENTE de Fase
+B (`status` ya no es `ACTIVE`/`AVAILABLE`-coincidente) — ninguna lógica nueva hizo falta. Test
+D21.
+
+**Retry/doble replacement — auditado, sin rediseño (seguridad ya suficiente):** el guard
+`oldCard.replacedByCode` (ya existía) protege contra duplicación — Firestore serializa dos
+intentos concurrentes porque ambos leen y uno de ellos escribe `oldCardRef` dentro de la
+transacción, así que el que pierde la carrera se reintenta automáticamente con una lectura
+fresca que ya ve `replacedByCode` fijado y rechaza limpio. Ni un retry ni una carrera real
+pueden duplicar el saldo ni crear dos destinos. Lo que NO ofrece: idempotencia de RESPUESTA
+— un reintento tras perder la respuesta de red obtiene un error ("ya fue reemplazada"), no el
+resultado original. Sin necesidad funcional demostrada para resolver esto ahora (a diferencia
+de `topUpGiftCard`, el admin ve el resultado en pantalla al ejecutar el reemplazo, y
+`replaceGiftCard` es una operación administrativa poco frecuente) — se deja documentado para
+Fase E si llegara a hacer falta.
+
+**Rules:** sin cambios — `giftCards`/`giftCardIssues`/`giftCardMovements` siguen escritos
+exclusivamente por el Admin SDK.
+
+**Frontend:** sin cambios — ningún campo nuevo (los campos de saldo en `GiftCardMovement` ya
+existían desde Fase A/B, reutilizados tal cual). UI de reemplazo visual sigue para Fase E.
+
+---
+
+### 16.24 Fase E — UI/UX de saldo persistente (POS, detalle, recibos, historial)
+
+**Alcance:** únicamente interfaz — ningún cambio en `functions/src/*` ni en `firestore.rules`
+en esta fase. Reportes/PDF (`reports.service.ts`, `reports-dashboard.component`,
+`receivedTotals`) **sin tocar** (Fase F). Sin reset de datos.
+
+**Resolvers del frontend ENDURECIDOS, espejo exacto de la Fase D backend** (plan §16.23,
+`functions/src/giftcards.ts`): `resolveGiftCardBalance`/`resolveGiftCardIssueBalance`
+(`gift-card.model.ts`) ahora comprueban el `status` PRIMERO — `AVAILABLE` y `CANCELLED` sin
+`pendingReplacement` devuelven `0` SIEMPRE, aunque el documento tenga un `balanceCents`
+residual distinto de cero (un desfase que antes de este endurecimiento habría mostrado un
+saldo falso en el mostrador). `giftCardConverter`/`giftCardIssueConverter` no cambiaron: ya
+llamaban a estos helpers, solo se endureció la función.
+
+**POS (`sales-pos.component.ts`) migrado de `amountCents` a saldo resuelto:**
+`giftCardBalanceCents` (nuevo, `resolveGiftCardBalance(card)`) reemplaza `card.amountCents`
+en todos los cálculos de cobro. `giftCardAppliedCents` sigue siendo
+`min(balance, total)` — consumo PARCIAL (Fase B), nunca total. El antiguo
+`giftCardForfeitCents` ("sobrante perdido") se **elimina del vocabulario**: con saldo
+persistente no hay nada que perder — se reemplaza por `giftCardRemainingAfterCents` (lo que
+QUEDA en la tarjeta, mismo ciclo) y `giftCardWillBeExhausted` (caso discreto: la compra deja
+el saldo en EXACTAMENTE `0`, única condición que reabre la tarjeta a `AVAILABLE` — plan
+§16.21). Textos nuevos: `app.sales.giftCard.balanceLabel`/`remainingOnCardLabel`/
+`exhaustedNote`; se retira `forfeitWarning` (ya sin uso); `forfeitedLabel` se CONSERVA (lo
+sigue usando el recibo de una venta legacy, pre-Fase-B). El escaneo de tarjeta sigue
+rechazando por `status !== 'ACTIVE'` — AVAILABLE/SUSPENDED/CANCELLED nunca llegan a
+`foundGiftCard`; una ACTIVE legacy sin `balanceCents` se acepta igual (el resolver cae a
+`amountCents`).
+
+**Recibo de venta (`sale-detail-dialog`/`sale-receipt.service.ts`) usa el SNAPSHOT congelado,
+nunca una relectura:** cuando `payment.giftCardBalanceAfterCents` está presente (venta Fase
+B+), se imprime `Saldo anterior`/`Saldo restante` (o la etiqueta `Saldo agotado` si el
+restante es exactamente `0` — nunca "Saldo restante: Bs 0"). Cuando está ausente (venta
+legacy, consumo total), se conserva EXACTAMENTE el comportamiento anterior (`Sobrante
+perdido` si lo hubo). Las dos ramas son mutuamente excluyentes por la presencia del campo,
+nunca se mezclan. Nuevas claves: `app.sales.giftCard.balanceBeforeLabel`/`balanceAfterLabel`/
+`exhaustedLabel`.
+
+**Recarga de saldo — decisión de arquitectura de UI:** se implementó como un `PanelMode`
+MÁS dentro de `GiftCardDetailDialogComponent` (`'topUp'`, junto a `activate`/`suspend`/
+`cancel`/`editAmount`/`replace`), **no** como un diálogo/componente separado — las seis
+acciones de ciclo de vida de la tarjeta ya compartían ese mismo patrón de panel inline; crear
+un diálogo paralelo habría sido la "UI paralela" que el prompt pedía evitar. Botón
+"Recargar saldo" visible solo si `isStaff() && status === 'ACTIVE'` (`canTopUp`). El panel
+reutiliza el modelo de pago cash/qr/cash+qr del POS (monto libre a recargar + split, nunca un
+monto fijo como en "Vender/Activar"), con una vista previa en vivo de `saldo actual + monto =
+saldo después` (`topUpBalanceAfterCents`).
+
+**Ciclo de vida de `topUpId` en el cliente (regla implementada, antes solo documentada en
+§16.18 "guía para la Fase E"):** `openTopUp()` genera un id fresco con
+`GiftCardsService.generateTopUpId()` — SIEMPRE, es un intento nuevo. `confirmTopUp()` compara
+el payload (`JSON.stringify` de los pagos a enviar) contra el del ÚLTIMO intento enviado: si
+coincide (reintento real — timeout, doble clic, mismo clic repetido sin cambiar nada) se
+reutiliza el MISMO id; si no coincide (el usuario editó el monto o el método antes de
+reintentar) se genera uno NUEVO antes de llamar a la Function. Esto es exactamente lo que
+hace que un reintento real sea idempotente (mismo id → mismo resultado, sin duplicar saldo) y
+que un cambio de intención nunca reutilice un id que ya representa otra operación — lo cual
+evitaría además el error `failed-precondition` de `topUpGiftCard` en el caso normal. Cuando
+ese error SÍ ocurre (alguien más reutilizó el id, o el propio cliente no pudo evitarlo por
+alguna razón), se muestra el mensaje del servidor tal cual (mismo patrón `onError` que el
+resto del diálogo) y el panel **nunca** reintenta solo con un id nuevo — el usuario decide
+explícitamente si reintentar (mismo payload) o cambiar algo (id nuevo automático en el
+próximo intento). Doble-submit: el botón de confirmar se deshabilita mientras `saving()`
+(UX únicamente — la protección real sigue siendo `tx.create()` en el servidor).
+
+**Comprobante de recarga — generado en el cliente, sin relectura, sin tocar Rules:**
+`GiftCardTopUpReceipt` (nuevo, `gift-card.model.ts`) se construye ÍNTEGRAMENTE desde la
+respuesta de `topUpGiftCard` (`GiftCardTopUpResult`) más los pagos que el propio cliente
+envió y el nombre de quien opera (sesión activa) — nunca relee `giftCardTopUps` (sigue
+`allow read, write: if false`, plan §16.22: abrir esa Rule solo para imprimir un recibo no
+entra en el alcance de esta fase). `GiftCardReceiptService.printTopUp()` (nuevo método,
+misma infraestructura `pdfmake`/logo/encabezado que `print()`) imprime
+`Saldo anterior`/`Monto recargado`/`Saldo nuevo` + desglose de pago — título explícito
+"Comprobante de recarga de Gift Card", **nunca** "venta nueva" ni ningún lenguaje que
+sugiera un ingreso por mercadería. Reimprimir una recarga **después** de cerrar el panel
+queda fuera de esta fase (requeriría relajar la Rule o una Function de lectura dedicada —
+documentado, no implementado).
+
+**Lista y detalle — nominal vs. saldo, nunca mezclados:** la columna de monto del listado
+(`gift-card-list.component.html`) muestra `amountCents` (AVAILABLE, CANCELLED sin
+`pendingReplacement`) o `balanceCents` (ACTIVE, SUSPENDED, CANCELLED con
+`pendingReplacement`) según el estado — mismo criterio que el resolver. El encabezado del
+diálogo de detalle distingue explícitamente "Saldo disponible" (ACTIVE/SUSPENDED) de "Monto
+configurado" (AVAILABLE/CANCELLED-sin-pending) y "Saldo pendiente de reemplazo"
+(CANCELLED-pending) — tres etiquetas distintas, nunca el mismo número mostrado con
+ambigüedad. El historial de movimientos (dentro del mismo diálogo, admin-only) imprime
+`saldo antes → saldo después` para cualquier movimiento que lo tenga (`REDEEMED` parcial,
+`TOP_UP`, `BALANCE_RESTORED`) — nuevas etiquetas `app.giftCards.movements.type.TOP_UP`/
+`BALANCE_RESTORED`; `balanceRevision` **nunca** se expone en ninguna pantalla (uso interno
+exclusivo del backend, plan §16.21).
+
+**Qué NO entró en esta fase (confirmado sin cambios):** reportes/PDF de Gift Cards;
+cancelación de una recarga (sigue sin precedente, plan §16.22); relajar
+`giftCardTopUps` Rules; reset de datos de prueba (plan §16.19, sigue pendiente de
+autorización); `replaceGiftCard` ya muestra el valor transferido real (Fase D) — sin cambios
+adicionales de UI más allá de lo que el panel de reemplazo ya hacía.
+
 ---
 
 ## 17. Dinero y fechas
@@ -3412,6 +4065,95 @@ canjes tal cual; estos datos ya no se imprimen en el PDF ejecutivo (quedó fuera
 pedido), pero siguen disponibles en pantalla para quien los necesite. No se implementó el
 nuevo modelo de Gift Card con saldo (`balanceCents`, recargas, consumo parcial) — explícitamente
 fuera de alcance, queda para una tarea posterior.
+
+---
+
+### 18.6 Fase F — Recargas de Gift Card en Reportes/Daily Summaries/PDF
+
+**Alcance:** únicamente `daily-summary.model/converter`, `reports.service.ts`,
+`reports-dashboard.component`, `reports-pdf.service.ts`, i18n y tests. **Sin tocar**
+`createSale`/`cancelSale`/`topUpGiftCard`/`replaceGiftCard`, ninguna UI de Gift Cards/POS/
+recibos, Rules ni Firestore real. Sin consultar `giftCardTopUps` desde Angular (sigue
+`allow read, write: if false`) — todo sale de `dailySummaries`, que `topUpGiftCard` (Fase C)
+ya agrega en la misma transacción.
+
+**Regla financiera (ajuste sobre §18.1):** dinero ingresado a caja = efectivo/QR de ventas
+normales + efectivo/QR de activaciones de Gift Card + efectivo/QR de RECARGAS de Gift Card.
+La Gift Card aplicada como pago (`giftCardCents`) sigue sin ser dinero nuevo — nunca entra a
+esta suma, la recarga tampoco se confunde con una activación (crea cero ciclos nuevos, dinero
+nuevo sobre uno YA abierto).
+
+**`RangeTotals`/`mergeDailySummaries` (plan §18.3):** se agregan `giftCardTopUpsCents`/
+`giftCardTopUpsCashCents`/`giftCardTopUpsQrCents` — sumados por `mergeDailySummaries` igual
+que `giftCardIssuesCashCents`/`giftCardIssuesQrCents` (acumulación directa, sin `?? 0`: la
+tolerancia a un documento histórico sin el campo vive en `dailySummaryConverter`, nunca en el
+merge — mismo criterio ya establecido en Fase C).
+
+**`receivedTotals` (fórmula única, pantalla y PDF):**
+```
+cashReceived = cashCents + giftCardIssuesCashCents + giftCardTopUpsCashCents
+qrReceived   = qrCents + giftCardIssuesQrCents + giftCardTopUpsQrCents
+moneyReceived = cashReceived + qrReceived
+```
+Los dos campos de recarga son OPCIONALES en la firma de la función (`Partial<...>`, `?? 0`
+en el cuerpo) — `buildSellerBreakdown` sigue llamándola con solo 4 campos (ver más abajo), y
+eso NUNCA debe romper ni dar `NaN`.
+
+**Seller breakdown — auditado, SIN cambios (decisión explícita de esta fase):**
+`SellerBreakdown`/`buildSellerBreakdown` hoy representan "dinero recibido por vendedor" —
+mercadería (`salesCashCents`/`salesQrCents`) + Gift Cards que ESE vendedor activó
+(`issuesCashCents`/`issuesQrCents`, atribuidas por `giftCardIssues.activatedBy`). Una recarga
+NO tiene atribución por vendedor disponible en ningún dato que Angular pueda leer:
+`giftCardTopUps` (que sí guarda `performedBy`) sigue con Rules cerradas, y
+`dailySummaries.giftCardTopUpsCents` es un agregado DIARIO, no por vendedor. Conceptualmente
+las recargas deberían entrar a "dinero recibido por vendedor" (mismo criterio que las
+activaciones), pero hacerlo real exigiría o abrir `giftCardTopUps` o añadir un agregado por
+vendedor en `topUpGiftCard` — ambos fuera del alcance de esta fase (no se toca Functions ni
+Rules). Documentado para una fase futura; `buildSellerBreakdown` queda exactamente igual.
+
+**Pantalla (`reports-dashboard.component`):** `identityReceivedOk` (comprobación de
+consistencia) ahora exige que `moneyReceivedCents` incluya también
+`giftCardTopUpsCashCents`/`QrCents`. Nueva tarjeta "RECARGAS DE GIFT CARD" (monto recargado/
+cobrado en efectivo/cobrado en QR) junto a las dos ya existentes en el grid "Desglose por
+forma de pago" (ahora a 3 columnas en pantallas medianas+). Sin contador de "cantidad de
+recargas": no existe un agregado barato para esa métrica sin tocar Functions (`topUpGiftCard`
+no lleva un conteo propio en `dailySummaries`) — se deja fuera a propósito, sin inventar una
+consulta nueva.
+
+**PDF (`reports-pdf.service.ts`):** bloques Efectivo y QR ganan la fila "De recargas Gift
+Card" antes del total de cada bloque. Nuevo bloque "Recargas de Gift Card" en la sección Gift
+Card, insertado entre "Gift Cards vendidas/emitidas" y "Gift Card aplicada como pago" (orden
+pedido: activación → recarga → consumo, nunca mezclados). El "Resumen final"/cierre
+(`unbreakable`, TOTAL DINERO INGRESADO A CAJA al final) **no gana una fila nueva** — ya
+refleja las recargas porque `cashReceivedCents`/`qrReceivedCents` las incluyen por
+construcción; se mantiene la tabla de 4 filas aprobada.
+
+**Terminología:** "Recargas de Gift Card" / "Monto recargado" / "Cobrado en efectivo" /
+"Cobrado en QR" en ambas superficies — nunca `TOP_UP` ni un nombre de campo técnico visible.
+
+**Bug encontrado y corregido en la auditoría de la Fase G:** `liabilityCents` ("Pasivo
+pendiente", pantalla de Reportes) sumaba `card.amountCents` (el monto NOMINAL) de las
+tarjetas `ACTIVE`/`SUSPENDED`, en vez de `card.balanceCents` (el saldo EFECTIVO, ya resuelto
+por `giftCardConverter`). Con consumo parcial esto sobreestimaba el pasivo real — una
+tarjeta nominal Bs 100 con saldo real Bs 30 contaba como Bs 100 de deuda pendiente, no Bs
+30. El PDF nunca imprime este KPI (solo existe en pantalla), así que el reporte ejecutivo no
+estaba afectado. Corregido en `reports-dashboard.component.ts` para usar `balanceCents`, con
+tests nuevos.
+
+**Corrección posterior a la Fase E (auditoría contra el prompt original, literal, no el
+resumen):** el panel de recarga NO tenía un campo de "efectivo recibido"/cambio — solo
+pedía el monto a recargar. El prompt original (§9) exige el mismo patrón que el POS:
+comparar lo recibido contra lo que falta cobrar en efectivo, mostrar "Cambio a entregar" si
+sobra, y que el servidor reciba SOLO el monto real de la recarga, nunca el recibido de más.
+Se agregaron `topUpCashReceivedBs`/`topUpChangeCents`/`topUpChangeDisplayCents` y
+`topUpPaymentSummary` (mismo vocabulario de colores que `SalesPosComponent`: amarillo
+pendiente / azul cambio / verde completo), y `topUpCanConfirm` ahora exige
+`topUpChangeCents() >= 0` para `cash`/`cashqr` — antes se podía confirmar sin haber
+comparado nada. También se corrigió un bug real heredado de la Fase D: el panel de
+reemplazo mostraba `card.amountCents` (el monto NOMINAL) como "Valor a transferir" en dos
+sitios, en vez de `resolveGiftCardBalance(card)` (el saldo REAL, que puede ser menor —
+plan §16.23) — el prompt original (§28) lo señala explícitamente ("no mostrar falsamente
+que se transfirieron 100 si solo quedaban 70"). Ambos corregidos con tests nuevos.
 
 ---
 
@@ -4636,7 +5378,7 @@ y está escrita con sus palabras.
 | E3 | ¿Admite consumo parcial? | *"se gasta todo de una vez"* | §2.1 C-2 |
 | E4 | ¿Se da vuelto en efectivo del saldo? | *"no"* | §2.1 C-2 |
 | E5 | ¿Las tarjetas caducan? | *"no, la idea es reusar los que salen y cuando traen lo tenemos nuevamente; la idea es volver a usarlas si otro cliente lo compra"* | §16.1 · §16.2 |
-| E6 | ¿Se pueden recargar? | *"no"* | §16.2 |
+| E6 | ¿Se pueden recargar? | *"no"* — **⟳ REVOCADA (ajuste posterior, §16.18):** el cliente pidió saldo persistente con recarga mientras `ACTIVE`; la respuesta original queda documentada por historial, ya no aplica | §16.2 · revocada en §16.18 |
 | E7 | ¿Quién emite una gift card? | *"debería ser ambos, en caso no esté el administrador"* | §16.2 |
 | E8 | ¿Qué se hace con una tarjeta perdida con saldo? | *(sin respuesta)* | §22 #2 |
 

@@ -99,13 +99,28 @@
                 <span class="font-mono">
                     {{ payment.giftCardCode }} · {{ "app.giftCards.cycle" | translate }} #{{ payment.giftCardCycleNumber }}
                 </span>
+                @if (payment.giftCardBalanceAfterCents != null) {
+                @if (payment.giftCardBalanceAfterCents === 0) {
+                <p-tag [value]="'app.sales.giftCard.exhaustedLabel' | translate" severity="secondary"></p-tag>
+                } @else {
+                <span>
+                    {{ "app.sales.giftCard.balanceAfterLabel" | translate }}: {{ payment.giftCardBalanceAfterCents | money }}
+                </span>
+                }
+                } @else {
                 @if (payment.giftCardForfeitedCents; as forfeit) { @if (forfeit > 0) {
                 <p-tag
                     [value]="'app.sales.giftCard.forfeitedLabel' | translate: { amount: (forfeit | money) }"
                     severity="warning"
                 ></p-tag>
                 } }
+                }
             </div>
+            @if (payment.giftCardBalanceBeforeCents != null) {
+            <div class="flex items-center justify-end text-xs text-gray-400 -mt-1 pl-2">
+                {{ "app.sales.giftCard.balanceBeforeLabel" | translate }}: {{ payment.giftCardBalanceBeforeCents | money }}
+            </div>
+            }
             }
             }
         </div>

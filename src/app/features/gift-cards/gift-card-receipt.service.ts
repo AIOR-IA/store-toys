@@ -7,7 +7,7 @@ import { AppSettings } from '@core/models';
 import { fromCents } from '@core/utils';
 import { formatInStoreTimezone } from '@core/utils/date.util';
 import { RECEIPT_LOGO_BASE64 } from '../sales/receipt-logo.const';
-import { GiftCardReceipt } from './gift-card.model';
+import { GiftCardReceipt, GiftCardTopUpReceipt } from './gift-card.model';
 
 type PdfMake = {
     createPdf: (doc: unknown) => { print: () => void; download: (name: string) => void };
@@ -49,6 +49,130 @@ export class GiftCardReceiptService {
         pdfMake.addVirtualFileSystem(vfs);
 
         pdfMake.createPdf(this.buildDocDefinition(receipt, settings)).print();
+    }
+
+    /**
+     * Comprobante de una RECARGA (Fase E, plan §16.18/§16.22): misma
+     * infraestructura (`pdfmake`, logo, encabezado de tienda) que
+     * `print()`, pero explícitamente NO es "venta nueva" — ninguna gift
+     * card se emite ni se cobra de nuevo aquí, solo se agrega saldo al
+     * MISMO ciclo. Generado en el instante desde la respuesta ya recibida
+     * de `topUpGiftCard`, nunca releído (`giftCardTopUps` sigue cerrada,
+     * ver el comentario de `GiftCardTopUpReceipt`).
+     */
+    async printTopUp(receipt: GiftCardTopUpReceipt): Promise<void> {
+        const settings = await firstValueFrom(this.settingsService.getSettings());
+        const [pdfMakeMod, vfsFontsMod] = await Promise.all([
+            import('pdfmake/build/pdfmake'),
+            import('pdfmake/build/vfs_fonts'),
+        ]);
+        const pdfMake = (pdfMakeMod as { default?: PdfMake }).default as PdfMake;
+        const vfs = (vfsFontsMod as { default?: unknown }).default ?? vfsFontsMod;
+        pdfMake.addVirtualFileSystem(vfs);
+
+        pdfMake.createPdf(this.buildTopUpDocDefinition(receipt, settings)).print();
+    }
+
+    private buildTopUpDocDefinition(receipt: GiftCardTopUpReceipt, settings: AppSettings): unknown {
+        const dateStr = formatInStoreTimezone(receipt.createdAt, settings.timezone);
+        const line = { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1 }] };
+        const paymentRows = receipt.payments.map((payment) => ({
+            columns: [
+                { text: this.translate.instant(`app.sales.payment.${payment.method}`), width: '*' },
+                { text: this.money(payment.amountCents), width: 'auto', alignment: 'right' },
+            ],
+        }));
+
+        return {
+            pageSize: 'LETTER',
+            pageMargins: [40, 40, 40, 40],
+            defaultStyle: { fontSize: 9 },
+            content: [
+                {
+                    columns: [
+                        { image: RECEIPT_LOGO_BASE64, width: 90 },
+                        {
+                            margin: [10, 0, 0, 0],
+                            stack: [
+                                {
+                                    text: `${settings.storeName} — ${settings.storeTagline}`,
+                                    bold: true,
+                                    fontSize: 13,
+                                },
+                                { text: settings.storeDescription },
+                                { text: settings.address },
+                                {
+                                    text: [
+                                        `Tel. ${settings.phone}`,
+                                        settings.social ? ` · ${settings.social}` : '',
+                                    ].join(''),
+                                },
+                            ],
+                        },
+                    ],
+                },
+                { ...line, margin: [0, 10, 0, 10] },
+                { text: this.translate.instant('app.giftCards.topUpReceipt.title'), bold: true },
+                {
+                    columns: [
+                        { text: `${this.t('date')}: ${dateStr} (La Paz)` },
+                        { text: `${this.t('code')}: ${receipt.cardCode}`, alignment: 'right' },
+                    ],
+                    margin: [0, 4, 0, 0],
+                },
+                {
+                    text: `${this.t('seller')}: ${receipt.performedByName}`,
+                    margin: [0, 4, 0, 10],
+                },
+                line,
+                {
+                    margin: [0, 10, 0, 0],
+                    columns: [
+                        { text: this.translate.instant('app.giftCards.topUpReceipt.balanceBefore'), width: '*' },
+                        { text: this.money(receipt.balanceBeforeCents), width: 'auto', alignment: 'right' },
+                    ],
+                },
+                {
+                    margin: [0, 4, 0, 0],
+                    columns: [
+                        { text: this.translate.instant('app.giftCards.topUpReceipt.amountAdded'), width: '*', bold: true },
+                        {
+                            text: this.money(receipt.amountAddedCents),
+                            width: 'auto',
+                            alignment: 'right',
+                            bold: true,
+                        },
+                    ],
+                },
+                {
+                    margin: [0, 4, 0, 0],
+                    columns: [
+                        { text: this.translate.instant('app.giftCards.topUpReceipt.balanceAfter'), width: '*', bold: true },
+                        {
+                            text: this.money(receipt.balanceAfterCents),
+                            width: 'auto',
+                            alignment: 'right',
+                            bold: true,
+                        },
+                    ],
+                },
+                {
+                    margin: [0, 10, 0, 0],
+                    columns: [
+                        { text: '', width: '*' },
+                        {
+                            width: 200,
+                            stack: [
+                                { text: this.translate.instant('app.sales.payment.title'), bold: true },
+                                ...paymentRows,
+                            ],
+                        },
+                    ],
+                },
+                { ...line, margin: [0, 10, 0, 10] },
+                { text: this.t('footer'), alignment: 'center', italics: true },
+            ],
+        };
     }
 
     private money(cents: number): string {

@@ -6,7 +6,7 @@ import { of } from 'rxjs';
 import { SettingsService } from '@core/services';
 import { fromCents } from '@core/utils';
 import { GiftCardReceiptService } from './gift-card-receipt.service';
-import { GiftCardReceipt } from './gift-card.model';
+import { GiftCardReceipt, GiftCardTopUpReceipt } from './gift-card.model';
 
 /**
  * Recibo de Gift Card (ajuste posterior, Recibo/Historial — prompt §21,
@@ -145,5 +145,114 @@ describe('GiftCardReceiptService', () => {
         const text = await run(baseReceipt({ amountCents: 50000 }));
         expect(text).toContain(money(50000));
         expect(text).not.toContain(money(100000)); // "monto actual" hipotético tras un cambio posterior
+    });
+});
+
+/**
+ * Comprobante de RECARGA (Fase E, UI/UX de saldo persistente, plan
+ * §16.18/§16.22): mismo estilo de prueba — se intercepta `pdfmake.createPdf`
+ * y se inspecciona el documento como texto. Nunca lee `giftCardTopUps`
+ * (sigue cerrada): el documento se construye ENTERO desde la respuesta ya
+ * recibida de `topUpGiftCard` más los pagos enviados.
+ */
+describe('GiftCardReceiptService.printTopUp', () => {
+    let currencyPipe: CurrencyPipe;
+    let service: GiftCardReceiptService;
+    const money = (cents: number) => currencyPipe.transform(fromCents(cents), 'BOB', 'Bs', '1.2-2') ?? '';
+
+    const baseTopUpReceipt = (overrides: Partial<GiftCardTopUpReceipt> = {}): GiftCardTopUpReceipt => ({
+        cardCode: 'GC000002',
+        cycleNumber: 1,
+        amountAddedCents: 30000,
+        balanceBeforeCents: 25000,
+        balanceAfterCents: 55000,
+        performedByName: 'Ad Min',
+        createdAt: Timestamp.now(),
+        payments: [{ method: 'cash', amountCents: 30000 }],
+        ...overrides,
+    });
+
+    const run = async (receipt: GiftCardTopUpReceipt): Promise<string> => {
+        const pdfMakeMod = (await import('pdfmake/build/pdfmake')) as unknown as {
+            default: { createPdf: (doc: unknown) => unknown };
+        };
+        let doc: unknown;
+        const spy = spyOn(pdfMakeMod.default, 'createPdf').and.callFake(((d: unknown) => {
+            doc = d;
+            return { print: () => undefined };
+        }) as never);
+        await service.printTopUp(receipt);
+        spy.calls.reset();
+        return JSON.stringify(doc);
+    };
+
+    beforeEach(() => {
+        TestBed.configureTestingModule({
+            imports: [TranslateModule.forRoot()],
+            providers: [
+                CurrencyPipe,
+                {
+                    provide: SettingsService,
+                    useValue: {
+                        getSettings: () =>
+                            of({
+                                storeName: 'Mi Pimpollito',
+                                storeTagline: 'Juguetería',
+                                storeDescription: 'Oruro, Bolivia',
+                                address: 'Calle Falsa 123',
+                                phone: '70000000',
+                                social: '',
+                                timezone: 'America/La_Paz',
+                            }),
+                    },
+                },
+            ],
+        });
+        currencyPipe = TestBed.inject(CurrencyPipe);
+        service = TestBed.inject(GiftCardReceiptService);
+    });
+
+    it('imprime saldo anterior/monto recargado/saldo nuevo, nunca como "venta nueva"', async () => {
+        const text = await run(baseTopUpReceipt());
+        expect(text).toContain('app.giftCards.topUpReceipt.title');
+        expect(text).toContain('app.giftCards.topUpReceipt.balanceBefore');
+        expect(text).toContain('app.giftCards.topUpReceipt.amountAdded');
+        expect(text).toContain('app.giftCards.topUpReceipt.balanceAfter');
+        expect(text).toContain(money(25000));
+        expect(text).toContain(money(30000));
+        expect(text).toContain(money(55000));
+    });
+
+    it('recarga en efectivo: desglose de pago con la clave correcta', async () => {
+        const text = await run(baseTopUpReceipt({ payments: [{ method: 'cash', amountCents: 30000 }] }));
+        expect(text).toContain('app.sales.payment.cash');
+        expect(text).not.toContain('app.sales.payment.qr');
+    });
+
+    it('recarga por QR: desglose de pago con la clave correcta', async () => {
+        const text = await run(baseTopUpReceipt({ payments: [{ method: 'qr', amountCents: 30000 }] }));
+        expect(text).toContain('app.sales.payment.qr');
+        expect(text).not.toContain('app.sales.payment.cash');
+    });
+
+    it('recarga mixta (efectivo + QR): ambos montos, cada uno con su propio pago', async () => {
+        const text = await run(
+            baseTopUpReceipt({
+                payments: [
+                    { method: 'cash', amountCents: 10000 },
+                    { method: 'qr', amountCents: 20000 },
+                ],
+            }),
+        );
+        expect(text).toContain('app.sales.payment.cash');
+        expect(text).toContain('app.sales.payment.qr');
+        expect(text).toContain(money(10000));
+        expect(text).toContain(money(20000));
+    });
+
+    it('código de tarjeta y operador correctos', async () => {
+        const text = await run(baseTopUpReceipt({ cardCode: 'GC000002', performedByName: 'Ad Min' }));
+        expect(text).toContain('GC000002');
+        expect(text).toContain('Ad Min');
     });
 });

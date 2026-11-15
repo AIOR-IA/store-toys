@@ -40,4 +40,5 @@ export {
     replaceGiftCard,
     getGiftCardIssue,
     listGiftCardIssues,
+    topUpGiftCard,
 } from './giftcards';

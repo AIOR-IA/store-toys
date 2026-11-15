@@ -225,14 +225,16 @@ describe('SalesPosComponent — rebaja', () => {
     });
 
     describe('con Gift Card', () => {
-        it('tarjeta de Bs 1.000, subtotal 970, rebaja 20 → aplica Bs 950 y sobran Bs 50', () => {
+        it('tarjeta de Bs 1.000, subtotal 970, rebaja 20 → aplica Bs 950 y quedan Bs 50 de saldo EN LA TARJETA (saldo persistente, no sobrante perdido)', () => {
             component.cart.set([line(97000)]);
             component.onDiscountChange(2000);
             component.setPaymentMethod('giftcard');
             component.foundGiftCard.set(giftCard(100000));
 
+            expect(component.giftCardBalanceCents()).toBe(100000);
             expect(component.giftCardAppliedCents()).toBe(95000);
-            expect(component.giftCardForfeitCents()).toBe(5000);
+            expect(component.giftCardRemainingAfterCents()).toBe(5000);
+            expect(component.giftCardWillBeExhausted()).toBeFalse();
             expect(component.giftCardDifferenceCents()).toBe(0);
 
             component.confirmSale();
@@ -248,7 +250,7 @@ describe('SalesPosComponent — rebaja', () => {
             ]);
         });
 
-        it('tarjeta de Bs 500, total 950 → aplica Bs 500 y el complemento es de Bs 450', () => {
+        it('tarjeta de Bs 500, total 950 → aplica Bs 500 y el complemento es de Bs 450, sin saldo remanente', () => {
             component.cart.set([line(97000)]);
             component.onDiscountChange(2000);
             component.setPaymentMethod('giftcard');
@@ -256,7 +258,8 @@ describe('SalesPosComponent — rebaja', () => {
             component.giftCardDifferenceMethod.set('qr');
 
             expect(component.giftCardAppliedCents()).toBe(50000);
-            expect(component.giftCardForfeitCents()).toBe(0);
+            expect(component.giftCardRemainingAfterCents()).toBe(0);
+            expect(component.giftCardWillBeExhausted()).toBeFalse(); // la tarjeta no llega a 0 por ESTA tarjeta: la agota el complemento, no el saldo propio
             expect(component.giftCardDifferenceCents()).toBe(45000);
 
             const totalBeforeConfirm = component.totalCents(); // confirmSale vacía el carrito
@@ -273,6 +276,82 @@ describe('SalesPosComponent — rebaja', () => {
                 totalBeforeConfirm,
             );
             expect(totalBeforeConfirm).toBe(95000);
+        });
+
+        it('E1. tarjeta ADOPTADA (balanceCents real, distinto de amountCents): el POS usa el saldo persistido, nunca el monto nominal', () => {
+            component.cart.set([line(30000)]); // total Bs 300
+            component.setPaymentMethod('giftcard');
+            component.foundGiftCard.set({
+                cardCode: 'GC1000-002',
+                amountCents: 100000, // nominal Bs 1.000 — irrelevante para cobrar
+                balanceCents: 40000, // saldo real Bs 400
+                status: 'ACTIVE',
+                activeCycleId: 'cycle-2',
+            } as unknown as GiftCard);
+
+            expect(component.giftCardBalanceCents()).toBe(40000);
+            expect(component.giftCardAppliedCents()).toBe(30000);
+            expect(component.giftCardRemainingAfterCents()).toBe(10000);
+        });
+
+        it('E2. tarjeta LEGACY sin balanceCents (ACTIVE nunca redimida): el saldo efectivo es amountCents, nunca 0', () => {
+            component.cart.set([line(10000)]);
+            component.setPaymentMethod('giftcard');
+            component.foundGiftCard.set(giftCard(25000)); // sin balanceCents, como GC000002/GC000003 reales
+
+            expect(component.giftCardBalanceCents()).toBe(25000);
+        });
+
+        it('E3. la compra agota el saldo EXACTO → giftCardWillBeExhausted en true, sin saldo remanente', () => {
+            component.cart.set([line(14000)]); // total Bs 140
+            component.setPaymentMethod('giftcard');
+            component.foundGiftCard.set(giftCard(14000)); // saldo == total
+
+            expect(component.giftCardAppliedCents()).toBe(14000);
+            expect(component.giftCardRemainingAfterCents()).toBe(0);
+            expect(component.giftCardWillBeExhausted()).toBeTrue();
+        });
+
+        it('E4. la compra supera el saldo → nunca "exhausted" (lo agota el complemento, no la tarjeta por sí sola) y la diferencia es correcta', () => {
+            component.cart.set([line(14000)]);
+            component.setPaymentMethod('giftcard');
+            component.foundGiftCard.set(giftCard(10000));
+
+            expect(component.giftCardWillBeExhausted()).toBeFalse();
+            expect(component.giftCardRemainingAfterCents()).toBe(0);
+            expect(component.giftCardDifferenceCents()).toBe(4000);
+        });
+
+        for (const status of ['AVAILABLE', 'SUSPENDED', 'CANCELLED'] as const) {
+            it(`E${status === 'AVAILABLE' ? 8 : status === 'SUSPENDED' ? 9 : 10}. buscar una tarjeta ${status} la rechaza (solo ACTIVE es válida para cobrar)`, () => {
+                const lookupByCode = jasmine
+                    .createSpy('lookupByCode')
+                    .and.returnValue(of({ cardCode: 'GC-X', amountCents: 10000, status } as unknown as GiftCard));
+                (TestBed.inject(GiftCardsService) as unknown as { lookupByCode: jasmine.Spy }).lookupByCode =
+                    lookupByCode;
+                const toastError = TestBed.inject(ToastService).error as jasmine.Spy;
+
+                component.setPaymentMethod('giftcard');
+                component.giftCardCodeValue.set('GC-X');
+                component.onGiftCardCodeSubmit();
+
+                expect(component.foundGiftCard()).toBeNull();
+                expect(toastError).toHaveBeenCalledWith('app.sales.giftCard.notActive');
+            });
+        }
+
+        it('E11. tarjeta ACTIVE sí se acepta (legacy sin balanceCents incluida)', () => {
+            const lookupByCode = jasmine
+                .createSpy('lookupByCode')
+                .and.returnValue(of(giftCard(10000)));
+            (TestBed.inject(GiftCardsService) as unknown as { lookupByCode: jasmine.Spy }).lookupByCode =
+                lookupByCode;
+
+            component.setPaymentMethod('giftcard');
+            component.giftCardCodeValue.set('GC1000-001');
+            component.onGiftCardCodeSubmit();
+
+            expect(component.foundGiftCard()?.cardCode).toBe('GC1000-001');
         });
     });
 

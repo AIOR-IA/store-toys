@@ -20,7 +20,31 @@
             } @case ('CANCELLED') {
             <p-tag severity="secondary" [value]="'app.giftCards.status.cancelled' | translate"></p-tag>
             } }
-            <div class="text-xl font-semibold">{{ card.amountCents | money }}</div>
+            <div class="text-right">
+                @switch (card.status) { @case ('ACTIVE') {
+                <div class="text-xs text-gray-500">{{ "app.giftCards.balance.label" | translate }}</div>
+                <div class="text-xl font-semibold">{{ displayBalanceCents() | money }}</div>
+                @if (displayBalanceCents() !== card.amountCents) {
+                <div class="text-xs text-gray-400">
+                    {{ "app.giftCards.balance.initialCycleLabel" | translate }}: {{ card.amountCents | money }}
+                </div>
+                }
+                } @case ('SUSPENDED') {
+                <div class="text-xs text-gray-500">{{ "app.giftCards.balance.label" | translate }}</div>
+                <div class="text-xl font-semibold">{{ displayBalanceCents() | money }}</div>
+                } @case ('CANCELLED') {
+                @if (card.pendingReplacement) {
+                <div class="text-xs text-gray-500">{{ "app.giftCards.balance.pendingReplacementLabel" | translate }}</div>
+                <div class="text-xl font-semibold">{{ displayBalanceCents() | money }}</div>
+                } @else {
+                <div class="text-xs text-gray-500">{{ "app.giftCards.balance.nominalLabel" | translate }}</div>
+                <div class="text-xl font-semibold">{{ card.amountCents | money }}</div>
+                }
+                } @default {
+                <div class="text-xs text-gray-500">{{ "app.giftCards.balance.nominalLabel" | translate }}</div>
+                <div class="text-xl font-semibold">{{ card.amountCents | money }}</div>
+                } }
+            </div>
         </div>
 
         @if (mode() === 'view') {
@@ -87,6 +111,15 @@
                 [label]="'app.giftCards.actions.suspend' | translate"
                 (click)="openSuspend()"
             ></button>
+            } @if (canTopUp()) {
+            <button
+                pButton
+                type="button"
+                class="p-button-success"
+                icon="fas fa-plus"
+                [label]="'app.giftCards.actions.topUp' | translate"
+                (click)="openTopUp()"
+            ></button>
             } @if (card.status === 'SUSPENDED') {
             <button
                 pButton
@@ -150,9 +183,15 @@
                         @if (m.cycleNumber !== null) {
                         <span class="text-gray-400">#{{ m.cycleNumber }}</span>
                         }
-                        <span class="font-medium">{{ "app.giftCards.movements.type." + m.type | translate }}</span>
+                        <span class="font-medium">{{
+                            (m.type === "REDEEMED" && m.balanceAfterCents != null && m.balanceAfterCents > 0
+                                ? "app.giftCards.movements.type.REDEEMED_PARTIAL"
+                                : "app.giftCards.movements.type." + m.type) | translate
+                        }}</span>
                         @if (m.type === 'AMOUNT_CHANGED') {
                         <span class="text-gray-500"> · {{ m.previousAmountCents | money }} → {{ m.amountCents | money }}</span>
+                        } @if (m.balanceBeforeCents != null && m.balanceAfterCents != null) {
+                        <span class="text-gray-500"> · {{ m.balanceBeforeCents | money }} → {{ m.balanceAfterCents | money }}</span>
                         } @if (m.type === 'REPLACED' && m.replacedByCode) {
                         <span class="text-gray-500"> · {{ m.replacedByCode }}</span>
                         } @if (m.type === 'REPLACEMENT_CREATED' && m.replacesCode) {
@@ -308,7 +347,176 @@
                 <button pButton type="submit" [label]="'app.giftCards.actions.editAmount' | translate" [loading]="saving()" [disabled]="saving()"></button>
             </div>
         </form>
-        } @else if (mode() === 'replace') { @if (replacedResult(); as result) {
+        } @else if (mode() === 'topUp') { @if (topUpResult(); as result) {
+        <div class="flex flex-col gap-4">
+            <div class="text-sm font-medium text-success">{{ "app.giftCards.topUp.successTitle" | translate }}</div>
+            <div class="border border-gray-200 rounded px-3 py-2 flex flex-col gap-1 text-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-500">{{ "app.giftCards.topUpReceipt.balanceBefore" | translate }}</span>
+                    <span>{{ result.balanceBeforeCents | money }}</span>
+                </div>
+                <div class="flex items-center justify-between font-medium">
+                    <span>{{ "app.giftCards.topUpReceipt.amountAdded" | translate }}</span>
+                    <span>{{ result.amountAddedCents | money }}</span>
+                </div>
+                <div class="flex items-center justify-between font-semibold">
+                    <span>{{ "app.giftCards.topUpReceipt.balanceAfter" | translate }}</span>
+                    <span>{{ result.balanceAfterCents | money }}</span>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.close' | translate" (click)="close()"></button>
+                <button
+                    pButton
+                    type="button"
+                    icon="fas fa-print"
+                    [label]="'app.giftCards.topUp.printReceipt' | translate"
+                    [loading]="printingReceipt()"
+                    [disabled]="printingReceipt()"
+                    (click)="printTopUpReceipt()"
+                ></button>
+            </div>
+        </div>
+        } @else {
+        <form (ngSubmit)="confirmTopUp()" class="flex flex-col gap-4">
+            <div class="text-sm text-gray-500">
+                {{ "app.giftCards.topUp.currentBalance" | translate: { amount: (displayBalanceCents() | money) } }}
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="topUpAmountBs">{{
+                    "app.giftCards.topUp.amountLabel" | translate
+                }}</label>
+                <p-inputNumber
+                    inputId="topUpAmountBs"
+                    [ngModel]="topUpAmountBs()"
+                    (ngModelChange)="topUpAmountBs.set($event)"
+                    [name]="'topUpAmountBs'"
+                    mode="currency"
+                    currency="BOB"
+                    locale="es-BO"
+                    [minFractionDigits]="2"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium">{{ "app.giftCards.topUp.paymentMethod" | translate }}</label>
+                <div class="flex gap-4">
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            name="topUpPaymentMethod"
+                            value="cash"
+                            [ngModel]="topUpPaymentMethod()"
+                            (ngModelChange)="setTopUpPaymentMethod($event)"
+                            inputId="topUpPayCash"
+                        ></p-radioButton>
+                        <label for="topUpPayCash">{{ "app.sales.payment.cash" | translate }}</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            name="topUpPaymentMethod"
+                            value="qr"
+                            [ngModel]="topUpPaymentMethod()"
+                            (ngModelChange)="setTopUpPaymentMethod($event)"
+                            inputId="topUpPayQr"
+                        ></p-radioButton>
+                        <label for="topUpPayQr">{{ "app.sales.payment.qr" | translate }}</label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <p-radioButton
+                            name="topUpPaymentMethod"
+                            value="cashqr"
+                            [ngModel]="topUpPaymentMethod()"
+                            (ngModelChange)="setTopUpPaymentMethod($event)"
+                            inputId="topUpPayCashQr"
+                        ></p-radioButton>
+                        <label for="topUpPayCashQr">{{ "app.sales.payment.cashQr" | translate }}</label>
+                    </div>
+                </div>
+            </div>
+
+            @if (topUpPaymentMethod() === 'cashqr') {
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-medium" for="topUpQrPartBs">{{ "app.sales.mixed.qrAmount" | translate }}</label>
+                <p-inputNumber
+                    inputId="topUpQrPartBs"
+                    [ngModel]="topUpQrPartBs()"
+                    (ngModelChange)="topUpQrPartBs.set($event)"
+                    [name]="'topUpQrPartBs'"
+                    mode="currency"
+                    currency="BOB"
+                    locale="es-BO"
+                    [minFractionDigits]="2"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
+                @if (topUpMixedQrInvalid()) {
+                <div class="text-xs text-danger">{{ "app.sales.mixed.invalidQr" | translate }}</div>
+                }
+            </div>
+            }
+
+            @if (topUpPaymentMethod() === 'cash' || topUpPaymentMethod() === 'cashqr') {
+            <div class="grid grid-cols-2 gap-4">
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-medium" for="topUpCashReceivedBs">{{
+                        "app.sales.payment.received" | translate
+                    }}</label>
+                    <p-inputNumber
+                        inputId="topUpCashReceivedBs"
+                        [ngModel]="topUpCashReceivedBs()"
+                        (ngModelChange)="topUpCashReceivedBs.set($event)"
+                        [name]="'topUpCashReceivedBs'"
+                        mode="currency"
+                        currency="BOB"
+                        locale="es-BO"
+                        [minFractionDigits]="2"
+                        styleClass="w-full"
+                        inputStyleClass="w-full"
+                    ></p-inputNumber>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-medium">{{ "app.sales.payment.change" | translate }}</label>
+                    <div
+                        class="text-lg font-semibold flex items-center h-full"
+                        [class.text-danger]="(topUpChangeCents() ?? 0) < 0"
+                    >
+                        {{ topUpChangeDisplayCents() | money }}
+                    </div>
+                </div>
+            </div>
+            }
+
+            @if (topUpPaymentSummary(); as summary) {
+            <div class="p-3 rounded-md border-2 flex items-start gap-3" [ngClass]="summary.containerClass">
+                <i class="text-lg mt-0.5" [ngClass]="[summary.icon, summary.textClass]"></i>
+                <div class="flex-1 flex flex-col gap-1">
+                    <span class="text-sm font-medium" [ngClass]="summary.textClass">{{ summary.titleKey | translate }}</span>
+                    <span class="text-xl font-bold" [ngClass]="summary.textClass">{{ summary.amountCents | money }}</span>
+                </div>
+            </div>
+            }
+
+            @if (topUpAmountCents() > 0) {
+            <div class="text-sm font-medium text-info">
+                {{ "app.giftCards.topUp.balanceAfterPreview" | translate: { amount: (topUpBalanceAfterCents() | money) } }}
+            </div>
+            }
+
+            <div class="flex justify-end gap-2">
+                <button pButton type="button" class="p-button-text" [label]="'app.common.cancel' | translate" (click)="backToView()"></button>
+                <button
+                    pButton
+                    type="submit"
+                    class="p-button-success"
+                    [label]="'app.giftCards.actions.topUp' | translate"
+                    [loading]="saving()"
+                    [disabled]="!topUpCanConfirm()"
+                ></button>
+            </div>
+        </form>
+        } } @else if (mode() === 'replace') { @if (replacedResult(); as result) {
         <div class="flex flex-col gap-4">
             <div class="text-sm font-medium text-success">{{ "app.giftCards.replace.successTitle" | translate }}</div>
             <div class="border border-gray-200 rounded px-3 py-2 flex items-center justify-between">
@@ -336,7 +544,7 @@
                 </div>
                 <div>
                     <div class="text-gray-500">{{ "app.giftCards.replace.transferAmount" | translate }}</div>
-                    <div class="font-medium">{{ card.amountCents | money }}</div>
+                    <div class="font-medium">{{ displayBalanceCents() | money }}</div>
                 </div>
             </div>
 
@@ -462,8 +670,8 @@
                     <div class="text-gray-500">{{ "app.common.loading" | translate }}</div>
                     } @else {
                     <div class="flex justify-between">
-                        <span class="text-gray-500">{{ "app.giftCards.amount" | translate }}</span>
-                        <span class="font-medium">{{ card.amountCents | money }}</span>
+                        <span class="text-gray-500">{{ "app.giftCards.replace.transferAmount" | translate }}</span>
+                        <span class="font-medium">{{ displayBalanceCents() | money }}</span>
                     </div>
                     <div class="flex justify-between">
                         <span class="text-gray-500">{{ "app.giftCards.buyer" | translate }}</span>

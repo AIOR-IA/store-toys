@@ -104,7 +104,17 @@
     <ng-template pTemplate="body" let-card>
         <tr>
             <td class="font-mono">{{ card.cardCode }}</td>
-            <td>{{ card.amountCents | money }}</td>
+            <td>
+                @switch (card.status) { @case ('ACTIVE') {
+                {{ card.balanceCents | money }}
+                } @case ('SUSPENDED') {
+                {{ card.balanceCents | money }}
+                } @case ('CANCELLED') {
+                @if (card.pendingReplacement) { {{ card.balanceCents | money }} } @else { {{ card.amountCents | money }} }
+                } @default {
+                {{ card.amountCents | money }}
+                } }
+            </td>
             <td>
                 @switch (card.status) { @case ('AVAILABLE') {
                 <p-tag severity="success" [value]="'app.giftCards.status.available' | translate"></p-tag>

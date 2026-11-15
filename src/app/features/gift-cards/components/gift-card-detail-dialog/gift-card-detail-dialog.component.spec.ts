@@ -36,6 +36,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
         ({
             cardCode: 'GC-000001',
             amountCents: 10000,
+            balanceCents: 0,
             status: 'AVAILABLE',
             cycleNumber: 0,
             activeCycleId: null,
@@ -64,7 +65,12 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
 
     let fixture: ComponentFixture<GiftCardDetailDialogComponent>;
     let component: GiftCardDetailDialogComponent;
-    let sessionRole = signal<{ status: string; role: string }>({ status: 'active', role: 'admin' });
+    let sessionRole = signal<{ status: string; role: string; firstName?: string; lastName?: string }>({
+        status: 'active',
+        role: 'admin',
+        firstName: 'Ad',
+        lastName: 'Min',
+    });
     let updateGiftCardAmount: jasmine.Spy;
     let replaceGiftCard: jasmine.Spy;
     let cancelGiftCard: jasmine.Spy;
@@ -72,15 +78,18 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
     let activateGiftCard: jasmine.Spy;
     let getIssueReceipt: jasmine.Spy;
     let printReceipt: jasmine.Spy;
+    let printTopUp: jasmine.Spy;
     let getIssue: jasmine.Spy;
     let createPager: jasmine.Spy;
     let pagerSpy: { first: jasmine.Spy; next: jasmine.Spy; prev: jasmine.Spy };
+    let generateTopUpId: jasmine.Spy;
+    let topUpGiftCard: jasmine.Spy;
 
     const makeTarget = (overrides: Partial<GiftCard> = {}): GiftCard =>
         baseCard({ cardCode: 'GC-TARGET', status: 'AVAILABLE', amountCents: 5000, ...overrides });
 
     const setUp = async (card: GiftCard, role: string = 'admin') => {
-        sessionRole.set({ status: 'active', role });
+        sessionRole.set({ status: 'active', role, firstName: 'Ad', lastName: 'Min' });
         updateGiftCardAmount = jasmine.createSpy('updateGiftCardAmount').and.returnValue(
             of({ cardCode: card.cardCode, amountCents: 0 }),
         );
@@ -106,7 +115,20 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             }),
         );
         printReceipt = jasmine.createSpy('print').and.returnValue(Promise.resolve());
+        printTopUp = jasmine.createSpy('printTopUp').and.returnValue(Promise.resolve());
         getIssue = jasmine.createSpy('getIssue').and.returnValue(of(null));
+        let topUpIdCounter = 0;
+        generateTopUpId = jasmine.createSpy('generateTopUpId').and.callFake(() => `topup-${++topUpIdCounter}`);
+        topUpGiftCard = jasmine.createSpy('topUpGiftCard').and.returnValue(
+            of({
+                cardCode: card.cardCode,
+                amountAddedCents: 0,
+                balanceBeforeCents: 0,
+                balanceAfterCents: 0,
+                balanceRevision: 1,
+                cycleNumber: card.cycleNumber,
+            }),
+        );
         pagerSpy = {
             first: jasmine.createSpy('first').and.returnValue(
                 Promise.resolve({ rows: [], hasNext: false, hasPrev: false, total: 0 }),
@@ -137,6 +159,8 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
                         getIssueReceipt,
                         getIssue,
                         createPager,
+                        generateTopUpId,
+                        topUpGiftCard,
                     },
                 },
                 { provide: SessionService, useValue: { session: sessionRole } },
@@ -148,7 +172,7 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
                         errorMessage: jasmine.createSpy('errorMessage'),
                     },
                 },
-                { provide: GiftCardReceiptService, useValue: { print: printReceipt } },
+                { provide: GiftCardReceiptService, useValue: { print: printReceipt, printTopUp } },
             ],
         }).compileComponents();
 
@@ -661,6 +685,279 @@ describe('GiftCardDetailDialogComponent — identidad ≠ monto (editar monto / 
             await flush();
 
             expect(closed).toBeTrue();
+        });
+    });
+
+    /**
+     * Recarga de saldo (Fase E, UI/UX de saldo persistente, plan
+     * §16.18/§16.22): botón visible solo ACTIVE + staff, el panel reutiliza
+     * el modelo de pago cash/qr/cash+qr del POS, y el ciclo de vida de
+     * `topUpId` sigue la regla del prompt: MISMO id en un reintento real
+     * (mismo payload), id NUEVO si el formulario cambió de verdad.
+     */
+    describe('canTopUp / Recargar saldo', () => {
+        it('admin + ACTIVE: true', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            expect(component.canTopUp()).toBeTrue();
+        });
+
+        it('vendedor + ACTIVE: true (igual que admin)', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'user');
+            expect(component.canTopUp()).toBeTrue();
+        });
+
+        it('admin + AVAILABLE: false (no tiene sentido recargar lo que no se vendió)', async () => {
+            await setUp(baseCard({ status: 'AVAILABLE' }), 'admin');
+            expect(component.canTopUp()).toBeFalse();
+        });
+
+        it('admin + SUSPENDED: false', async () => {
+            await setUp(baseCard({ status: 'SUSPENDED' }), 'admin');
+            expect(component.canTopUp()).toBeFalse();
+        });
+
+        it('rol no autorizado + ACTIVE: false', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'guest');
+            expect(component.canTopUp()).toBeFalse();
+        });
+
+        it('openTopUp genera un topUpId fresco y resetea el formulario', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            expect(generateTopUpId).toHaveBeenCalledTimes(1);
+            expect(component.mode()).toBe('topUp');
+            expect(component.topUpAmountBs()).toBeNull();
+            expect(component.topUpPaymentMethod()).toBe('cash');
+        });
+
+        it('confirmTopUp (cash): envía un solo pago cash por el monto tecleado', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(300);
+            component.confirmTopUp();
+
+            expect(topUpGiftCard).toHaveBeenCalledOnceWith('topup-1', 'GC000002', [
+                { method: 'cash', amountCents: 30000 },
+            ]);
+        });
+
+        it('confirmTopUp (qr): envía un solo pago qr por el monto tecleado', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(200);
+            component.topUpPaymentMethod.set('qr');
+            component.confirmTopUp();
+
+            expect(topUpGiftCard).toHaveBeenCalledOnceWith('topup-1', 'GC000002', [
+                { method: 'qr', amountCents: 20000 },
+            ]);
+        });
+
+        it('confirmTopUp (efectivo + QR): el efectivo es el restante exacto (monto − QR)', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(500);
+            component.topUpPaymentMethod.set('cashqr');
+            component.topUpQrPartBs.set(200);
+            component.topUpCashReceivedBs.set(300); // exacto: 500 - 200 de QR
+            component.confirmTopUp();
+
+            expect(topUpGiftCard).toHaveBeenCalledOnceWith('topup-1', 'GC000002', [
+                { method: 'cash', amountCents: 30000 },
+                { method: 'qr', amountCents: 20000 },
+            ]);
+        });
+
+        it('confirmTopUp (efectivo con cambio): el cliente entrega más de lo que falta — el servidor SOLO recibe el monto real de la recarga, nunca el recibido', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(500); // entrega de más → hay cambio
+
+            expect(component.topUpChangeDisplayCents()).toBe(20000); // Bs 200 de cambio
+            expect(component.topUpCanConfirm()).toBeTrue();
+
+            component.confirmTopUp();
+            expect(topUpGiftCard).toHaveBeenCalledOnceWith('topup-1', 'GC000002', [
+                { method: 'cash', amountCents: 30000 }, // nunca los 50000 recibidos
+            ]);
+        });
+
+        it('topUpPaymentSummary: amarillo (pendiente) si lo recibido es menor a lo que falta cobrar en efectivo', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(200);
+
+            const summary = component.topUpPaymentSummary();
+            expect(summary?.severity).toBe('warn');
+            expect(summary?.amountCents).toBe(10000);
+            expect(component.topUpCanConfirm()).toBeFalse();
+        });
+
+        it('topUpPaymentSummary: azul (cambio) si lo recibido supera lo que falta cobrar', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(500);
+
+            const summary = component.topUpPaymentSummary();
+            expect(summary?.severity).toBe('info');
+            expect(summary?.amountCents).toBe(20000);
+        });
+
+        it('topUpPaymentSummary: verde (completo) con QR a secas, sin pedir "recibido"', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpPaymentMethod.set('qr');
+
+            const summary = component.topUpPaymentSummary();
+            expect(summary?.severity).toBe('success');
+            expect(summary?.amountCents).toBe(30000);
+        });
+
+        it('setTopUpPaymentMethod: cambiar de método limpia el QR y el efectivo recibido tecleados', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpPaymentMethod.set('cashqr');
+            component.topUpQrPartBs.set(100);
+            component.topUpCashReceivedBs.set(200);
+
+            component.setTopUpPaymentMethod('qr');
+
+            expect(component.topUpQrPartBs()).toBeNull();
+            expect(component.topUpCashReceivedBs()).toBeNull();
+        });
+
+        it('topUpCanConfirm: false sin monto', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            expect(component.topUpCanConfirm()).toBeFalse();
+        });
+
+        it('topUpCanConfirm: false con QR == monto (el efectivo aplicado sería 0, eso ya es "QR" a secas)', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            component.openTopUp();
+            component.topUpAmountBs.set(200);
+            component.topUpPaymentMethod.set('cashqr');
+            component.topUpQrPartBs.set(200);
+            expect(component.topUpCanConfirm()).toBeFalse();
+            expect(component.topUpMixedQrInvalid()).toBeTrue();
+        });
+
+        it('doble clic (mismo payload, ningún cambio): reutiliza el MISMO topUpId — reintento real', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            topUpGiftCard.and.returnValue(throwError(() => new Error('network timeout')));
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(300);
+
+            component.confirmTopUp();
+            component.confirmTopUp();
+
+            expect(topUpGiftCard.calls.argsFor(0)[0]).toBe('topup-1');
+            expect(topUpGiftCard.calls.argsFor(1)[0]).toBe('topup-1');
+            expect(generateTopUpId).toHaveBeenCalledTimes(1); // solo al abrir el panel, nunca entre reintentos
+        });
+
+        it('el usuario cambia el monto tras un intento fallido: genera un topUpId NUEVO (intento distinto, nunca reenvía otro payload con el id viejo)', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            topUpGiftCard.and.returnValue(throwError(() => new Error('network timeout')));
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(300);
+            component.confirmTopUp();
+
+            component.topUpAmountBs.set(400); // cambia de intención
+            component.topUpCashReceivedBs.set(400);
+            component.confirmTopUp();
+
+            expect(topUpGiftCard.calls.argsFor(0)[0]).toBe('topup-1');
+            expect(topUpGiftCard.calls.argsFor(1)[0]).toBe('topup-2');
+        });
+
+        it('éxito: guarda el resultado, emite changed y refresca cardOverride con una relectura real', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002', amountCents: 25000 }), 'admin');
+            topUpGiftCard.and.returnValue(
+                of({
+                    cardCode: 'GC000002',
+                    amountAddedCents: 30000,
+                    balanceBeforeCents: 25000,
+                    balanceAfterCents: 55000,
+                    balanceRevision: 2,
+                    cycleNumber: 1,
+                }),
+            );
+            const refreshed = baseCard({ status: 'ACTIVE', cardCode: 'GC000002', amountCents: 25000, balanceCents: 55000 });
+            lookupByCode.and.returnValue(of(refreshed));
+            let changedEmitted = false;
+            component.changed.subscribe(() => (changedEmitted = true));
+
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(300);
+            component.confirmTopUp();
+
+            expect(component.topUpResult()?.balanceAfterCents).toBe(55000);
+            expect(changedEmitted).toBeTrue();
+            expect(component.displayCard()?.balanceCents).toBe(55000);
+        });
+
+        it('error del servidor (id ya usado para otra operación): muestra el mensaje, no crashea, el panel sigue abierto', async () => {
+            await setUp(baseCard({ status: 'ACTIVE' }), 'admin');
+            const toast = TestBed.inject(ToastService) as unknown as { errorMessage: jasmine.Spy };
+            topUpGiftCard.and.returnValue(
+                throwError(() => ({
+                    code: 'functions/failed-precondition',
+                    message: 'Este identificador de recarga ya fue utilizado para otra operación.',
+                })),
+            );
+
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(300);
+            expect(() => component.confirmTopUp()).not.toThrow();
+
+            expect(toast.errorMessage).toHaveBeenCalledWith(
+                'Este identificador de recarga ya fue utilizado para otra operación.',
+            );
+            expect(component.saving()).toBeFalse();
+            expect(component.mode()).toBe('topUp');
+            expect(component.topUpResult()).toBeNull();
+        });
+
+        it('printTopUpReceipt: imprime con el snapshot del resultado, los pagos enviados y el nombre del operador en sesión', async () => {
+            await setUp(baseCard({ status: 'ACTIVE', cardCode: 'GC000002' }), 'admin');
+            topUpGiftCard.and.returnValue(
+                of({
+                    cardCode: 'GC000002',
+                    amountAddedCents: 30000,
+                    balanceBeforeCents: 25000,
+                    balanceAfterCents: 55000,
+                    balanceRevision: 2,
+                    cycleNumber: 1,
+                }),
+            );
+
+            component.openTopUp();
+            component.topUpAmountBs.set(300);
+            component.topUpCashReceivedBs.set(300);
+            component.confirmTopUp();
+            component.printTopUpReceipt();
+
+            expect(printTopUp).toHaveBeenCalledOnceWith(
+                jasmine.objectContaining({
+                    cardCode: 'GC000002',
+                    amountAddedCents: 30000,
+                    balanceBeforeCents: 25000,
+                    balanceAfterCents: 55000,
+                    performedByName: 'Ad Min',
+                    payments: [{ method: 'cash', amountCents: 30000 }],
+                }),
+            );
         });
     });
 });

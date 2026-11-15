@@ -37,6 +37,12 @@ export const dailySummaryConverter: FirestoreDataConverter<DailySummary> = {
             discountCents: data.discountCents ?? 0,
             giftCardIssuesCashCents: data.giftCardIssuesCashCents ?? 0,
             giftCardIssuesQrCents: data.giftCardIssuesQrCents ?? 0,
+            // Recargas de saldo (Fase C, plan §16.22): un resumen anterior a
+            // esta fase (o un día sin ninguna recarga) no tiene estos campos
+            // — mismo criterio defensivo que los de arriba.
+            giftCardTopUpsCents: data.giftCardTopUpsCents ?? 0,
+            giftCardTopUpsCashCents: data.giftCardTopUpsCashCents ?? 0,
+            giftCardTopUpsQrCents: data.giftCardTopUpsQrCents ?? 0,
             // Rediseño del PDF ejecutivo: un resumen anterior a este ajuste
             // (o un día sin ningún Extra vendido) no tiene este campo — sin
             // Extras ese día, mismo criterio defensivo de arriba.

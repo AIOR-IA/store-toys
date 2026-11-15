@@ -139,7 +139,12 @@ export class ReportsDashboardComponent implements OnInit {
         const t = this.rangeTotals();
         return (
             this.moneyReceivedCents() ===
-            t.cashCents + t.qrCents + t.giftCardIssuesCashCents + t.giftCardIssuesQrCents
+            t.cashCents +
+                t.qrCents +
+                t.giftCardIssuesCashCents +
+                t.giftCardIssuesQrCents +
+                t.giftCardTopUpsCashCents +
+                t.giftCardTopUpsQrCents
         );
     });
 
@@ -177,10 +182,19 @@ export class ReportsDashboardComponent implements OnInit {
             .map(([amountCents, count]) => ({ amountCents, count }))
             .sort((a, b) => a.amountCents - b.amountCents);
     });
+    /**
+     * Pasivo pendiente REAL (Fase G, auditoría de saldo persistente): suma
+     * el saldo EFECTIVO (`balanceCents`, ya resuelto por `giftCardConverter`
+     * — nunca `amountCents` directo). Antes de este ajuste sumaba el monto
+     * NOMINAL de cada tarjeta ACTIVE/SUSPENDED, lo que sobreestimaba el
+     * pasivo real de cualquier tarjeta con consumo parcial o reemplazo
+     * (ej. nominal Bs 100, saldo real Bs 30 tras una compra parcial — el
+     * pasivo vigente es Bs 30, no Bs 100).
+     */
     readonly liabilityCents = computed(() =>
         this.giftCards()
             .filter((c) => OPEN_LIABILITY_STATUSES.includes(c.status))
-            .reduce((sum, c) => sum + c.amountCents, 0),
+            .reduce((sum, c) => sum + c.balanceCents, 0),
     );
 
     readonly loadingGiftCardActivity = signal(false);

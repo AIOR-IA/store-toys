@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { Timestamp } from '@angular/fire/firestore';
 import { FormsModule } from '@angular/forms';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 import { ButtonModule } from 'primeng/button';
@@ -21,15 +22,21 @@ import { GiftCardReceiptService } from '../../gift-card-receipt.service';
 import {
     GiftCard,
     GiftCardIssue,
+    GiftCardIssuePayment,
     GiftCardIssuePaymentMethod,
     GiftCardMovement,
     GiftCardReceipt,
     GiftCardReplaceMode,
+    GiftCardTopUpReceipt,
+    GiftCardTopUpResult,
+    resolveGiftCardBalance,
 } from '../../gift-card.model';
 import { GiftCardsService } from '../../gift-cards.service';
 import { GiftCardLabelDialogComponent, GiftCardLabelTarget } from '../gift-card-label-dialog/gift-card-label-dialog.component';
 
-type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel' | 'editAmount' | 'replace';
+type PanelMode = 'view' | 'activate' | 'suspend' | 'cancel' | 'editAmount' | 'replace' | 'topUp';
+/** Lo que el panel de recarga ofrece — mismo vocabulario que `PosPaymentMethod` del POS. */
+type TopUpPaymentMethod = GiftCardIssuePaymentMethod | 'cashqr';
 
 /**
  * Detalle de una gift card (Fase 6, prompt §33): info + acciones de ciclo de
@@ -192,6 +199,144 @@ export class GiftCardDetailDialogComponent {
     loadingMovements = signal(false);
 
     /**
+     * Saldo persistente EFECTIVO de la tarjeta mostrada (Fase E, plan
+     * §16.18/§16.23) — NUNCA `amountCents` a secas: una `ACTIVE`/`SUSPENDED`
+     * adoptada puede tener un saldo real distinto del monto nominal
+     * (recargas incluidas). El header y el panel de recarga comparten esta
+     * misma fuente.
+     */
+    readonly displayBalanceCents = computed(() => {
+        const card = this.displayCard();
+        return card ? resolveGiftCardBalance(card) : 0;
+    });
+
+    /** Admin + vendedor, solo mientras ACTIVE (prompt Fase E): recargar una `AVAILABLE`/`SUSPENDED`/`CANCELLED` no tiene sentido de negocio. */
+    readonly canTopUp = computed(() => {
+        const card = this.displayCard();
+        return !!card && this.isStaff() && card.status === 'ACTIVE';
+    });
+
+    // --- Recarga de saldo (Fase E, plan §16.18/§16.22) ---
+    topUpAmountBs = signal<number | null>(null);
+    topUpPaymentMethod = signal<TopUpPaymentMethod>('cash');
+    topUpQrPartBs = signal<number | null>(null);
+    /** Efectivo RECIBIDO (puede superar lo que falta cobrar) — distinto del efectivo APLICADO que se envía al servidor (prompt §9: "el backend recibe únicamente el monto real de recarga/pago"). */
+    topUpCashReceivedBs = signal<number | null>(null);
+    topUpResult = signal<GiftCardTopUpResult | null>(null);
+    private topUpId: string | null = null;
+    /** Snapshot (JSON) del ÚLTIMO intento enviado — permite distinguir un reintento real (mismo payload) de un intento NUEVO tras editar el formulario. */
+    private topUpLastAttemptSnapshot: string | null = null;
+    private topUpLastPayments: GiftCardIssuePayment[] = [];
+
+    readonly topUpAmountCents = computed(() => {
+        const bs = this.topUpAmountBs();
+        return bs == null ? 0 : toCents(bs);
+    });
+    readonly topUpQrPartCents = computed(() => {
+        const bs = this.topUpQrPartBs();
+        return bs == null ? 0 : toCents(bs);
+    });
+    /** `0 < QR < monto`: con `QR == monto` el efectivo aplicado sería 0 (eso ya es «QR» a secas) — mismo criterio que el POS. */
+    readonly isTopUpQrValid = computed(() => {
+        const qr = this.topUpQrPartCents();
+        return Number.isSafeInteger(qr) && qr > 0 && qr < this.topUpAmountCents();
+    });
+    readonly topUpMixedQrInvalid = computed(
+        () => this.topUpPaymentMethod() === 'cashqr' && this.topUpQrPartBs() != null && !this.isTopUpQrValid(),
+    );
+    readonly topUpCashPartCents = computed(() =>
+        this.topUpPaymentMethod() === 'cashqr' && this.isTopUpQrValid()
+            ? this.topUpAmountCents() - this.topUpQrPartCents()
+            : 0,
+    );
+    readonly topUpBalanceAfterCents = computed(() => this.displayBalanceCents() + this.topUpAmountCents());
+
+    /** Lo que de verdad falta cobrar en EFECTIVO para esta recarga: el monto completo en «cash», o el tramo en «cashqr». */
+    private topUpRequiredCashCents(): number {
+        return this.topUpPaymentMethod() === 'cashqr' ? this.topUpCashPartCents() : this.topUpAmountCents();
+    }
+    readonly topUpCashReceivedCents = computed(() => {
+        const bs = this.topUpCashReceivedBs();
+        return bs == null ? 0 : toCents(bs);
+    });
+    /** Cambio = recibido − efectivo APLICADO (nunca se guarda; el servidor solo recibe el monto real de la recarga, prompt §9). */
+    readonly topUpChangeCents = computed(() => {
+        const method = this.topUpPaymentMethod();
+        if (method !== 'cash' && method !== 'cashqr') return null;
+        if (method === 'cashqr' && !this.isTopUpQrValid()) return null;
+        const received = this.topUpCashReceivedBs();
+        if (received === null || received === undefined) return null;
+        return toCents(received) - this.topUpRequiredCashCents();
+    });
+    readonly topUpChangeDisplayCents = computed(() => {
+        const change = this.topUpChangeCents();
+        return change === null ? null : Math.max(0, change);
+    });
+
+    /**
+     * Resumen visual del cobro de la recarga — mismo vocabulario de colores
+     * que el POS (amarillo pendiente / azul cambio / verde completo, prompt
+     * §9): «qr» a secas siempre está completo (sin «recibido» que comparar,
+     * igual que en `SalesPosComponent`); «cash»/«cashqr» comparan lo
+     * recibido contra lo que falta cobrar en efectivo.
+     */
+    readonly topUpPaymentSummary = computed<{
+        severity: 'success' | 'warn' | 'info';
+        icon: string;
+        containerClass: string;
+        textClass: string;
+        titleKey: string;
+        amountCents: number;
+    } | null>(() => {
+        if (this.topUpAmountCents() <= 0) return null;
+        const method = this.topUpPaymentMethod();
+        if (method === 'qr') {
+            return this.buildTopUpSummary('success', 'app.sales.summary.completeLabel', this.topUpAmountCents());
+        }
+        if (method === 'cashqr' && !this.isTopUpQrValid()) return null;
+        const receivedBs = this.topUpCashReceivedBs();
+        if (receivedBs === null || receivedBs === undefined) return null;
+        const diff = this.topUpCashReceivedCents() - this.topUpRequiredCashCents();
+        if (diff > 0) return this.buildTopUpSummary('info', 'app.sales.summary.changeLabel', diff);
+        if (diff < 0) return this.buildTopUpSummary('warn', 'app.sales.summary.pendingLabel', -diff);
+        return this.buildTopUpSummary('success', 'app.sales.summary.completeLabel', this.topUpRequiredCashCents());
+    });
+
+    private buildTopUpSummary(
+        severity: 'success' | 'warn' | 'info',
+        titleKey: string,
+        amountCents: number,
+    ): { severity: 'success' | 'warn' | 'info'; icon: string; containerClass: string; textClass: string; titleKey: string; amountCents: number } {
+        const bySeverity = {
+            success: { icon: 'fas fa-circle-check', containerClass: 'bg-success-soft border-success', textClass: 'text-success-dark' },
+            warn: { icon: 'fas fa-triangle-exclamation', containerClass: 'bg-warning-soft border-warning', textClass: 'text-warning-dark' },
+            info: { icon: 'fas fa-circle-info', containerClass: 'bg-info-soft border-info', textClass: 'text-info-dark' },
+        };
+        return { severity, titleKey, amountCents, ...bySeverity[severity] };
+    }
+
+    readonly topUpCanConfirm = computed(() => {
+        if (this.topUpAmountCents() <= 0 || this.saving()) return false;
+        const method = this.topUpPaymentMethod();
+        if (method === 'cashqr') {
+            if (!this.isTopUpQrValid()) return false;
+        }
+        if (method === 'cash' || method === 'cashqr') {
+            const change = this.topUpChangeCents();
+            return change !== null && change >= 0;
+        }
+        return true;
+    });
+
+    /** Cambiar de método limpia lo propio del método anterior (mismo criterio que `SalesPosComponent.setPaymentMethod`). */
+    setTopUpPaymentMethod(method: TopUpPaymentMethod): void {
+        if (method === this.topUpPaymentMethod()) return;
+        this.topUpPaymentMethod.set(method);
+        this.topUpQrPartBs.set(null);
+        this.topUpCashReceivedBs.set(null);
+    }
+
+    /**
      * Etiqueta de impresión (ajuste posterior a la Fase 6, prompt §15-§16):
      * admin-only, igual que registrar — funciona para códigos manuales Y
      * generados por igual, porque el diálogo solo necesita `{code,
@@ -227,6 +372,14 @@ export class GiftCardDetailDialogComponent {
                 this.cardOverride.set(null);
                 this.movements.set([]);
                 this.labelTarget.set(null);
+                this.topUpAmountBs.set(null);
+                this.topUpPaymentMethod.set('cash');
+                this.topUpQrPartBs.set(null);
+                this.topUpCashReceivedBs.set(null);
+                this.topUpResult.set(null);
+                this.topUpId = null;
+                this.topUpLastAttemptSnapshot = null;
+                this.topUpLastPayments = [];
                 if (card && admin) {
                     this.loadMovements(card.cardCode);
                 }
@@ -264,6 +417,18 @@ export class GiftCardDetailDialogComponent {
         this.newAmountBs.set(fromCents(card.amountCents));
         this.mode.set('editAmount');
     }
+    openTopUp(): void {
+        this.topUpAmountBs.set(null);
+        this.topUpPaymentMethod.set('cash');
+        this.topUpQrPartBs.set(null);
+        this.topUpCashReceivedBs.set(null);
+        this.topUpResult.set(null);
+        // Intento NUEVO: id fresco, nunca el de un panel anterior (prompt Fase E).
+        this.topUpId = this.giftCardsService.generateTopUpId();
+        this.topUpLastAttemptSnapshot = null;
+        this.mode.set('topUp');
+    }
+
     openReplace(): void {
         const card = this.displayCard();
         this.replaceReason.set('');
@@ -447,6 +612,79 @@ export class GiftCardDetailDialogComponent {
             },
             error: (error) => this.onError(error),
         });
+    }
+
+    private buildTopUpPayments(): GiftCardIssuePayment[] {
+        const method = this.topUpPaymentMethod();
+        if (method === 'cashqr') {
+            return [
+                { method: 'cash', amountCents: this.topUpCashPartCents() },
+                { method: 'qr', amountCents: this.topUpQrPartCents() },
+            ];
+        }
+        return [{ method, amountCents: this.topUpAmountCents() }];
+    }
+
+    /**
+     * Recarga el saldo (admin + vendedor, solo ACTIVE, Fase E, plan
+     * §16.18/§16.22). `topUpId` se reutiliza TAL CUAL si el payload es
+     * idéntico al último intento (reintento real: timeout, doble clic) —
+     * nunca se reenvía un payload DISTINTO con el mismo id, porque
+     * `topUpGiftCard` lo rechazaría como "usado para otra operación"
+     * (prompt Fase E: "nunca reintentar automáticamente con un id nuevo"
+     * tras ese error — aquí directamente se evita generarlo de más, dando
+     * uno nuevo recién cuando el formulario cambió de verdad).
+     */
+    confirmTopUp(): void {
+        const card = this.displayCard();
+        if (!card || !this.topUpCanConfirm() || !this.topUpId) return;
+
+        const payments = this.buildTopUpPayments();
+        const snapshot = JSON.stringify(payments);
+        if (this.topUpLastAttemptSnapshot !== null && this.topUpLastAttemptSnapshot !== snapshot) {
+            this.topUpId = this.giftCardsService.generateTopUpId();
+        }
+        this.topUpLastAttemptSnapshot = snapshot;
+        this.topUpLastPayments = payments;
+
+        this.saving.set(true);
+        this.giftCardsService.topUpGiftCard(this.topUpId, card.cardCode, payments).subscribe({
+            next: (result) => {
+                this.saving.set(false);
+                this.toast.success('app.giftCards.messages.toppedUp');
+                this.changed.emit();
+                this.topUpResult.set(result);
+                this.giftCardsService.lookupByCode(card.cardCode).subscribe({
+                    next: (fresh) => {
+                        if (fresh) this.cardOverride.set(fresh);
+                    },
+                    error: () => undefined,
+                });
+            },
+            error: (error) => this.onError(error),
+        });
+    }
+
+    printTopUpReceipt(): void {
+        const result = this.topUpResult();
+        const card = this.displayCard();
+        const session = this.sessionService.session();
+        if (!result || !card || session.status !== 'active') return;
+
+        this.printingReceipt.set(true);
+        this.receiptService
+            .printTopUp({
+                cardCode: result.cardCode,
+                cycleNumber: result.cycleNumber,
+                amountAddedCents: result.amountAddedCents,
+                balanceBeforeCents: result.balanceBeforeCents,
+                balanceAfterCents: result.balanceAfterCents,
+                performedByName: `${session.firstName} ${session.lastName}`.trim(),
+                createdAt: Timestamp.now(),
+                payments: this.topUpLastPayments,
+            })
+            .catch(() => this.toast.error('app.common.errors.general'))
+            .finally(() => this.printingReceipt.set(false));
     }
 
     /**

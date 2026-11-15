@@ -4,6 +4,7 @@ import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { TranslateModule } from '@ngx-translate/core';
 import { of, throwError } from 'rxjs';
 import { ImageCompressorService, SettingsService, ToastService } from '@core/services';
+import { GiftCard } from '../../../gift-cards/gift-card.model';
 import { GiftCardsService } from '../../../gift-cards/gift-cards.service';
 import { SaleReceiptService } from '../../../sales/sale-receipt.service';
 import { PaymentMethod, Sale } from '../../../sales/sale.model';
@@ -362,7 +363,8 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
             dateKey: '2026-09-01', monthKey: '2026-09', year: 2026, salesCount: 4, itemsCount: 4,
             totalCents: bs(2880), discountCents: 0, cashCents: bs(580), qrCents: bs(300), giftCardCents: bs(2000),
             giftCardsIssuedCents: bs(4500), giftCardForfeitedCents: bs(300),
-            giftCardIssuesCashCents: bs(3000), giftCardIssuesQrCents: bs(1500), products: {},
+            giftCardIssuesCashCents: bs(3000), giftCardIssuesQrCents: bs(1500),
+            giftCardTopUpsCents: 0, giftCardTopUpsCashCents: 0, giftCardTopUpsQrCents: 0, products: {},
         } as DailySummary;
 
         const kpi = (labelKey: string): string => {
@@ -392,6 +394,118 @@ describe('ReportsDashboardComponent — filtro por método en la consulta', () =
             expect(text).toContain('app.reports.kpis.giftCardRedeemed');
             expect(text).toContain('app.reports.kpis.giftCardsIssued');
             expect(text).not.toContain('forfeited');
+        });
+    });
+
+    /**
+     * Recargas de Gift Card (Fase F, plan §18.6, puntos 18/20 del pedido):
+     * la pantalla y el PDF deben usar EXACTAMENTE la misma fuente
+     * (`RangeTotals`/`receivedTotals`) — nunca una cifra en pantalla y otra
+     * en el PDF.
+     */
+    describe('recargas de Gift Card (Fase F)', () => {
+        const bs = (n: number) => n * 100;
+        const dayWithTopUps = {
+            dateKey: '2026-09-01', monthKey: '2026-09', year: 2026, salesCount: 1, itemsCount: 1,
+            totalCents: bs(100), discountCents: 0, cashCents: bs(100), qrCents: 0, giftCardCents: 0,
+            giftCardsIssuedCents: bs(300), giftCardForfeitedCents: 0,
+            giftCardIssuesCashCents: bs(200), giftCardIssuesQrCents: bs(100),
+            giftCardTopUpsCents: bs(75), giftCardTopUpsCashCents: bs(50), giftCardTopUpsQrCents: bs(25),
+            products: {},
+        } as DailySummary;
+
+        it('F7/F20. cashReceived/qrReceived/moneyReceived en pantalla ya incluyen las recargas', () => {
+            component.dailyRows.set([]);
+            component.summaries.set([dayWithTopUps]);
+            fixture.detectChanges();
+
+            expect(component.cashReceivedCents()).toBe(bs(100 + 200 + 50)); // ventas + activación + recarga
+            expect(component.qrReceivedCents()).toBe(bs(100 + 25));
+            expect(component.moneyReceivedCents()).toBe(bs(475));
+            expect(component.identityReceivedOk()).toBeTrue();
+        });
+
+        it('F20. el PDF recibe EXACTAMENTE el mismo rangeTotals/cashReceivedCents/qrReceivedCents que la pantalla', async () => {
+            const exportSpy = jasmine.createSpy('export').and.returnValue(Promise.resolve());
+            (TestBed.inject(ReportsPdfService) as unknown as { export: jasmine.Spy }).export = exportSpy;
+            component.dailyRows.set([]);
+            component.summaries.set([dayWithTopUps]);
+            fixture.detectChanges();
+
+            await component.exportPdf();
+
+            const sent = exportSpy.calls.mostRecent().args[0];
+            expect(sent.cashReceivedCents).toBe(component.cashReceivedCents());
+            expect(sent.qrReceivedCents).toBe(component.qrReceivedCents());
+            expect(sent.moneyReceivedCents).toBe(component.moneyReceivedCents());
+            expect(sent.rangeTotals.giftCardTopUpsCashCents).toBe(bs(50));
+            expect(sent.rangeTotals.giftCardTopUpsQrCents).toBe(bs(25));
+        });
+    });
+
+    /**
+     * Pasivo pendiente (Fase G, auditoría de saldo persistente): debe
+     * reflejar el saldo EFECTIVO de las tarjetas ACTIVE/SUSPENDED, nunca su
+     * monto nominal — una tarjeta con consumo parcial o ya reemplazada tiene
+     * un pasivo real menor al configurado originalmente.
+     */
+    describe('liabilityCents — pasivo pendiente usa balanceCents, nunca amountCents', () => {
+        const bs = (n: number) => n * 100;
+        const card = (overrides: Partial<GiftCard>): GiftCard =>
+            ({
+                cardCode: 'GC-X',
+                amountCents: bs(100),
+                balanceCents: bs(100),
+                status: 'ACTIVE',
+                cycleNumber: 1,
+                activeCycleId: 'cyc-1',
+                lastCycleId: 'cyc-1',
+                replacedByCode: null,
+                replacesCode: null,
+                pendingReplacement: false,
+                currentBuyerName: null,
+                activatedAt: null,
+                activatedBy: null,
+                activatedByName: null,
+                suspendedAt: null,
+                suspendedBy: null,
+                suspendedByName: null,
+                suspensionReason: null,
+                cancelledAt: null,
+                cancelledBy: null,
+                cancelledByName: null,
+                cancelReason: null,
+                createdAt: { toDate: () => new Date() } as GiftCard['createdAt'],
+                createdBy: 'admin',
+                createdByName: 'Ad Min',
+                updatedAt: { toDate: () => new Date() } as GiftCard['updatedAt'],
+                ...overrides,
+            }) as GiftCard;
+
+        it('ACTIVE con consumo parcial (nominal 100, saldo real 30): el pasivo es 30, NUNCA 100', () => {
+            component.giftCards.set([card({ status: 'ACTIVE', amountCents: bs(100), balanceCents: bs(30) })]);
+            expect(component.liabilityCents()).toBe(bs(30));
+        });
+
+        it('SUSPENDED conserva su saldo real como pasivo', () => {
+            component.giftCards.set([card({ status: 'SUSPENDED', amountCents: bs(100), balanceCents: bs(70) })]);
+            expect(component.liabilityCents()).toBe(bs(70));
+        });
+
+        it('AVAILABLE y CANCELLED nunca aportan pasivo, aunque tengan un amountCents nominal alto', () => {
+            component.giftCards.set([
+                card({ status: 'AVAILABLE', amountCents: bs(500), balanceCents: 0 }),
+                card({ status: 'CANCELLED', amountCents: bs(500), balanceCents: 0, pendingReplacement: false }),
+            ]);
+            expect(component.liabilityCents()).toBe(0);
+        });
+
+        it('suma varias tarjetas ACTIVE/SUSPENDED por su saldo real, nunca por su nominal', () => {
+            component.giftCards.set([
+                card({ status: 'ACTIVE', amountCents: bs(100), balanceCents: bs(30) }),
+                card({ status: 'SUSPENDED', amountCents: bs(250), balanceCents: bs(250) }),
+            ]);
+            expect(component.liabilityCents()).toBe(bs(280));
         });
     });
 

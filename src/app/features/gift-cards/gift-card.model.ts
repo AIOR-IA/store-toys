@@ -64,6 +64,31 @@ export type GiftCardReplaceMode = 'generate' | 'existing';
 export interface GiftCard {
     cardCode: string; // del ID del documento — NO se guarda en el documento
     amountCents: number; // monto configurado ACTUAL (editable solo admin + AVAILABLE; ver comentario de cabecera)
+    /**
+     * Saldo persistente disponible AHORA MISMO (ajuste posterior, plan §16.18
+     * — revoca E6 "no se pueden recargar"). NUNCA es `amountCents`: ese sigue
+     * siendo el monto configurado/nominal del ciclo, este es lo que
+     * realmente queda por gastar. Invariantes: `AVAILABLE` → `0`;
+     * `ACTIVE`/`SUSPENDED` → `> 0` (suspender nunca pierde saldo);
+     * `CANCELLED` puede conservar `> 0` mientras `pendingReplacement` espera
+     * un `replaceGiftCard`. Un documento anterior a este ajuste no tiene el
+     * campo: `giftCardConverter` lo lee como `0` (nunca como `amountCents` —
+     * sería una suposición de negocio, no un valor neutro).
+     */
+    balanceCents: number;
+    /**
+     * Contador monotónico de "algo tocó el saldo de este ciclo" (ajuste
+     * sobre la Fase B, plan §16.21) — nunca se repite dentro de un ciclo,
+     * a diferencia del saldo (que sí puede volver a un valor anterior tras
+     * una recarga). Solo lo usa el backend (`cancelSale`) como chequeo
+     * autoritativo; la UI todavía no lo necesita — opcional a propósito,
+     * sin resolver legacy (no hay historial de `balanceRevision` que
+     * reconstruir). Representa EXCLUSIVAMENTE la secuencia de operaciones
+     * que modifican `balanceCents` — nunca cambios de status, comprador ni
+     * ningún otro campo (por eso el nombre explícito, no un `revision`
+     * genérico).
+     */
+    balanceRevision?: number;
     status: GiftCardStatus;
 
     /**
@@ -171,7 +196,19 @@ export interface GiftCardIssue {
     id: string;
     cardCode: string;
     cycleNumber: number;
-    amountCents: number; // snapshot de GiftCard.amountCents en la activación
+    amountCents: number; // snapshot INMUTABLE del monto con el que nació este ciclo — nunca cambia después
+    /**
+     * Saldo CORRIENTE de este ciclo (ajuste posterior, plan §16.18). Vive
+     * aparte de `GiftCard.balanceCents` (que es el acceso rápido del
+     * mostrador) porque la reversión de `cancelSale` necesita comparar el
+     * saldo exactamente como quedó en el momento de ESTA venta, sin depender
+     * de qué le haya pasado a `GiftCard` desde entonces. Un ciclo histórico
+     * (anterior a este ajuste, o ya cerrado antes de que existiera) se lee
+     * como `0` — nunca como `amountCents`.
+     */
+    balanceCents: number;
+    /** Equivalente a `GiftCard.balanceRevision` para este ciclo (ajuste sobre la Fase B, plan §16.21). */
+    balanceRevision?: number;
     status: GiftCardCycleStatus;
     /** Opcional por compatibilidad histórica: un ciclo sin este campo es `'sale'` (ver el tipo). */
     origin?: GiftCardIssueOrigin;
@@ -203,6 +240,61 @@ export interface GiftCardIssue {
     closedAt: Timestamp | null;
 }
 
+/**
+ * Saldo persistente — adopción progresiva, SIN backfill masivo (ajuste
+ * posterior sobre la Fase A, plan §16.18): resuelve el saldo EFECTIVO de una
+ * `GiftCard` que todavía no fue "adoptada" por el modelo nuevo (nunca tuvo
+ * `balanceCents` escrito). Usado por `giftCardConverter` para que el
+ * mostrador NUNCA muestre saldo `0` falso en una `ACTIVE`/`SUSPENDED` legacy
+ * que jamás se redimió — mismo criterio y mismo nombre que el helper
+ * equivalente de `functions/src/giftcards.ts` (backend).
+ *
+ * Recibe los campos ya leídos de Firestore (antes de que el converter
+ * decida qué poner en `balanceCents`), nunca un `GiftCard` ya resuelto —
+ * evitaría poder distinguir "0 real" de "campo ausente".
+ *
+ * ENDURECIDO en la Fase E — mismo criterio que el helper equivalente de
+ * `functions/src/giftcards.ts` (Fase D, plan §16.23): el `status` manda
+ * SIEMPRE sobre cualquier `balanceCents` residual, nunca al revés.
+ * `AVAILABLE` y `CANCELLED` sin `pendingReplacement` devuelven `0` aunque el
+ * documento tenga un `balanceCents` viejo distinto de cero (p. ej. una
+ * tarjeta ya reemplazada con un residuo que debería haber quedado en 0) —
+ * el mostrador nunca debe mostrar un saldo que el backend ya considera
+ * inexistente.
+ */
+export function resolveGiftCardBalance(card: {
+    status: GiftCardStatus;
+    amountCents: number;
+    balanceCents?: number | null;
+    pendingReplacement?: boolean;
+}): number {
+    if (card.status === 'AVAILABLE') return 0;
+    if (card.status === 'CANCELLED' && !card.pendingReplacement) return 0;
+    if (typeof card.balanceCents === 'number') return card.balanceCents;
+    return card.amountCents;
+}
+
+/**
+ * Equivalente a `resolveGiftCardBalance` para un `GiftCardIssue` (ajuste
+ * posterior, plan §16.18). Un ciclo CERRADO (`redeemed`/`cancelled`,
+ * histórico) nunca necesitó saldo — su efectivo es `0`; solo un ciclo
+ * abierto (`active`/`suspended`) sin `balanceCents` todavía reconstruye
+ * desde `amountCents`, igual criterio que la tarjeta.
+ *
+ * ENDURECIDO en la Fase E, mismo motivo que `resolveGiftCardBalance`: un
+ * ciclo cerrado devuelve `0` aunque tenga un `balanceCents` residual — el
+ * estado del ciclo manda siempre.
+ */
+export function resolveGiftCardIssueBalance(issue: {
+    status: GiftCardCycleStatus;
+    amountCents: number;
+    balanceCents?: number | null;
+}): number {
+    if (issue.status === 'redeemed' || issue.status === 'cancelled') return 0;
+    if (typeof issue.balanceCents === 'number') return issue.balanceCents;
+    return issue.amountCents;
+}
+
 export type GiftCardMovementType =
     | 'REGISTERED'
     | 'ACTIVATED'
@@ -215,7 +307,12 @@ export type GiftCardMovementType =
     // Ajuste posterior (identidad ≠ monto, plan §16.13):
     | 'AMOUNT_CHANGED' // admin cambió el monto configurado (solo AVAILABLE) — NUNCA es ingreso
     | 'REPLACED' // tarjeta vieja: quedó CANCELLED y transfirió su valor a `replacedByCode`
-    | 'REPLACEMENT_CREATED'; // tarjeta nueva: nació con el valor transferido de `replacesCode`
+    | 'REPLACEMENT_CREATED' // tarjeta nueva: nació con el valor transferido de `replacesCode`
+    // Ajuste posterior (saldo persistente, plan §16.18) — tipos reservados
+    // para las Fases B/C: ningún Function los escribe todavía (Fase A solo
+    // prepara el modelo).
+    | 'TOP_UP' // recarga: balanceCents aumenta sobre el MISMO ciclo (ACTIVE únicamente)
+    | 'BALANCE_RESTORED'; // reversión de `cancelSale` sobre saldo parcial — NUNCA reutiliza 'ADJUSTMENT'
 
 /**
  * `giftCardMovements/{id}` — libro mayor append-only. Solo admin (Rules).
@@ -245,4 +342,55 @@ export interface GiftCardMovement {
     replacedByCode?: string | null;
     /** Solo en `REPLACEMENT_CREATED` (tarjeta nueva): el código de la tarjeta vieja. */
     replacesCode?: string | null;
+    /**
+     * Saldo antes/después del evento (ajuste posterior, plan §16.18) —
+     * `REDEEMED`/`BALANCE_RESTORED` (Fase B) y `TOP_UP` (Fase C) ya los
+     * escriben; el resto de los tipos (`REGISTERED`, `ACTIVATED`, etc.) no
+     * los necesita, quedan opcionales por eso.
+     */
+    balanceBeforeCents?: number | null;
+    balanceAfterCents?: number | null;
+    /** Equivalente a `balanceRevision` de la tarjeta/ciclo en el momento de este movimiento (ajuste sobre la Fase B, plan §16.21). */
+    balanceRevisionBefore?: number | null;
+    balanceRevisionAfter?: number | null;
+}
+
+/**
+ * Respuesta de `topUpGiftCard` (Fase C, plan §16.22) — lo mínimo que el
+ * frontend futuro (Fase E) necesita para refrescar la pantalla sin releer la
+ * tarjeta. Un reintento idempotente (mismo `topUpId`) devuelve exactamente
+ * esta misma forma, con los valores de la recarga original.
+ */
+export interface GiftCardTopUpResult {
+    cardCode: string;
+    amountAddedCents: number;
+    balanceBeforeCents: number;
+    balanceAfterCents: number;
+    balanceRevision: number;
+    cycleNumber: number;
+}
+
+/**
+ * Comprobante de UNA recarga (Fase E, UI/UX de saldo persistente): a
+ * diferencia de `GiftCardReceipt` (emisión/venta real, respaldada por
+ * `giftCardIssues` vía `getGiftCardIssue`), este NUNCA se relee del servidor
+ * — `giftCardTopUps` sigue `allow read, write: if false` (plan §16.22: "sin
+ * consumidor real todavía") y abrir esa Rule solo para imprimir un recibo no
+ * está en el alcance de esta fase. Se construye en el cliente, en el
+ * instante, a partir de la RESPUESTA ya recibida de `topUpGiftCard`
+ * (`GiftCardTopUpResult`) más los pagos que el propio cliente envió y el
+ * nombre de quien hizo la operación (sesión activa) — nunca se inventa
+ * ningún valor que no haya confirmado el servidor. Reimprimir más adelante
+ * (fuera de esta fase) requeriría o bien relajar esa Rule, o bien una
+ * Function de lectura dedicada — documentado, no implementado aquí.
+ */
+export interface GiftCardTopUpReceipt {
+    cardCode: string;
+    cycleNumber: number;
+    amountAddedCents: number;
+    balanceBeforeCents: number;
+    balanceAfterCents: number;
+    performedByName: string;
+    createdAt: Timestamp;
+    payments: GiftCardIssuePayment[];
 }

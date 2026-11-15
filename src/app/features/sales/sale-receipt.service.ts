@@ -59,6 +59,15 @@ export class SaleReceiptService {
      * entero. Ahora cada método imprime su propio `amountCents` (el mismo
      * snapshot que ya guardó `createSale`, nunca un recálculo) para que el
      * dueño pueda ver de un vistazo cuánto entró por cada forma de pago.
+     *
+     * Saldo persistente (Fase E, plan §16.18/§16.23): un pago `giftcard` de
+     * una venta Fase B+ imprime además el saldo ANTES/DESPUÉS, siempre desde
+     * el SNAPSHOT congelado de la venta (`giftCardBalanceBeforeCents`/
+     * `AfterCents`) — nunca una relectura del estado actual de la tarjeta,
+     * que puede pertenecer a un ciclo totalmente distinto para cuando se
+     * reimprime. Un recibo de una venta ANTERIOR a esa fase no tiene esos
+     * campos: se imprime exactamente igual que siempre (sobrante perdido, si
+     * lo hubo).
      */
     private buildPaymentRows(sale: Sale): unknown[] {
         return sale.payments.flatMap((payment) => {
@@ -78,6 +87,28 @@ export class SaleReceiptService {
                     color: 'gray',
                     margin: [0, 0, 0, 2] as [number, number, number, number],
                 });
+                if (payment.giftCardBalanceAfterCents != null) {
+                    const afterText =
+                        payment.giftCardBalanceAfterCents === 0
+                            ? this.translate.instant('app.sales.giftCard.exhaustedLabel')
+                            : `${this.translate.instant('app.sales.giftCard.balanceAfterLabel')}: ${this.money(payment.giftCardBalanceAfterCents)}`;
+                    const beforeLabel = this.translate.instant('app.sales.giftCard.balanceBeforeLabel');
+                    rows.push({
+                        text: `${beforeLabel}: ${this.money(payment.giftCardBalanceBeforeCents ?? 0)} · ${afterText}`,
+                        fontSize: 8,
+                        color: 'gray',
+                        margin: [0, 0, 0, 2] as [number, number, number, number],
+                    });
+                } else if (payment.giftCardForfeitedCents) {
+                    rows.push({
+                        text: this.translate.instant('app.sales.giftCard.forfeitedLabel', {
+                            amount: this.money(payment.giftCardForfeitedCents),
+                        }),
+                        fontSize: 8,
+                        color: 'gray',
+                        margin: [0, 0, 0, 2] as [number, number, number, number],
+                    });
+                }
             }
             return rows;
         });

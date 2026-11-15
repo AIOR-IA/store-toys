@@ -181,12 +181,14 @@ export class ReportsPdfService {
                 this.sectionTitle(this.t('sections.cash')),
                 this.row(this.t('cash.fromSales'), this.money(t.cashCents)),
                 this.row(this.t('cash.fromGiftCards'), this.money(t.giftCardIssuesCashCents)),
+                this.row(this.t('cash.fromTopUps'), this.money(t.giftCardTopUpsCashCents)),
                 this.row(this.t('cash.total'), this.money(data.cashReceivedCents), true),
 
                 // ---- QR ----
                 this.sectionTitle(this.t('sections.qr')),
                 this.row(this.t('qr.fromSales'), this.money(t.qrCents)),
                 this.row(this.t('qr.fromGiftCards'), this.money(t.giftCardIssuesQrCents)),
+                this.row(this.t('qr.fromTopUps'), this.money(t.giftCardTopUpsQrCents)),
                 this.row(this.t('qr.total'), this.money(data.qrReceivedCents), true),
 
                 // ---- Gift Card ----
@@ -199,6 +201,15 @@ export class ReportsPdfService {
                 this.row(this.t('breakdown.totalNominal'), this.money(t.giftCardsIssuedCents)),
                 this.row(this.t('breakdown.collectedCash'), this.money(t.giftCardIssuesCashCents)),
                 this.row(this.t('breakdown.collectedQr'), this.money(t.giftCardIssuesQrCents)),
+                {
+                    text: this.t('giftCards.topUps.title'),
+                    bold: true,
+                    fontSize: 9,
+                    margin: [0, 8, 0, 2] as [number, number, number, number],
+                },
+                this.row(this.t('giftCards.topUps.amount'), this.money(t.giftCardTopUpsCents)),
+                this.row(this.t('giftCards.topUps.cash'), this.money(t.giftCardTopUpsCashCents)),
+                this.row(this.t('giftCards.topUps.qr'), this.money(t.giftCardTopUpsQrCents)),
                 {
                     text: this.t('giftCards.appliedTitle'),
                     bold: true,

@@ -46,8 +46,35 @@ export interface Payment {
     giftCardCode?: string;
     giftCardCycleNumber?: number;
     giftCardCycleId?: string;
-    /** Sobrante perdido de la tarjeta si la compra fue menor a su denominación (plan §16.3, fila 4'). */
+    /**
+     * Sobrante perdido de la tarjeta si la compra fue menor a su denominación
+     * (plan §16.3, fila 4'). Solo en ventas ANTERIORES a la Fase B (saldo
+     * persistente, plan §16.18/§16.20): con saldo persistente ya no existe
+     * sobrante que perder — toda venta NUEVA guarda este campo en `0`, nunca
+     * se omite (misma forma que siempre, compatibilidad de lectura).
+     */
     giftCardForfeitedCents?: number;
+    /**
+     * Saldo persistente (Fase B, plan §16.18/§16.20): snapshot del saldo
+     * EFECTIVO antes/después de esta venta — permite reconstruir saldo
+     * antes/aplicado(`amountCents`)/después sin leer el estado futuro de la
+     * tarjeta, y es lo que `cancelSale` compara para decidir si puede
+     * restaurar. Ausentes en una venta anterior a esta fase (consumo TOTAL,
+     * sin saldo persistente) — `cancelSale` distingue ese caso por la
+     * ausencia de estos dos campos, nunca por otra señal.
+     */
+    giftCardBalanceBeforeCents?: number;
+    giftCardBalanceAfterCents?: number;
+    /**
+     * Contador monotónico de "algo tocó el saldo de este ciclo" (ajuste
+     * sobre la Fase B, plan §16.21) — el saldo solo no basta: tras una
+     * recarga puede volver a un valor que ya tuvo antes. `cancelSale` exige
+     * `currentBalanceRevision === giftCardBalanceRevisionAfter` como chequeo
+     * autoritativo, además de (nunca en vez de) la comparación de saldo.
+     * Ausente en la misma rama legacy que los campos de saldo.
+     */
+    giftCardBalanceRevisionBefore?: number;
+    giftCardBalanceRevisionAfter?: number;
 }
 
 /**

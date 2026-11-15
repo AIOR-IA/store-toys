@@ -151,6 +151,19 @@ interface UpdateGiftCardAmountData {
 }
 
 /**
+ * `topUpId` lo genera el CLIENTE (Fase C, plan §16.22) — mismo mecanismo que
+ * `saleId` (`GiftCardsService.generateTopUpId()` / `generateSaleId()`): es lo
+ * que permite que `topUpGiftCard` sea idempotente con `tx.create()` sobre
+ * `giftCardTopUps/{topUpId}` — un doble clic reenvía el mismo `topUpId` y la
+ * segunda llamada devuelve el resultado ya guardado, sin volver a sumar saldo.
+ */
+interface TopUpGiftCardData {
+    topUpId: string;
+    code: string;
+    payments: IssuePaymentInput[];
+}
+
+/**
  * `'generate'` (default, sin cambios) — código nuevo generado por el sistema.
  * `'existing'` — reutiliza una Gift Card física YA REGISTRADA, `AVAILABLE`
  * (ajuste posterior, prompt "reemplazar usando una Gift Card existente").
@@ -442,6 +455,19 @@ function requireIssueId(value: unknown): string {
     return value.trim();
 }
 
+/**
+ * Forma de ID de documento de Firestore (Fase C, plan §16.22) — mismo
+ * patrón/regex que `requireDocId` en `sales.ts` para `saleId`: el valor se
+ * usa directamente como path de `giftCardTopUps/{topUpId}`, así que su forma
+ * se valida server-side, nunca se confía a ciegas en lo que mande el cliente.
+ */
+function requireTopUpId(value: unknown): string {
+    if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+        throw new HttpsError('invalid-argument', 'El identificador de recarga es inválido.');
+    }
+    return value;
+}
+
 function requireListPageSize(value: unknown): number {
     if (
         typeof value !== 'number' ||
@@ -515,6 +541,96 @@ function toIssueDto(snap: FirebaseFirestore.DocumentSnapshot): GiftCardIssueDto 
         payments:
             (snap.get('payments') as { method: IssuePaymentMethod; amountCents: number }[]) ?? [],
     };
+}
+
+/**
+ * Saldo persistente — adopción progresiva, SIN backfill masivo (ajuste
+ * posterior sobre la Fase A, plan §16.18): resuelve el saldo EFECTIVO de una
+ * Gift Card/ciclo que todavía no fue "adoptada" por el modelo nuevo (nunca
+ * tuvo `balanceCents` escrito). **Nunca usa `?? 0` a ciegas**: una tarjeta
+ * `ACTIVE`/`SUSPENDED` legacy que jamás se redimió tiene saldo real =
+ * `amountCents`, no cero — lo contrario inventaría una pérdida de dinero que
+ * nunca ocurrió.
+ *
+ * Prioridad de lectura: `card.balanceCents` (ya adoptada) > `issue.balanceCents`
+ * (el ciclo ya lo tiene aunque la tarjeta denormalizada todavía no, caso
+ * borde defensivo) > reconstrucción por `status`.
+ *
+ * Toda Function que mueva dinero sobre Gift Cards (Fase B+:
+ * `createSale`/`cancelSale`/`topUpGiftCard`/`replaceGiftCard`) DEBE leer el
+ * saldo a través de este helper, nunca `cardSnap.get('balanceCents')`
+ * directo — y debe escribir `balanceCents` explícito (en `giftCards` Y en
+ * `giftCardIssues`, misma transacción) en la PRIMERA operación que toque esa
+ * tarjeta: desde ese momento queda adoptada y este fallback deja de
+ * aplicarle para siempre (invariante card/issue, plan §16.18).
+ *
+ * `pendingReplacement` solo importa para `CANCELLED`: una tarjeta cancelada
+ * con un ciclo pagado todavía sin transferir conserva ese valor
+ * (`replaceGiftCard` lo necesita); cancelada sin eso, el saldo efectivo es 0
+ * (nunca tuvo valor pendiente).
+ *
+ * ENDURECIDO (Fase D, plan §16.23): el `status` manda SIEMPRE, incluso sobre
+ * un `balanceCents` ya persistido — un documento nunca debería llegar a este
+ * estado (`replaceGiftCard` ahora pone `source.balanceCents = 0` al
+ * transferir, y `createSale` ya pone `0` al llegar a `AVAILABLE`), pero el
+ * helper no se arriesga a que un residuo inconsistente (un dato corrupto a
+ * mano, un bug futuro) haga parecer "con saldo utilizable" una tarjeta que
+ * el propio estado dice que no lo tiene:
+ * - `AVAILABLE` → SIEMPRE `0`, sin mirar `balanceCents` en absoluto.
+ * - `CANCELLED` SIN `pendingReplacement` (nunca tuvo ciclo abierto, o ya se
+ *   reemplazó) → SIEMPRE `0`, sin mirar `balanceCents`.
+ * - `ACTIVE`/`SUSPENDED`/`CANCELLED` CON `pendingReplacement` → el saldo
+ *   persistido manda si existe; si no, reconstruye por `amountCents`
+ *   (legacy).
+ */
+export function resolveGiftCardBalance(
+    card: {
+        status: string;
+        amountCents: number;
+        balanceCents?: number | null;
+        pendingReplacement?: boolean;
+    },
+    issue?: { balanceCents?: number | null } | null,
+): number {
+    if (card.status === 'AVAILABLE') return 0;
+    if (card.status === 'CANCELLED' && !card.pendingReplacement) return 0;
+    if (typeof card.balanceCents === 'number') return card.balanceCents;
+    if (issue && typeof issue.balanceCents === 'number') return issue.balanceCents;
+    // Solo se llega aquí para ACTIVE/SUSPENDED/CANCELLED+pendingReplacement —
+    // los únicos estados donde "saldo efectivo" legacy tiene sentido.
+    return card.amountCents;
+}
+
+/**
+ * Contador monotónico de "algo tocó el saldo de este ciclo" (ajuste sobre la
+ * Fase B, plan §16.21): el saldo SOLO no basta para que `cancelSale` detecte
+ * una operación posterior — sin recarga, el saldo de un ciclo abierto solo
+ * baja (nunca repite un valor), pero en cuanto exista `topUpGiftCard` el
+ * saldo puede subir y volver a coincidir con un valor que ya tuvo antes
+ * (ejemplo real: 100→70 por una venta, recarga 70→100, otra venta 100→70 —
+ * el mismo "70" aparece dos veces sin relación entre sí). `cycleNumber`
+ * tampoco lo detecta: ni una redención parcial ni una recarga avanzan el
+ * ciclo.
+ *
+ * `balanceRevision` nace en `0` en cada activación nueva (junto con
+ * `cycleNumber`/`balanceCents`) y sube `+1` en CADA operación que toque el
+ * saldo del ciclo — nunca se repite dentro del mismo ciclo, así que es un
+ * testigo fiable de "nada pasó desde que leí este valor", a diferencia del
+ * saldo. Representa EXCLUSIVAMENTE la secuencia de operaciones que
+ * modifican `balanceCents` — nunca cambios de status, comprador ni ningún
+ * otro campo (por eso el nombre explícito, no un `revision` genérico).
+ *
+ * Un documento legacy sin el campo se reconstruye como `0` — nunca hay un
+ * fallback por `status` como en `resolveGiftCardBalance`: no existe ningún
+ * historial de `balanceRevision` previo a este ajuste que reconstruir.
+ */
+export function resolveGiftCardBalanceRevision(
+    card: { balanceRevision?: number | null },
+    issue?: { balanceRevision?: number | null } | null,
+): number {
+    if (typeof card.balanceRevision === 'number') return card.balanceRevision;
+    if (issue && typeof issue.balanceRevision === 'number') return issue.balanceRevision;
+    return 0;
 }
 
 /**
@@ -674,6 +790,13 @@ function buildNewCardDoc(
     return {
         cardCode,
         amountCents,
+        // Saldo persistente (ajuste posterior, plan §16.18): una tarjeta
+        // recién registrada nace AVAILABLE — invariante definitivo,
+        // balanceCents = 0 (no hay nada que gastar hasta que se venda/active).
+        balanceCents: 0,
+        // Contador balanceRevision (ajuste sobre Fase B, plan §16.21): nace
+        // en 0, igual que balanceCents — no hay nada que proteger todavía.
+        balanceRevision: 0,
         status: 'AVAILABLE' as const,
         cycleNumber: 0,
         activeCycleId: null,
@@ -787,6 +910,12 @@ export const activateGiftCard = onCall<ActivateGiftCardData>({ region: REGION },
         // Solo escrituras de aquí en adelante.
         tx.update(cardRef, {
             status: 'ACTIVE',
+            // Saldo persistente (ajuste posterior, plan §16.18): una
+            // activación NUEVA nace con balance completo — invariante
+            // definitivo, ACTIVE siempre > 0 en el momento de nacer.
+            balanceCents: amountCents,
+            // Nuevo ciclo = nuevo contador balanceRevision, desde 0 (plan §16.21).
+            balanceRevision: 0,
             cycleNumber: newCycleNumber,
             activeCycleId: issueRef.id,
             lastCycleId: issueRef.id,
@@ -806,6 +935,11 @@ export const activateGiftCard = onCall<ActivateGiftCardData>({ region: REGION },
             cardCode,
             cycleNumber: newCycleNumber,
             amountCents,
+            // Saldo persistente (ajuste posterior, plan §16.18): el ciclo
+            // nace con el mismo saldo que la tarjeta — snapshot inicial,
+            // nunca vuelve a cambiar `amountCents`, solo `balanceCents`.
+            balanceCents: amountCents,
+            balanceRevision: 0,
             status: 'active',
             // Venta real (a diferencia de `replaceGiftCard`, que abre un
             // ciclo con `origin: 'replacement'` — nunca cuenta como venta en
@@ -1054,6 +1188,32 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
             issueSnap = await tx.get(issueRef);
         }
 
+        // Snapshot de saldo SOLO para auditoría en el movimiento de abajo
+        // (plan §16.23) — `cancelGiftCard` NUNCA escribe `balanceCents`/
+        // `balanceRevision` en `giftCards`/`giftCardIssues`: el valor
+        // pendiente se preserva intacto (nunca se pone a 0 aquí) hasta que
+        // `replaceGiftCard` lo transfiera de verdad. `status` todavía es el
+        // de ANTES de cancelar (ACTIVE/SUSPENDED/AVAILABLE, nunca CANCELLED
+        // — ya se rechazó arriba), así que el helper endurecido resuelve
+        // correctamente sin necesitar `pendingReplacement` (solo importa
+        // para el status CANCELLED, que no aplica todavía en este punto).
+        const balanceAtCancel = resolveGiftCardBalance(
+            {
+                status,
+                amountCents: cardSnap.get('amountCents') as number,
+                balanceCents: cardSnap.get('balanceCents') as number | undefined,
+            },
+            { balanceCents: issueSnap?.exists ? (issueSnap.get('balanceCents') as number | undefined) : undefined },
+        );
+        const balanceRevisionAtCancel = resolveGiftCardBalanceRevision(
+            { balanceRevision: cardSnap.get('balanceRevision') as number | undefined },
+            {
+                balanceRevision: issueSnap?.exists
+                    ? (issueSnap.get('balanceRevision') as number | undefined)
+                    : undefined,
+            },
+        );
+
         // Solo escrituras de aquí en adelante.
         tx.update(cardRef, {
             status: 'CANCELLED',
@@ -1094,6 +1254,18 @@ export const cancelGiftCard = onCall<CancelGiftCardData>({ region: REGION }, asy
             giftCardId: cardCode,
             codeSnapshot: cardCode,
             amountCents: cardSnap.get('amountCents') as number,
+            // Snapshot de auditoría (plan §16.23) — el saldo que queda
+            // PENDIENTE de transferir (0 si la tarjeta nunca tuvo ciclo
+            // abierto): nunca se escribe en los documentos, solo se registra
+            // aquí para poder leer el historial. `before === after` a
+            // propósito (mismos dos campos que ya usan REDEEMED/TOP_UP/
+            // BALANCE_RESTORED/REPLACED, nunca un nombre de campo nuevo):
+            // `cancelGiftCard` no MUTA el saldo, solo lo deja constancia de
+            // cuánto queda pendiente en el momento de cancelar.
+            balanceBeforeCents: balanceAtCancel,
+            balanceAfterCents: balanceAtCancel,
+            balanceRevisionBefore: balanceRevisionAtCancel,
+            balanceRevisionAfter: balanceRevisionAtCancel,
             cycleNumber: cardSnap.get('cycleNumber') as number,
             cycleId,
             type: 'CANCELLED' as const,
@@ -1178,6 +1350,250 @@ export const updateGiftCardAmount = onCall<UpdateGiftCardAmountData>({ region: R
     });
 
     return { cardCode, amountCents };
+});
+
+/**
+ * Recarga el saldo de una Gift Card ACTIVE (Fase C, plan §16.22): dinero
+ * NUEVO que entra a caja, sobre el MISMO ciclo — nunca crea un ciclo nuevo,
+ * nunca cambia `cycleNumber`/`activeCycleId`, nunca toca `amountCents` (el
+ * monto nominal del ciclo, que sigue intacto; `balanceCents` SÍ puede quedar
+ * por encima de `amountCents` tras recargar — es válido, no se impone
+ * `balanceCents <= amountCents`).
+ *
+ * Reutiliza EXACTAMENTE el modelo de pago de `activateGiftCard`
+ * (`IssuePaymentInput`/`validateIssuePayments`/`ISSUE_PAYMENT_METHODS`:
+ * cash/qr, 1-2 pagos, sin método repetido) — auditado antes de escribir
+ * esta Function: no había ningún motivo para un modelo de pago paralelo.
+ *
+ * Permisos: `assertStaffRole` (admin + vendedor), mismo criterio que
+ * `activateGiftCard`/`updateGiftCardAmount` — recargar no es más sensible
+ * que vender/activar.
+ *
+ * Adopción legacy SIN backfill (mismo principio que Fase B, §16.18):
+ * `resolveGiftCardBalance`/`resolveGiftCardBalanceRevision` resuelven el
+ * saldo/revisión EFECTIVOS de una `ACTIVE` que todavía no tiene
+ * `balanceCents`/`balanceRevision` (ej. `GC000002`/`GC000003` reales) — la
+ * escritura de esta Function ya los deja explícitos en `giftCards` Y
+ * `giftCardIssues` (misma transacción, invariante card/issue de siempre),
+ * adoptando la tarjeta desde ese momento.
+ *
+ * IDEMPOTENCIA — el punto central de esta Function: a diferencia de
+ * `activateGiftCard` (que tiene una transición de estado, AVAILABLE→ACTIVE,
+ * que bloquea un reintento de forma natural), una recarga no cambia
+ * `status`/`cycleNumber`/`activeCycleId` — NO HAY NINGUNA guarda de estado
+ * que detecte un doble clic, y `balanceRevision` tampoco sirve para esto:
+ * distingue ORDEN ("¿pasó algo desde que leí esto?"), no identifica si dos
+ * llamadas son el MISMO reintento o dos recargas distintas. La solución
+ * reutiliza el único patrón de idempotencia que el proyecto ya tiene
+ * (`sales/{saleId}` pre-generado en el cliente, `tx.create()` falla limpio
+ * en un duplicado — plan §15.3): `topUpId` lo genera el cliente
+ * (`GiftCardsService.generateTopUpId()`, mismo mecanismo que
+ * `generateSaleId()`) y la transacción lee `giftCardTopUps/{topUpId}` como
+ * su PRIMERA lectura. El documento guarda el snapshot CANÓNICO de la
+ * solicitud (`cardCode`/`cashCents`/`qrCents`/`performedBy`): un mismo
+ * `topUpId` solo puede representar la MISMA operación — si coincide exacto
+ * es un reintento válido (devuelve el resultado guardado, sin tocar saldo
+ * ni crear nada más); si NO coincide (otra tarjeta, otro monto, otro
+ * reparto cash/QR, otro actor), se rechaza con `failed-precondition`
+ * genérico, sin revelar el detalle de la operación original. Si el
+ * documento no existe, se crea con `tx.create()` en la MISMA transacción
+ * que mueve el saldo, así que ambas cosas nacen o fallan juntas. Esta
+ * colección cumple doble función: ledger de idempotencia (y de su propio
+ * snapshot canónico) Y comprobante de la recarga (mismo rol dual que
+ * `sales/{saleId}` para una venta). Rules: `allow read, write: if false`
+ * — cerrada por completo, ni lectura admin todavía (sin consumidor real
+ * desde el cliente en esta fase); el Admin SDK nunca depende de esa Rule.
+ *
+ * El desglose de pago (cash/qr) vive SOLO en `giftCardTopUps/{topUpId}` —
+ * NUNCA se agrega a `giftCardIssues.payments`, que significa específicamente
+ * "cómo se pagó la ACTIVACIÓN" y que `sumIssues()` (`reports.service.ts`) ya
+ * suma para "Gift Cards vendidas": mezclar ahí dinero de una recarga
+ * inflaría esa métrica con dinero que es otra cosa.
+ *
+ * Sin cancelación de recarga en esta fase (decisión explícita, plan §16.22):
+ * no existe ningún precedente de "anular una activación/emisión" en el
+ * sistema — una recarga exitosa es definitiva, igual que vender/activar.
+ */
+export const topUpGiftCard = onCall<TopUpGiftCardData>({ region: REGION }, async (request) => {
+    const staffSnap = await assertStaffRole(request.auth);
+    const uid = request.auth!.uid;
+    const name = staffName(staffSnap);
+
+    const topUpId = requireTopUpId(request.data.topUpId);
+    const cardCode = requireCode(request.data.code);
+    const payments = validateIssuePayments(request.data.payments);
+    const paidCents = payments.reduce((sum, p) => sum + p.amountCents, 0);
+    const cashCents = payments.filter((p) => p.method === 'cash').reduce((sum, p) => sum + p.amountCents, 0);
+    const qrCents = payments.filter((p) => p.method === 'qr').reduce((sum, p) => sum + p.amountCents, 0);
+
+    const settingsSnap = await db.doc('settings/app').get();
+    const timezone = (settingsSnap.get('timezone') as string) || 'America/La_Paz';
+    const { dateKey, monthKey, year } = dateKeys(new Date(), timezone);
+
+    const topUpRef = db.doc(`giftCardTopUps/${topUpId}`);
+    const cardRef = db.doc(`giftCards/${cardCode}`);
+    const summaryRef = db.doc(`dailySummaries/${dateKey}`);
+
+    const result = await db.runTransaction(async (tx) => {
+        // Idempotencia: PRIMERA lectura de la transacción. `giftCardTopUps/
+        // {topUpId}` guarda el snapshot CANÓNICO de la solicitud
+        // (`cardCode`/`cashCents`/`qrCents`/`performedBy`) — un mismo
+        // `topUpId` solo puede representar la MISMA operación:
+        // - coincide exacto → es un RETRY (timeout, doble clic, reenvío de
+        //   red): se devuelve el resultado ya guardado tal cual, sin tocar
+        //   saldo ni crear nada más.
+        // - NO coincide → alguien reutilizó el identificador para una
+        //   operación DISTINTA (otra tarjeta, otro monto, otro reparto
+        //   cash/QR, otro actor): se rechaza, sin revelar el detalle de la
+        //   operación original.
+        const existingTopUpSnap = await tx.get(topUpRef);
+        if (existingTopUpSnap.exists) {
+            const sameRequest =
+                existingTopUpSnap.get('cardCode') === cardCode &&
+                existingTopUpSnap.get('cashCents') === cashCents &&
+                existingTopUpSnap.get('qrCents') === qrCents &&
+                existingTopUpSnap.get('performedBy') === uid;
+            if (!sameRequest) {
+                throw new HttpsError(
+                    'failed-precondition',
+                    'Este identificador de recarga ya fue utilizado para otra operación.',
+                );
+            }
+            return {
+                cardCode: existingTopUpSnap.get('cardCode') as string,
+                amountAddedCents: existingTopUpSnap.get('amountCents') as number,
+                balanceBeforeCents: existingTopUpSnap.get('balanceBeforeCents') as number,
+                balanceAfterCents: existingTopUpSnap.get('balanceAfterCents') as number,
+                balanceRevision: existingTopUpSnap.get('balanceRevisionAfter') as number,
+                cycleNumber: existingTopUpSnap.get('cycleNumber') as number,
+            };
+        }
+
+        const cardSnap = await tx.get(cardRef);
+        if (!cardSnap.exists) {
+            throw new HttpsError('not-found', 'Tarjeta no encontrada.');
+        }
+        if (cardSnap.get('status') !== 'ACTIVE') {
+            throw new HttpsError(
+                'failed-precondition',
+                'Solo se puede recargar una tarjeta activa.',
+            );
+        }
+        const activeCycleId = cardSnap.get('activeCycleId') as string;
+        const issueRef = db.doc(`giftCardIssues/${activeCycleId}`);
+        const issueSnap = await tx.get(issueRef);
+        if (!issueSnap.exists) {
+            throw new HttpsError('internal', 'No se pudo recargar la tarjeta. Intenta nuevamente.');
+        }
+        const summarySnap = await tx.get(summaryRef);
+
+        const balanceBeforeCents = resolveGiftCardBalance(
+            {
+                status: cardSnap.get('status') as string,
+                amountCents: cardSnap.get('amountCents') as number,
+                balanceCents: cardSnap.get('balanceCents') as number | undefined,
+                pendingReplacement: cardSnap.get('pendingReplacement') as boolean | undefined,
+            },
+            { balanceCents: issueSnap.get('balanceCents') as number | undefined },
+        );
+        const balanceRevisionBefore = resolveGiftCardBalanceRevision(
+            { balanceRevision: cardSnap.get('balanceRevision') as number | undefined },
+            { balanceRevision: issueSnap.get('balanceRevision') as number | undefined },
+        );
+        const balanceAfterCents = balanceBeforeCents + paidCents;
+        if (!Number.isSafeInteger(balanceAfterCents)) {
+            throw new HttpsError(
+                'internal',
+                'Error interno de cálculo de saldo. Intenta nuevamente.',
+            );
+        }
+        const balanceRevisionAfter = balanceRevisionBefore + 1;
+        const cycleNumber = cardSnap.get('cycleNumber') as number;
+
+        // Solo escrituras de aquí en adelante.
+        tx.create(topUpRef, {
+            cardCode,
+            cycleId: activeCycleId,
+            cycleNumber,
+            amountCents: paidCents,
+            cashCents,
+            qrCents,
+            balanceBeforeCents,
+            balanceAfterCents,
+            balanceRevisionBefore,
+            balanceRevisionAfter,
+            performedBy: uid,
+            performedByName: name,
+            dateKey,
+            createdAt: FieldValue.serverTimestamp(),
+        });
+        tx.update(cardRef, {
+            balanceCents: balanceAfterCents,
+            balanceRevision: balanceRevisionAfter,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+        tx.update(issueRef, {
+            balanceCents: balanceAfterCents,
+            balanceRevision: balanceRevisionAfter,
+        });
+        tx.create(db.collection('giftCardMovements').doc(), {
+            giftCardId: cardCode,
+            codeSnapshot: cardCode,
+            amountCents: paidCents,
+            balanceBeforeCents,
+            balanceAfterCents,
+            balanceRevisionBefore,
+            balanceRevisionAfter,
+            cycleNumber,
+            cycleId: activeCycleId,
+            type: 'TOP_UP' as const,
+            createdAt: FieldValue.serverTimestamp(),
+            performedBy: uid,
+            performedByName: name,
+            buyerNameSnapshot: (cardSnap.get('currentBuyerName') as string | null) ?? null,
+            saleId: null,
+            reason: null,
+        });
+
+        if (!summarySnap.exists) {
+            tx.create(summaryRef, {
+                dateKey,
+                monthKey,
+                year,
+                salesCount: 0,
+                itemsCount: 0,
+                totalCents: 0,
+                discountCents: 0,
+                cashCents: 0,
+                qrCents: 0,
+                giftCardCents: 0,
+                giftCardsIssuedCents: 0,
+                giftCardForfeitedCents: 0,
+                giftCardIssuesCashCents: 0,
+                giftCardIssuesQrCents: 0,
+                giftCardTopUpsCents: paidCents,
+                giftCardTopUpsCashCents: cashCents,
+                giftCardTopUpsQrCents: qrCents,
+                products: {},
+                extras: {},
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        } else {
+            const newTopUpsCents = ((summarySnap.get('giftCardTopUpsCents') as number) ?? 0) + paidCents;
+            const newTopUpsCashCents = ((summarySnap.get('giftCardTopUpsCashCents') as number) ?? 0) + cashCents;
+            const newTopUpsQrCents = ((summarySnap.get('giftCardTopUpsQrCents') as number) ?? 0) + qrCents;
+            tx.update(summaryRef, {
+                giftCardTopUpsCents: newTopUpsCents,
+                giftCardTopUpsCashCents: newTopUpsCashCents,
+                giftCardTopUpsQrCents: newTopUpsQrCents,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        }
+
+        return { cardCode, amountAddedCents: paidCents, balanceBeforeCents, balanceAfterCents, balanceRevision: balanceRevisionAfter, cycleNumber };
+    });
+
+    return result;
 });
 
 /**
@@ -1292,7 +1708,7 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
 
     const oldCardRef = db.doc(`giftCards/${oldCode}`);
     let newCode = '';
-    let transferredAmountCents = 0;
+    let transferredBalanceCents = 0;
 
     await db.runTransaction(async (tx) => {
         const oldCardSnap = await tx.get(oldCardRef);
@@ -1312,8 +1728,7 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             );
         }
 
-        const amountCents = oldCardSnap.get('amountCents') as number;
-        transferredAmountCents = amountCents;
+        const amountCents = oldCardSnap.get('amountCents') as number; // nominal — destino lo hereda SIN cambios
         const cycleNumber = oldCardSnap.get('cycleNumber') as number;
         const cycleId = oldCardSnap.get('lastCycleId') as string | null;
         if (!cycleId) {
@@ -1344,6 +1759,32 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         const originalActivatedBy = originalIssueSnap.get('activatedBy') as string;
         const originalActivatedByName = originalIssueSnap.get('activatedByName') as string;
 
+        // Saldo persistente (Fase D, plan §16.23): NUNCA se transfiere
+        // `amountCents` (nominal) — se transfiere el saldo EFECTIVO real,
+        // que puede ser menor (consumo parcial) o mayor (recarga) que el
+        // nominal. `oldCardSnap.status` en este punto siempre es
+        // `CANCELLED` con `pendingReplacement === true` (ya validado arriba),
+        // así que el helper cae en la rama que respeta ese saldo pendiente.
+        const sourceBalanceRevisionBefore = resolveGiftCardBalanceRevision(
+            { balanceRevision: oldCardSnap.get('balanceRevision') as number | undefined },
+            { balanceRevision: originalIssueSnap.get('balanceRevision') as number | undefined },
+        );
+        transferredBalanceCents = resolveGiftCardBalance(
+            {
+                status,
+                amountCents,
+                balanceCents: oldCardSnap.get('balanceCents') as number | undefined,
+                pendingReplacement,
+            },
+            { balanceCents: originalIssueSnap.get('balanceCents') as number | undefined },
+        );
+        // El propio traspaso (saldo → 0 en la fuente) ES una mutación del
+        // saldo de ese ciclo — se refleja en `balanceRevision` igual que
+        // cualquier otra (plan §16.23, decisión documentada): el contador
+        // representa CUALQUIER cambio de `balanceCents`, sin excepción para
+        // el cierre vía reemplazo.
+        const sourceBalanceRevisionAfter = sourceBalanceRevisionBefore + 1;
+
         // Resolución del destino — TODAS las lecturas (incluida la del
         // plástico existente, si aplica) ocurren antes de cualquier
         // escritura, regla de las transacciones de Firestore (prompt §16).
@@ -1371,6 +1812,24 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
                     'La tarjeta seleccionada ya no está disponible. Selecciona otra tarjeta.',
                 );
             }
+            // Defensivo (plan §16.23): además del `status`, confirma que el
+            // destino no arrastra ningún saldo efectivo propio — con
+            // `resolveGiftCardBalance` endurecido, `AVAILABLE` siempre
+            // resuelve `0`, así que esto nunca debería disparar hoy; existe
+            // para no depender SOLO de la lectura de `status` si el helper
+            // cambiara en el futuro.
+            const targetEffectiveBalance = resolveGiftCardBalance({
+                status: targetCardSnap.get('status') as string,
+                amountCents: targetCardSnap.get('amountCents') as number,
+                balanceCents: targetCardSnap.get('balanceCents') as number | undefined,
+                pendingReplacement: targetCardSnap.get('pendingReplacement') as boolean | undefined,
+            });
+            if (targetEffectiveBalance !== 0) {
+                throw new HttpsError(
+                    'failed-precondition',
+                    'La tarjeta seleccionada no está realmente disponible.',
+                );
+            }
             newCode = targetCode as string;
             // El plástico puede traer ciclos anteriores (prompt §18): se
             // avanza su propio contador, igual que `activateGiftCard` — NUNCA
@@ -1395,10 +1854,17 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
 
         // La tarjeta vieja ya estaba CANCELLED (la dejó así `cancelGiftCard`):
         // solo se marca hacia dónde se transfirió el valor, sin reabrir ni
-        // tocar nada más de su estado terminal.
+        // tocar nada más de su estado terminal. `balanceCents: 0` (plan
+        // §16.23, preferencia explícita): el valor ya vive en el destino —
+        // nunca debe parecer que existe simultáneamente en los dos plásticos
+        // (el `resolveGiftCardBalance` endurecido ya lo garantizaría de
+        // todas formas por `pendingReplacement: false`, pero se escribe
+        // explícito para que el dato crudo sea igual de honesto).
         tx.update(oldCardRef, {
             replacedByCode: newCode,
             pendingReplacement: false,
+            balanceCents: 0,
+            balanceRevision: sourceBalanceRevisionAfter,
             updatedAt: FieldValue.serverTimestamp(),
         });
 
@@ -1410,6 +1876,13 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             // son del registro original del plástico, no de este ciclo.
             tx.update(targetCardRef, {
                 amountCents,
+                // Saldo persistente (plan §16.23): el destino recibe el
+                // saldo EFECTIVO transferido, NUNCA el nominal — y un ciclo
+                // NUEVO siempre arranca `balanceRevision = 0` (replacement
+                // SIEMPRE crea un `giftCardIssues` nuevo, confirmado en la
+                // auditoría previa: nunca continúa un ciclo existente).
+                balanceCents: transferredBalanceCents,
+                balanceRevision: 0,
                 status: 'ACTIVE' as const,
                 cycleNumber: newCycleNumber,
                 activeCycleId: newIssueRef.id,
@@ -1431,6 +1904,9 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             tx.create(targetCardRef, {
                 cardCode: newCode,
                 amountCents,
+                // Mismo criterio que el modo 'existing' (plan §16.23).
+                balanceCents: transferredBalanceCents,
+                balanceRevision: 0,
                 status: 'ACTIVE' as const,
                 cycleNumber: newCycleNumber,
                 activeCycleId: newIssueRef.id,
@@ -1461,6 +1937,8 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
             cardCode: newCode,
             cycleNumber: newCycleNumber,
             amountCents,
+            balanceCents: transferredBalanceCents,
+            balanceRevision: 0,
             status: 'active',
             buyerName: originalBuyerName,
             activatedAt: originalActivatedAt,
@@ -1489,7 +1967,14 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         tx.create(db.collection('giftCardMovements').doc(), {
             giftCardId: oldCode,
             codeSnapshot: oldCode,
-            amountCents,
+            // `amountCents` aquí es el saldo TRANSFERIDO, no el nominal
+            // (plan §16.23) — mismo criterio que `REDEEMED`/`TOP_UP`: el
+            // monto de un movimiento es el efecto monetario real del evento.
+            amountCents: transferredBalanceCents,
+            balanceBeforeCents: transferredBalanceCents,
+            balanceAfterCents: 0,
+            balanceRevisionBefore: sourceBalanceRevisionBefore,
+            balanceRevisionAfter: sourceBalanceRevisionAfter,
             cycleNumber,
             cycleId,
             type: 'REPLACED' as const,
@@ -1505,7 +1990,15 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         tx.create(db.collection('giftCardMovements').doc(), {
             giftCardId: newCode,
             codeSnapshot: newCode,
-            amountCents,
+            amountCents: transferredBalanceCents,
+            // Nace el ciclo: "antes" es 0 (no existía), "después" es el
+            // saldo heredado — sin incremento de `balanceRevision` (nace en
+            // 0, igual que `activateGiftCard`: un nacimiento no es una
+            // mutación posterior, es el punto de partida).
+            balanceBeforeCents: 0,
+            balanceAfterCents: transferredBalanceCents,
+            balanceRevisionBefore: 0,
+            balanceRevisionAfter: 0,
             cycleNumber: newCycleNumber,
             cycleId: newIssueRef.id,
             type: 'REPLACEMENT_CREATED' as const,
@@ -1520,7 +2013,10 @@ export const replaceGiftCard = onCall<ReplaceGiftCardData>({ region: REGION }, a
         });
     });
 
-    return { cardCode: oldCode, newCardCode: newCode, amountCents: transferredAmountCents };
+    // `amountCents` en la respuesta es el saldo TRANSFERIDO (plan §16.23),
+    // no el nominal — es lo útil para el llamador: cuánto valor realmente
+    // se movió al nuevo plástico.
+    return { cardCode: oldCode, newCardCode: newCode, amountCents: transferredBalanceCents };
 });
 
 /**
