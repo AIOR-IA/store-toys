@@ -7,6 +7,7 @@ import { AppSettings } from '@core/models';
 import { fromCents } from '@core/utils';
 import { formatInStoreTimezone } from '@core/utils/date.util';
 import { RECEIPT_LOGO_BASE64 } from '../sales/receipt-logo.const';
+import { RECEIPT_ADDRESS_LINE, RECEIPT_WHATSAPP_LINE } from '../sales/receipt-header.const';
 import { GiftCardReceipt, GiftCardTopUpReceipt } from './gift-card.model';
 
 type PdfMake = {
@@ -99,14 +100,8 @@ export class GiftCardReceiptService {
                                     bold: true,
                                     fontSize: 13,
                                 },
-                                { text: settings.storeDescription },
-                                { text: settings.address },
-                                {
-                                    text: [
-                                        `Tel. ${settings.phone}`,
-                                        settings.social ? ` · ${settings.social}` : '',
-                                    ].join(''),
-                                },
+                                { text: RECEIPT_ADDRESS_LINE },
+                                { text: RECEIPT_WHATSAPP_LINE },
                             ],
                         },
                     ],
@@ -214,14 +209,8 @@ export class GiftCardReceiptService {
                                     bold: true,
                                     fontSize: 13,
                                 },
-                                { text: settings.storeDescription },
-                                { text: settings.address },
-                                {
-                                    text: [
-                                        `Tel. ${settings.phone}`,
-                                        settings.social ? ` · ${settings.social}` : '',
-                                    ].join(''),
-                                },
+                                { text: RECEIPT_ADDRESS_LINE },
+                                { text: RECEIPT_WHATSAPP_LINE },
                             ],
                         },
                     ],

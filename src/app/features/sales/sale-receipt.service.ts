@@ -8,6 +8,7 @@ import { fromCents } from '@core/utils';
 import { formatProductName } from '@shared/utils';
 import { formatInStoreTimezone } from '@core/utils/date.util';
 import { RECEIPT_LOGO_BASE64 } from './receipt-logo.const';
+import { RECEIPT_ADDRESS_LINE, RECEIPT_WHATSAPP_LINE } from './receipt-header.const';
 import { Sale } from './sale.model';
 
 type PdfMake = {
@@ -182,14 +183,8 @@ export class SaleReceiptService {
                                     bold: true,
                                     fontSize: 13,
                                 },
-                                { text: settings.storeDescription },
-                                { text: settings.address },
-                                {
-                                    text: [
-                                        `Tel. ${settings.phone}`,
-                                        settings.social ? ` · ${settings.social}` : '',
-                                    ].join(''),
-                                },
+                                { text: RECEIPT_ADDRESS_LINE },
+                                { text: RECEIPT_WHATSAPP_LINE },
                             ],
                         },
                     ],
