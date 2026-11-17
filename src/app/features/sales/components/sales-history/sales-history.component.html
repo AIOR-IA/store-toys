@@ -30,6 +30,39 @@
         ></p-dropdown>
     </div>
     }
+
+    <!-- Caja del día/vendedor seleccionado (plan §29-bis): nunca depende de la
+         paginación de la tabla, siempre viene de getSellerCashbox. -->
+    <div class="flex flex-col sm:flex-row gap-3 md:ml-auto">
+        <div class="rounded-lg border border-gray-200 bg-white px-4 py-2 min-w-[11rem]">
+            <div class="text-xs text-gray-500 uppercase font-medium">
+                {{ "app.sales.historyPage.cashbox.cash" | translate }}
+            </div>
+            @if (cashboxLoading()) {
+            <div class="h-7 w-28 bg-gray-200 rounded animate-pulse mt-1"></div>
+            } @else if (cashboxError()) {
+            <div class="text-sm text-gray-400 mt-1">
+                {{ "app.sales.historyPage.cashbox.error" | translate }}
+            </div>
+            } @else {
+            <div class="text-2xl font-bold text-gray-900">{{ cashbox()!.cashCents | money }}</div>
+            }
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white px-4 py-2 min-w-[9rem]">
+            <div class="text-xs text-gray-500 uppercase font-medium">
+                {{ "app.sales.historyPage.cashbox.qr" | translate }}
+            </div>
+            @if (cashboxLoading()) {
+            <div class="h-6 w-20 bg-gray-200 rounded animate-pulse mt-1"></div>
+            } @else if (cashboxError()) {
+            <div class="text-sm text-gray-400 mt-1">
+                {{ "app.sales.historyPage.cashbox.error" | translate }}
+            </div>
+            } @else {
+            <div class="text-xl font-semibold text-gray-700">{{ cashbox()!.qrCents | money }}</div>
+            }
+        </div>
+    </div>
 </div>
 
 @if (loading()) {

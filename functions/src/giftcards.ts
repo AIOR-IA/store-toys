@@ -4,6 +4,7 @@ import { db } from './admin';
 import { assertActive, assertAdmin } from './guards';
 import { dateKeys } from './date-keys';
 import { normalizeGiftCardCode } from './normalize';
+import { applySellerSummaryDelta, dailySellerSummaryRef } from './daily-seller-summary';
 
 /**
  * Cloud Functions de Gift Cards (Fase 6, docs/architecture/mi-pimpollito-plan.md
@@ -903,6 +904,8 @@ export const activateGiftCard = onCall<ActivateGiftCardData>({ region: REGION },
             .reduce((sum, p) => sum + p.amountCents, 0);
 
         const summarySnap = await tx.get(summaryRef);
+        const sellerSummaryRef = dailySellerSummaryRef(dateKey, uid);
+        const sellerSummarySnap = await tx.get(sellerSummaryRef);
 
         const newCycleNumber = ((cardSnap.get('cycleNumber') as number) ?? 0) + 1;
         resultCycleNumber = newCycleNumber;
@@ -1015,6 +1018,17 @@ export const activateGiftCard = onCall<ActivateGiftCardData>({ region: REGION },
                 updatedAt: FieldValue.serverTimestamp(),
             });
         }
+
+        // `dailySellerSummaries` (write-time aggregation): la activación es
+        // dinero NUEVO cobrado por `uid` — nunca se toca en `cancelGiftCard`
+        // (baja administrativa del plástico, no una devolución).
+        applySellerSummaryDelta(tx, sellerSummaryRef, sellerSummarySnap, {
+            dateKey,
+            sellerId: uid,
+            sellerName: name,
+            cashDeltaCents: cashCents,
+            qrDeltaCents: qrCents,
+        });
     });
 
     return { cardCode, cycleId: issueRef.id, cycleNumber: resultCycleNumber };
@@ -1486,6 +1500,8 @@ export const topUpGiftCard = onCall<TopUpGiftCardData>({ region: REGION }, async
             throw new HttpsError('internal', 'No se pudo recargar la tarjeta. Intenta nuevamente.');
         }
         const summarySnap = await tx.get(summaryRef);
+        const sellerSummaryRef = dailySellerSummaryRef(dateKey, uid);
+        const sellerSummarySnap = await tx.get(sellerSummaryRef);
 
         const balanceBeforeCents = resolveGiftCardBalance(
             {
@@ -1589,6 +1605,18 @@ export const topUpGiftCard = onCall<TopUpGiftCardData>({ region: REGION }, async
                 updatedAt: FieldValue.serverTimestamp(),
             });
         }
+
+        // `dailySellerSummaries` (write-time aggregation): dinero NUEVO
+        // cobrado por `uid` al recargar. El retorno temprano de arriba (mismo
+        // `topUpId`, misma solicitud) nunca llega hasta aquí — un reintento
+        // idempotente no vuelve a sumar.
+        applySellerSummaryDelta(tx, sellerSummaryRef, sellerSummarySnap, {
+            dateKey,
+            sellerId: uid,
+            sellerName: name,
+            cashDeltaCents: cashCents,
+            qrDeltaCents: qrCents,
+        });
 
         return { cardCode, amountAddedCents: paidCents, balanceBeforeCents, balanceAfterCents, balanceRevision: balanceRevisionAfter, cycleNumber };
     });

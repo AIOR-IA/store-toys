@@ -155,6 +155,17 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Resumen diario POR VENDEDOR (plan §29-ter): write-time aggregation
+    // mantenido por `createSale`/`cancelSale`/`activateGiftCard`/
+    // `topUpGiftCard` dentro de la MISMA transacción que cada operación.
+    // CERRADA POR COMPLETO, igual que `giftCardTopUps` — ni lectura admin: el
+    // único consumidor es la Function `getSellerCashbox` (Admin SDK, nunca
+    // depende de esta Rule). Abrir lectura directa no aporta nada hoy y
+    // sumaría una superficie innecesaria sobre una colección financiera.
+    match /dailySellerSummaries/{summaryId} {
+      allow read, write: if false;
+    }
+
     // Contador técnico por denominación para el código GENERADO de Gift
     // Cards (ajuste posterior a la Fase 6, ver `functions/src/giftcards.ts`,
     // comentario de cabecera sobre `codeMode`). A diferencia de

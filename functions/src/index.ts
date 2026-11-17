@@ -42,3 +42,8 @@ export {
     listGiftCardIssues,
     topUpGiftCard,
 } from './giftcards';
+
+// Historial de Ventas — caja (efectivo/QR) por vendedor/fecha, autoritativa
+// en backend: nunca abre `giftCardIssues`/`giftCardTopUps` al cliente (ver
+// comentario largo en sales-cashbox.ts).
+export { getSellerCashbox } from './sales-cashbox';

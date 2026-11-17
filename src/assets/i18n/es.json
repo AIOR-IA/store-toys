@@ -352,7 +352,12 @@
         "detail": "Detalle de venta",
         "cancelAction": "Anular venta",
         "reprint": "Reimprimir comprobante",
-        "empty": "No hay ventas para los filtros seleccionados."
+        "empty": "No hay ventas para los filtros seleccionados.",
+        "cashbox": {
+          "cash": "Efectivo recibido",
+          "qr": "QR recibido",
+          "error": "No se pudo cargar el resumen de caja."
+        }
       },
       "receipt": {
         "title": "Comprobante de venta",

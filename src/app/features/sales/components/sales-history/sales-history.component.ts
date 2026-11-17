@@ -82,6 +82,17 @@ export class SalesHistoryComponent implements OnInit {
 
     detailSale = signal<Sale | null>(null);
 
+    /**
+     * Caja (efectivo/QR) del `dateKey`/`sellerId` actual — SIEMPRE desde
+     * `getSellerCashbox` (Function autoritativa en backend), NUNCA sumando
+     * `rows()` (que está paginado): cambiar de página nunca cambia este
+     * signal. `cashbox()` es `null` mientras carga o si falló, para no
+     * mostrar nunca el valor del filtro anterior ni inventar un 0,00 Bs.
+     */
+    cashboxLoading = signal(false);
+    cashboxError = signal(false);
+    cashbox = signal<{ cashCents: number; qrCents: number } | null>(null);
+
     private pager = this.salesService.createPager(this.currentFilter(), this.pageSize());
 
     ngOnInit(): void {
@@ -93,6 +104,7 @@ export class SalesHistoryComponent implements OnInit {
             });
         }
         this.loadFirstPage();
+        this.loadCashbox();
     }
 
     private currentFilter() {
@@ -105,11 +117,13 @@ export class SalesHistoryComponent implements OnInit {
     onDateChange(date: Date): void {
         this.selectedDate.set(date);
         this.loadFirstPage();
+        this.loadCashbox();
     }
 
     onSellerChange(uid: string | null): void {
         this.sellerId.set(uid);
         this.loadFirstPage();
+        this.loadCashbox();
     }
 
     onPageSizeChange(pageSize: number): void {
@@ -144,6 +158,7 @@ export class SalesHistoryComponent implements OnInit {
     onSaleCancelled(): void {
         this.detailSale.set(null);
         this.loadFirstPage();
+        this.loadCashbox();
     }
 
     /**
@@ -188,5 +203,27 @@ export class SalesHistoryComponent implements OnInit {
         this.loading.set(false);
         this.hasLoadedOnce.set(true);
         this.toast.error('app.common.errors.general');
+    }
+
+    /**
+     * Carga la caja del `dateKey`/`sellerId` actual (mismo alcance que
+     * `currentFilter()`, nunca de `rows()`). Independiente de `loading`/
+     * `rows` de la tabla: un error acá nunca rompe el historial.
+     */
+    private loadCashbox(): void {
+        this.cashboxLoading.set(true);
+        this.cashboxError.set(false);
+        this.cashbox.set(null);
+        const filter = this.currentFilter();
+        this.salesService.getSellerCashbox(filter.dateKey, filter.sellerId).subscribe({
+            next: (result) => {
+                this.cashbox.set(result);
+                this.cashboxLoading.set(false);
+            },
+            error: () => {
+                this.cashboxError.set(true);
+                this.cashboxLoading.set(false);
+            },
+        });
     }
 }

@@ -112,6 +112,26 @@ export class SalesService {
     }
 
     /**
+     * `getSellerCashbox` (Function): caja de efectivo/QR de UN día (Historial
+     * de Ventas, plan §29-bis). Fuente AUTORITATIVA en backend — nunca se lee
+     * `giftCardIssues`/`giftCardTopUps` directo desde Angular para esto, esas
+     * Rules siguen exactamente como estaban. El backend decide el alcance
+     * real (vendedor: siempre su propio UID; admin sin `sellerId`: todos los
+     * vendedores) — `sellerId` aquí es solo lo que el admin eligió en el
+     * selector, nunca una fuente de autorización.
+     */
+    getSellerCashbox(
+        dateKey: string,
+        sellerId?: string,
+    ): Observable<{ cashCents: number; qrCents: number }> {
+        const callable = httpsCallable<
+            { dateKey: string; sellerId?: string },
+            { cashCents: number; qrCents: number }
+        >(this.functions, 'getSellerCashbox');
+        return from(callable({ dateKey, sellerId })).pipe(map((result) => result.data));
+    }
+
+    /**
      * Adjunta el voucher de un pago QR vía `attachVoucher` (Fase 5): la
      * imagen (ya comprimida por `ImageCompressorService`) viaja en base64
      * dentro del propio payload del callable — `attachVoucher` es quien sube

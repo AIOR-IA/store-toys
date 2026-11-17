@@ -6,6 +6,7 @@ import { assertActive, assertAdmin } from './guards';
 import { dateKeys } from './date-keys';
 import { applyDiscount, parseDiscountCents } from './sale-discount';
 import { resolveGiftCardBalance, resolveGiftCardBalanceRevision } from './giftcards';
+import { applySellerSummaryDelta, dailySellerSummaryRef } from './daily-seller-summary';
 
 /**
  * Cloud Functions de Ventas (plan §15).
@@ -597,12 +598,15 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
             const totalItems = allSaleItems.reduce((sum, item) => sum + item.quantity, 0);
             const summaryRef = db.doc(`dailySummaries/${dateKey}`);
             const summarySnap = await tx.get(summaryRef);
+            const sellerName = `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim();
+            const sellerSummaryRef = dailySellerSummaryRef(dateKey, request.auth!.uid);
+            const sellerSummarySnap = await tx.get(sellerSummaryRef);
 
             // A partir de aquí solo escrituras (Firestore exige que todas las
             // lecturas de la transacción precedan a las escrituras).
             tx.create(saleRef, {
                 sellerId: request.auth!.uid,
-                sellerName: `${sellerSnap.get('firstName')} ${sellerSnap.get('lastName')}`.trim(),
+                sellerName,
                 items: allSaleItems,
                 subtotalCents,
                 discountCents,
@@ -841,6 +845,16 @@ export const createSale = onCall<CreateSaleData>({ region: REGION }, async (requ
                 }
                 tx.update(summaryRef, update);
             }
+
+            // `dailySellerSummaries` (write-time aggregation por vendedor,
+            // plan §29-ter): SOLO cash/QR reales — nunca `giftCardAppliedCents`.
+            applySellerSummaryDelta(tx, sellerSummaryRef, sellerSummarySnap, {
+                dateKey,
+                sellerId: request.auth!.uid,
+                sellerName,
+                cashDeltaCents: cashCents,
+                qrDeltaCents: qrCents,
+            });
         });
     } catch (error) {
         if (error instanceof HttpsError) throw error;
@@ -923,6 +937,13 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
         const dateKey = saleSnap.get('dateKey') as string;
         const summaryRef = db.doc(`dailySummaries/${dateKey}`);
         const summarySnap = await tx.get(summaryRef);
+        // Vendedor ORIGINAL de la venta (nunca quien ejecuta la anulación,
+        // siempre admin): `dailySellerSummaries` debe revertirse exactamente
+        // donde `createSale` sumó.
+        const originalSellerId = saleSnap.get('sellerId') as string;
+        const originalSellerName = (saleSnap.get('sellerName') as string | undefined) ?? '';
+        const sellerSummaryRef = dailySellerSummaryRef(dateKey, originalSellerId);
+        const sellerSummarySnap = await tx.get(sellerSummaryRef);
 
         // Gift card involucrada (Fase 6, prompt §31): el plan original
         // (§15.4) revertía siempre "la emisión vuelve a 'active'", una regla
@@ -1314,6 +1335,16 @@ export const cancelSale = onCall<CancelSaleData>({ region: REGION }, async (requ
                 update['extras'] = subtractExtrasFromMap(currentExtras, extraItems);
             }
             tx.update(summaryRef, update);
+
+            // `dailySellerSummaries` del vendedor ORIGINAL (nunca del admin
+            // que anula) — revierte exactamente lo que esa venta sumó.
+            applySellerSummaryDelta(tx, sellerSummaryRef, sellerSummarySnap, {
+                dateKey,
+                sellerId: originalSellerId,
+                sellerName: originalSellerName,
+                cashDeltaCents: -saleCashCents,
+                qrDeltaCents: -saleQrCents,
+            });
         }
     });
 
