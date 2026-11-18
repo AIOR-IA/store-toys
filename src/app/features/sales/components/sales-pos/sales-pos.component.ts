@@ -68,6 +68,8 @@ interface PaymentSummaryView {
     titleKey: string;
     amountCents?: number;
     lines?: PaymentSummaryLine[];
+    /** Aclaración opcional bajo el título (Ajuste de Ventas QR): solo el exceso de QR la usa hoy. */
+    noteKey?: string;
 }
 
 /**
@@ -268,6 +270,33 @@ export class SalesPosComponent implements AfterViewInit {
     );
 
     /**
+     * Ajuste de Ventas (observación QR): monto que el vendedor VERIFICA que
+     * llegó por QR — comparte input con dos contextos que nunca están
+     * activos a la vez (`setPaymentMethod`/`clearGiftCardSelection`/
+     * `setGiftCardDifferenceMethod` siempre lo reinician al salir de uno):
+     * QR puro (debe cubrir `totalCents()`) y el complemento QR de una Gift
+     * Card (debe cubrir `giftCardDifferenceCents()`). A diferencia de
+     * «Efectivo recibido», un QR de más NUNCA se trata como cambio a
+     * entregar — devolver efectivo por un sobrepago QR mezclaría dos medios
+     * de pago distintos en la contabilidad — así que aquí se exige monto
+     * EXACTO (`isQrReceivedExact`) para poder confirmar.
+     */
+    qrReceivedBs = signal<number | null>(null);
+    readonly qrReceivedCents = computed(() => toCents(this.qrReceivedBs() ?? 0));
+    /** Lo que el QR debe cubrir en el contexto actual; `0` si QR no aplica ahora mismo. */
+    readonly qrRequiredCents = computed(() => {
+        const method = this.paymentMethod();
+        if (method === 'qr') return this.totalCents();
+        if (method === 'giftcard' && this.giftCardDifferenceMethod() === 'qr') {
+            return this.giftCardDifferenceCents();
+        }
+        return 0;
+    });
+    readonly isQrReceivedExact = computed(
+        () => this.qrRequiredCents() > 0 && this.qrReceivedCents() === this.qrRequiredCents(),
+    );
+
+    /**
      * Efectivo APLICADO a la venta (el que viaja en `payments[]`), distinto
      * del efectivo RECIBIDO: el cambio nunca es un ingreso.
      */
@@ -319,11 +348,7 @@ export class SalesPosComponent implements AfterViewInit {
                     'app.sales.summary.pendingLabel',
                 );
             case 'qr':
-                return this.buildPaymentSummary(
-                    'success',
-                    'app.sales.summary.completeLabel',
-                    this.totalCents(),
-                );
+                return this.qrFlowSummary(this.totalCents(), this.qrReceivedBs(), 'app.sales.summary.pendingLabel');
             case 'cashqr': {
                 const qr = this.qrPartBs();
                 if (qr === null || qr === undefined) return null;
@@ -354,13 +379,14 @@ export class SalesPosComponent implements AfterViewInit {
                 const coveredLine: PaymentSummaryLine[] = [
                     { labelKey: 'app.sales.giftCard.coveredLabel', amountCents: this.giftCardAppliedCents() },
                 ];
-                // Complemento QR: siempre cubre la diferencia exacta, sin «recibido» que comparar
-                // (mismo razonamiento que el método «qr» puro) — nunca queda pendiente ni da cambio.
+                // Complemento QR (Ajuste de Ventas QR): el vendedor verifica el
+                // monto QR contra la diferencia exacta — mismo patrón de 3
+                // estados que QR puro, nunca "siempre completo".
                 if (this.giftCardDifferenceMethod() === 'qr') {
-                    return this.buildPaymentSummary(
-                        'success',
-                        'app.sales.summary.completeLabel',
-                        this.totalCents(),
+                    return this.qrFlowSummary(
+                        difference,
+                        this.qrReceivedBs(),
+                        'app.sales.summary.pendingLabel',
                         coveredLine,
                     );
                 }
@@ -413,6 +439,7 @@ export class SalesPosComponent implements AfterViewInit {
         titleKey: string,
         amountCents?: number,
         lines?: PaymentSummaryLine[],
+        noteKey?: string,
     ): PaymentSummaryView {
         const bySeverity: Record<PaymentSummarySeverity, Pick<PaymentSummaryView, 'icon' | 'containerClass' | 'textClass'>> = {
             success: {
@@ -436,7 +463,44 @@ export class SalesPosComponent implements AfterViewInit {
                 textClass: 'text-danger-dark',
             },
         };
-        return { severity, titleKey, amountCents, lines, ...bySeverity[severity] };
+        return { severity, titleKey, amountCents, lines, noteKey, ...bySeverity[severity] };
+    }
+
+    /**
+     * Lectura para QR puro y el complemento QR de Gift Card (Ajuste de Ventas
+     * QR): a diferencia de `cashFlowSummary`, un QR por ENCIMA de lo
+     * requerido nunca es "cambio a entregar" — es un exceso informativo que
+     * BLOQUEA confirmar (devolver efectivo por un sobrepago QR mezclaría dos
+     * medios de pago en la contabilidad de `dailySummaries`/
+     * `dailySellerSummaries`, que CLAUDE.md prohíbe introducir sin necesidad).
+     * "Nada tecleado todavía" se trata como Bs 0, igual que `cashFlowSummary`.
+     */
+    private qrFlowSummary(
+        requiredCents: number,
+        receivedBs: number | null,
+        pendingTitleKey: string,
+        lines?: PaymentSummaryLine[],
+    ): PaymentSummaryView {
+        const receivedCents = toCents(receivedBs ?? 0);
+        const diff = receivedCents - requiredCents;
+        if (diff > 0) {
+            return this.buildPaymentSummary(
+                'info',
+                'app.sales.summary.qrExcessLabel',
+                diff,
+                lines,
+                'app.sales.summary.qrExcessNote',
+            );
+        }
+        if (diff < 0) {
+            return this.buildPaymentSummary('warn', pendingTitleKey, -diff, lines);
+        }
+        return this.buildPaymentSummary(
+            'success',
+            'app.sales.summary.completeLabel',
+            this.totalCents(),
+            lines,
+        );
     }
 
     readonly canConfirm = computed(() => {
@@ -446,9 +510,18 @@ export class SalesPosComponent implements AfterViewInit {
             const change = this.changeCents();
             return change !== null && change >= 0;
         }
+        if (this.paymentMethod() === 'qr') {
+            // Ajuste de Ventas QR: ya no se asume "pago completo" en automático
+            // — el vendedor debe verificar el monto EXACTO recibido por QR.
+            return this.isQrReceivedExact();
+        }
         if (this.paymentMethod() === 'giftcard') {
             const card = this.foundGiftCard();
-            return card !== null && card.status === 'ACTIVE' && !this.giftCardLookingUp();
+            if (card === null || card.status !== 'ACTIVE' || this.giftCardLookingUp()) return false;
+            if (this.giftCardDifferenceMethod() === 'qr' && this.giftCardDifferenceCents() > 0) {
+                return this.isQrReceivedExact();
+            }
+            return true;
         }
         return true;
     });
@@ -689,6 +762,7 @@ export class SalesPosComponent implements AfterViewInit {
         this.paymentMethod.set(method);
         this.cashReceivedBs.set(null);
         this.qrPartBs.set(null);
+        this.qrReceivedBs.set(null);
         this.clearVoucherSelection();
         this.clearGiftCardSelection();
     }
@@ -728,6 +802,7 @@ export class SalesPosComponent implements AfterViewInit {
         this.giftCardCodeValue.set('');
         this.giftCardDifferenceMethod.set('cash');
         this.cashReceivedBs.set(null); // era del complemento en efectivo de la tarjeta anterior
+        this.qrReceivedBs.set(null); // ídem para el complemento QR
     }
 
     /**
@@ -740,6 +815,7 @@ export class SalesPosComponent implements AfterViewInit {
         if (method === this.giftCardDifferenceMethod()) return;
         this.giftCardDifferenceMethod.set(method);
         this.cashReceivedBs.set(null);
+        this.qrReceivedBs.set(null);
     }
 
     async onVoucherSelected(event: Event): Promise<void> {
@@ -788,6 +864,7 @@ export class SalesPosComponent implements AfterViewInit {
         // rebaja nunca ve un estado inválido y no avisa por una limpieza normal.
         this.discountCents.set(0);
         this.qrPartBs.set(null);
+        this.qrReceivedBs.set(null);
         this.paymentMethod.set('cash');
         this.cart.set([]); // limpia Products Y Extras — es el mismo arreglo (prompt §23)
         this.nextExtraId = 0;
@@ -827,8 +904,15 @@ export class SalesPosComponent implements AfterViewInit {
             ];
         }
 
-        if (method !== 'giftcard') {
-            return [{ method, amountCents: this.totalCents() }];
+        if (method === 'qr') {
+            // Ajuste de Ventas QR: el monto REAL verificado por el vendedor
+            // (nunca `totalCents()` asumido en automático) — `canConfirm` ya
+            // garantiza que es exacto antes de poder llegar aquí.
+            return [{ method: 'qr', amountCents: this.qrReceivedCents() }];
+        }
+
+        if (method === 'cash') {
+            return [{ method: 'cash', amountCents: this.totalCents() }];
         }
 
         const card = this.foundGiftCard();
@@ -844,7 +928,11 @@ export class SalesPosComponent implements AfterViewInit {
         ];
         const difference = this.giftCardDifferenceCents();
         if (difference > 0) {
-            payments.push({ method: this.giftCardDifferenceMethod(), amountCents: difference });
+            const diffMethod = this.giftCardDifferenceMethod();
+            // Complemento QR: igual que QR puro, el monto real verificado
+            // (nunca la diferencia calculada en automático).
+            const amountCents = diffMethod === 'qr' ? this.qrReceivedCents() : difference;
+            payments.push({ method: diffMethod, amountCents });
         }
         return payments;
     }
@@ -856,8 +944,15 @@ export class SalesPosComponent implements AfterViewInit {
         }
         if (!this.canConfirm()) {
             let message = 'app.sales.messages.insufficientCash';
-            if (this.paymentMethod() === 'giftcard') {
-                message = 'app.sales.giftCard.searchFirst';
+            if (this.paymentMethod() === 'qr') {
+                message = 'app.sales.messages.qrAmountMismatch';
+            } else if (this.paymentMethod() === 'giftcard') {
+                const card = this.foundGiftCard();
+                if (!card || card.status !== 'ACTIVE') {
+                    message = 'app.sales.giftCard.searchFirst';
+                } else if (this.giftCardDifferenceMethod() === 'qr') {
+                    message = 'app.sales.messages.qrAmountMismatch';
+                }
             } else if (this.paymentMethod() === 'cashqr' && !this.isMixedQrValid()) {
                 message = 'app.sales.mixed.invalidQr';
             }

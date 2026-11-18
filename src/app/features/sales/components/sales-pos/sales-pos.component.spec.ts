@@ -261,6 +261,7 @@ describe('SalesPosComponent — rebaja', () => {
             expect(component.giftCardRemainingAfterCents()).toBe(0);
             expect(component.giftCardWillBeExhausted()).toBeFalse(); // la tarjeta no llega a 0 por ESTA tarjeta: la agota el complemento, no el saldo propio
             expect(component.giftCardDifferenceCents()).toBe(45000);
+            component.qrReceivedBs.set(450); // Ajuste de Ventas QR: el complemento exige el monto verificado, exacto
 
             const totalBeforeConfirm = component.totalCents(); // confirmSale vacía el carrito
             component.confirmSale();
@@ -356,10 +357,11 @@ describe('SalesPosComponent — rebaja', () => {
     });
 
     describe('con QR', () => {
-        it('el pago QR es del total final', () => {
+        it('el pago QR es del total final (Ajuste de Ventas QR: exige el monto verificado, exacto)', () => {
             component.cart.set([line(97000)]);
             component.onDiscountChange(2000);
             component.setPaymentMethod('qr');
+            component.qrReceivedBs.set(950); // total 950, el vendedor verifica el monto exacto
 
             component.confirmSale();
             const payload = createSale.calls.mostRecent().args[0];
@@ -542,6 +544,7 @@ describe('SalesPosComponent — rebaja', () => {
             it('QR único → índice 0', () => {
                 component.cart.set([line(14000)]);
                 component.setPaymentMethod('qr');
+                component.qrReceivedBs.set(140);
                 const image = blob();
                 component.voucherImage.set(image);
                 component.confirmSale();
@@ -566,6 +569,7 @@ describe('SalesPosComponent — rebaja', () => {
                 component.setPaymentMethod('giftcard');
                 component.foundGiftCard.set(giftCard(5000));
                 component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(90); // restante 140 − 50 = 90
                 const image = blob();
                 component.voucherImage.set(image); // el POS hoy no ofrece foto aquí; el índice se resuelve igual
                 component.confirmSale();
@@ -628,6 +632,7 @@ describe('SalesPosComponent — rebaja', () => {
         it('2. QR: total 340 → confirma', () => {
             component.cart.set([line(8500, 4)]);
             component.setPaymentMethod('qr');
+            component.qrReceivedBs.set(340);
             component.confirmSale();
             expect(payloadOf().payments).toEqual([{ method: 'qr', amountCents: 34000 }]);
             expectValidNoDiscount();
@@ -710,6 +715,7 @@ describe('SalesPosComponent — rebaja', () => {
             component.setPaymentMethod(method);
             component.cashReceivedBs.set(350);
             if (method === 'cashqr') component.qrPartBs.set(100);
+            if (method === 'qr') component.qrReceivedBs.set(330);
             if (method === 'qr' || method === 'cashqr') {
                 component.voucherImage.set(blob());
                 component.voucherPreviewUrl.set('blob:preview');
@@ -718,6 +724,7 @@ describe('SalesPosComponent — rebaja', () => {
                 component.foundGiftCard.set(giftCard(50000));
                 component.giftCardCodeValue.set('GC1000-001');
                 component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(40);
             }
         };
 
@@ -732,6 +739,7 @@ describe('SalesPosComponent — rebaja', () => {
                     expect(component.cashReceivedBs()).toBeNull();
                     expect(component.changeCents()).toBeNull();
                     expect(component.qrPartBs()).toBeNull();
+                    expect(component.qrReceivedBs()).toBeNull();
                     expect(component.mixedQrCents()).toBe(0);
                     expect(component.voucherImage()).toBeNull();
                     expect(component.voucherPreviewUrl()).toBeNull();
@@ -1302,15 +1310,50 @@ describe('SalesPosComponent — rebaja', () => {
             });
         });
 
-        describe('QR puro', () => {
-            it('L) siempre cubre el total y nunca muestra «Cambio a entregar»', () => {
+        describe('QR puro (Ajuste de Ventas QR: monto verificado, no asumido)', () => {
+            it('nada tecleado todavía → amarillo con el total completo (Bs 0 recibido por defecto)', () => {
                 component.setPaymentMethod('qr');
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingLabel');
+                expect(summary?.amountCents).toBe(14000);
+                expect(component.canConfirm()).toBeFalse();
+            });
+
+            it('Q1. recibido menor al total → amarillo, no confirma', () => {
+                component.setPaymentMethod('qr');
+                component.qrReceivedBs.set(100); // total 140, recibe 100 → faltan 40
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingLabel');
+                expect(summary?.amountCents).toBe(4000);
+                expect(component.canConfirm()).toBeFalse();
+            });
+
+            it('Q2. recibido exacto → verde, confirma', () => {
+                component.setPaymentMethod('qr');
+                component.qrReceivedBs.set(140);
 
                 const summary = component.paymentSummary();
                 expect(summary?.severity).toBe('success');
                 expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
-                expect(summary?.titleKey).not.toBe('app.sales.summary.changeLabel');
                 expect(summary?.amountCents).toBe(14000);
+                expect(component.canConfirm()).toBeTrue();
+            });
+
+            it('Q3. recibido mayor al total → azul "Exceso recibido por QR", NUNCA cambio, no confirma', () => {
+                component.setPaymentMethod('qr');
+                component.qrReceivedBs.set(160); // exceso de Bs 20
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('info');
+                expect(summary?.titleKey).toBe('app.sales.summary.qrExcessLabel');
+                expect(summary?.titleKey).not.toBe('app.sales.summary.changeLabel');
+                expect(summary?.amountCents).toBe(2000);
+                expect(summary?.noteKey).toBe('app.sales.summary.qrExcessNote');
+                expect(component.canConfirm()).toBeFalse(); // Q8: un exceso QR nunca genera cambio en efectivo
             });
         });
 
@@ -1408,15 +1451,76 @@ describe('SalesPosComponent — rebaja', () => {
                 expect(summary?.amountCents).toBe(3000);
             });
 
-            it('K) complemento QR → siempre success, sin cambio físico que mostrar', () => {
+            it('complemento QR: nada tecleado todavía → amarillo con la diferencia completa', () => {
                 component.setPaymentMethod('giftcard');
                 component.foundGiftCard.set(giftCard(10000)); // restante 40
                 component.giftCardDifferenceMethod.set('qr');
 
                 const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingLabel');
+                expect(summary?.amountCents).toBe(4000);
+                expect(component.canConfirm()).toBeFalse();
+            });
+
+            it('Q4. Gift Card 70 + QR requerido 40, QR=30 → amarillo, faltan 10', () => {
+                component.cart.set([line(11000)]); // total Bs 110
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(7000)); // Bs 70
+                component.giftCardDifferenceMethod.set('qr');
+                expect(component.giftCardDifferenceCents()).toBe(4000); // Bs 40
+                component.qrReceivedBs.set(30);
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn');
+                expect(summary?.titleKey).toBe('app.sales.summary.pendingLabel');
+                expect(summary?.amountCents).toBe(1000); // faltan Bs 10
+                expect(component.canConfirm()).toBeFalse();
+            });
+
+            it('Q5. Gift Card 70 + QR=40 → completo, confirma', () => {
+                component.cart.set([line(11000)]);
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(7000));
+                component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(40);
+
+                const summary = component.paymentSummary();
                 expect(summary?.severity).toBe('success');
                 expect(summary?.titleKey).toBe('app.sales.summary.completeLabel');
-                expect(summary?.amountCents).toBe(14000);
+                expect(summary?.amountCents).toBe(11000);
+                expect(component.canConfirm()).toBeTrue();
+            });
+
+            it('Q9. QR válido envía el qrCents REAL verificado a createSale (nunca la diferencia calculada en automático)', () => {
+                component.cart.set([line(11000)]);
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(7000));
+                component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(40);
+
+                component.confirmSale();
+                const payload = createSale.calls.mostRecent().args[0];
+                expect(payload.payments).toEqual([
+                    { method: 'giftcard', amountCents: 7000, giftCardId: 'GC1000-001', giftCardCycleId: 'cycle-1' },
+                    { method: 'qr', amountCents: 4000 },
+                ]);
+            });
+
+            it('Q6. Gift Card 70 + QR=50 → exceso 10, no confirma (NUNCA genera cambio en efectivo)', () => {
+                component.cart.set([line(11000)]);
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(7000));
+                component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(50);
+
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('info');
+                expect(summary?.titleKey).toBe('app.sales.summary.qrExcessLabel');
+                expect(summary?.titleKey).not.toBe('app.sales.summary.changeLabel');
+                expect(summary?.amountCents).toBe(1000);
+                expect(summary?.noteKey).toBe('app.sales.summary.qrExcessNote');
+                expect(component.canConfirm()).toBeFalse();
             });
 
             it('cambiar de complemento (efectivo → QR) descarta el efectivo ya tecleado', () => {
@@ -1433,13 +1537,31 @@ describe('SalesPosComponent — rebaja', () => {
                 expect(summary?.amountCents).toBe(4000);
             });
 
-            it('«Cambiar» tarjeta descarta el efectivo tecleado para el complemento anterior', () => {
+            it('cambiar de complemento (QR → efectivo) descarta el monto QR ya tecleado', () => {
+                component.setPaymentMethod('giftcard');
+                component.foundGiftCard.set(giftCard(10000));
+                component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(40);
+
+                component.setGiftCardDifferenceMethod('cash');
+                expect(component.qrReceivedBs()).toBeNull();
+
+                component.setGiftCardDifferenceMethod('qr');
+                const summary = component.paymentSummary();
+                expect(summary?.severity).toBe('warn'); // vuelve a 0 recibido, no arrastra los 40
+                expect(summary?.amountCents).toBe(4000);
+            });
+
+            it('«Cambiar» tarjeta descarta el efectivo y el QR tecleados para el complemento anterior', () => {
                 component.setPaymentMethod('giftcard');
                 component.foundGiftCard.set(giftCard(10000));
                 component.cashReceivedBs.set(70);
+                component.giftCardDifferenceMethod.set('qr');
+                component.qrReceivedBs.set(40);
 
                 component.clearGiftCardSelection();
                 expect(component.cashReceivedBs()).toBeNull();
+                expect(component.qrReceivedBs()).toBeNull();
             });
         });
     });
@@ -1547,6 +1669,7 @@ describe('SalesPosComponent — rebaja', () => {
         it('N) pago QR con solo Extra', () => {
             component.onExtraAdded(chocolate(2));
             component.setPaymentMethod('qr');
+            component.qrReceivedBs.set(20);
 
             component.confirmSale();
             const payload = createSale.calls.mostRecent().args[0];

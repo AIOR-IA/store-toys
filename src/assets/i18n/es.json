@@ -297,6 +297,7 @@
         "cashQr": "Efectivo + QR",
         "giftcard": "Gift Card",
         "received": "Efectivo recibido",
+        "qrReceived": "Monto recibido por QR",
         "change": "Cambio"
       },
       "mixed": {
@@ -325,6 +326,7 @@
         "productInactive": "\"{{name}}\" está inactivo y no se puede vender.",
         "emptyCart": "Agrega al menos un producto para confirmar la venta.",
         "insufficientCash": "El efectivo recibido es menor al total.",
+        "qrAmountMismatch": "El monto recibido por QR debe coincidir exactamente con lo que falta cobrar.",
         "saleCreated": "Venta registrada correctamente.",
         "saleAlreadyExists": "Esta venta ya fue registrada.",
         "saleCancelled": "Venta anulada correctamente.",
@@ -413,7 +415,9 @@
         "pendingLabel": "Diferencia a cobrar",
         "pendingCashLabel": "Restante por cobrar en efectivo",
         "changeLabel": "Cambio a entregar",
-        "completeLabel": "Pago completo"
+        "completeLabel": "Pago completo",
+        "qrExcessLabel": "Exceso recibido por QR",
+        "qrExcessNote": "El monto recibido por QR debe coincidir con el monto a cobrar."
       }
     },
     "giftCards": {

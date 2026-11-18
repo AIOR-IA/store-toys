@@ -331,10 +331,46 @@
                             inputStyleClass="w-full"
                         ></p-inputNumber>
                     </div>
+                    } @else {
+                    <div class="flex flex-col gap-1 max-w-xs">
+                        <label class="text-sm font-medium" for="giftCardQrReceived">{{
+                            "app.sales.payment.qrReceived" | translate
+                        }}</label>
+                        <p-inputNumber
+                            inputId="giftCardQrReceived"
+                            mode="currency"
+                            currency="BOB"
+                            locale="es-BO"
+                            [minFractionDigits]="2"
+                            [ngModel]="qrReceivedBs()"
+                            (ngModelChange)="qrReceivedBs.set($event)"
+                            styleClass="w-full"
+                            inputStyleClass="w-full"
+                        ></p-inputNumber>
+                    </div>
                     }
                 </div>
                 }
                 }
+            </div>
+            }
+
+            @if (paymentMethod() === 'qr') {
+            <div class="flex flex-col gap-2 mt-2">
+                <label class="text-sm font-medium" for="qrReceived">{{
+                    "app.sales.payment.qrReceived" | translate
+                }}</label>
+                <p-inputNumber
+                    inputId="qrReceived"
+                    mode="currency"
+                    currency="BOB"
+                    locale="es-BO"
+                    [minFractionDigits]="2"
+                    [ngModel]="qrReceivedBs()"
+                    (ngModelChange)="qrReceivedBs.set($event)"
+                    styleClass="w-full"
+                    inputStyleClass="w-full"
+                ></p-inputNumber>
             </div>
             }
 
@@ -374,6 +410,8 @@
                         <span>{{ line.labelKey | translate }}</span>
                         <span class="font-semibold">{{ line.amountCents | money }}</span>
                     </div>
+                    } @if (summary.noteKey) {
+                    <span class="text-xs" [ngClass]="summary.textClass">{{ summary.noteKey | translate }}</span>
                     }
                 </div>
             </div>
